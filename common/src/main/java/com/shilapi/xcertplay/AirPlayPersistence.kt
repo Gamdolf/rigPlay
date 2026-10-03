@@ -68,6 +68,7 @@ object AirPlayPersistence {
     private const val KEY_SAFE_AREA_DRAW_OUTSIDE = "safe_area_draw_outside"
     private const val KEY_AUTO_START_ON_BOOT = "auto_start_on_boot"
     private const val KEY_LOCATION_REPORTING_ENABLED = "location_reporting_enabled"
+    private const val KEY_LOCATION_SOURCE = "location_source"
     private const val KEY_AUDIO_OUTPUT_TARGET = "audio_output_target"
     private const val KEY_SIMHUB_HOST_ID = "simhub_host_id"
     private const val KEY_SIMHUB_HOST = "simhub_host"
@@ -400,6 +401,26 @@ object AirPlayPersistence {
     fun saveLocationReportingEnabled(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_LOCATION_REPORTING_ENABLED, enabled)
+            .apply()
+    }
+
+    /**
+     * Where CarPlay's position comes from (#41). "This tablet" stays stored as
+     * [KEY_LOCATION_REPORTING_ENABLED], which the permission flows clear when precise location is denied,
+     * so only the SimHub choice needs its own key.
+     */
+    fun loadLocationSource(context: Context): LocationSource {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (LocationSource.fromKey(prefs.getString(KEY_LOCATION_SOURCE, null)) == LocationSource.SIMHUB) {
+            return LocationSource.SIMHUB
+        }
+        return if (prefs.getBoolean(KEY_LOCATION_REPORTING_ENABLED, false)) LocationSource.TABLET else LocationSource.NONE
+    }
+
+    fun saveLocationSource(context: Context, source: LocationSource) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_LOCATION_SOURCE, source.key)
+            .putBoolean(KEY_LOCATION_REPORTING_ENABLED, source == LocationSource.TABLET)
             .apply()
     }
 

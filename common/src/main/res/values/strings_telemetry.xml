@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SimHub telemetry into CarPlay (#41, #45, #46). English only for now. -->
+<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <!-- Location source (#41) -->
+    <string name="telemetry_location_source">Location source</string>
+    <string name="telemetry_location_source_simhub">SimHub (game car)</string>
+    <string name="telemetry_location_source_tablet">This tablet</string>
+    <string name="telemetry_location_source_none">None</string>
+    <string name="telemetry_location_source_desc">SimHub sends the game car\'s position, speed and gear to Apple Maps; the iPhone falls back to its own GPS when the game stops. This tablet sends its precise Android location. Applies on the next connection: the iPhone reads it when CarPlay connects.</string>
+</resources>

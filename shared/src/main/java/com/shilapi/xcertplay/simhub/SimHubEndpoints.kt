@@ -13,6 +13,8 @@ package com.shilapi.xcertplay.simhub
  * if (SimHubEndpoints.mediaBridge.onCommand(command) == SimHubMediaBridge.Result.UNAVAILABLE) {
  *     link.sendCommandUnavailable()
  * }
+ * // on `telemetry` (any thread):
+ * SimHubEndpoints.telemetry.update(telemetry)
  * ```
  */
 object SimHubEndpoints {
@@ -27,4 +29,7 @@ object SimHubEndpoints {
 
     /** Bound to the running CarPlay session by `CarPlayMediaKeys.attach`/`detach`. */
     val mediaBridge: SimHubMediaBridge = SimHubMediaBridge(statusSink = { statusSink })
+
+    /** `telemetry` from the paired PC (#41); the link owner feeds it from `Listener.onTelemetry`. */
+    val telemetry: SimHubTelemetryStore = SimHubTelemetryStore()
 }

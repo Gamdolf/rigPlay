@@ -16,6 +16,7 @@ import com.shilapi.xcertplay.simhub.SimHubLink
 import com.shilapi.xcertplay.simhub.SimHubLinkAudioTransport
 import com.shilapi.xcertplay.simhub.SimHubMediaBridge
 import com.shilapi.xcertplay.simhub.SimHubMessage
+import com.shilapi.xcertplay.simhub.SimHubProtocol
 import com.shilapi.xcertplay.simhub.SimHubState
 import com.shilapi.xcertplay.simhub.SimHubStatusSink
 import com.shilapi.xcertplay.host.R
@@ -41,6 +42,9 @@ import com.shilapi.xcertplay.host.R
  */
 object RigSessionCoordinator {
     private const val TAG = "rigplay-coordinator"
+
+    /** `hello.features` (§7.3): `telemetry` feeds [SimHubEndpoints.telemetry] (#41). */
+    private val LINK_FEATURES = setOf(SimHubProtocol.FEATURE_IDLE_DASHBOARD, SimHubProtocol.FEATURE_TELEMETRY)
 
     private val main = Handler(Looper.getMainLooper())
     private val observers = LinkedHashSet<() -> Unit>()
@@ -106,7 +110,7 @@ object RigSessionCoordinator {
         if (appContext != null) return
         val app = context.applicationContext ?: context
         appContext = app
-        link = SimHubLink(identity(app), LinkListener)
+        link = SimHubLink(identity(app), LinkListener, features = LINK_FEATURES)
         linkPort = EpochLinkPort(SimHubLinkPort.of(link))
         flow = SimHubPairingFlow(linkPort) { notifyObservers() }
         lifecycle = RigSessionLifecycle(linkPort, RigPhoneSession(app), AppScreens(app)) { Log.i(TAG, it) }
@@ -436,6 +440,8 @@ object RigSessionCoordinator {
         // Media commands reach SimHubEndpoints.mediaBridge through mediaCommandHandler (see
         // routeMediaToBridge); showDashboard/showCarPlay stay in RigSessionLifecycle.
         override fun onCommand(command: SimHubCommand) = fromLink { lifecycle.onCommand(command) }
+        // Up to 10 Hz: straight into the thread-safe store on the link thread, not via the main thread.
+        override fun onTelemetry(telemetry: SimHubMessage.Telemetry) = SimHubEndpoints.telemetry.update(telemetry)
     }
 
     private object DiscoveryListener : SimHubDiscovery.Listener {

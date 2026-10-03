@@ -82,6 +82,10 @@ import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
 import com.shilapi.xcertplay.orchestration.isManualHotspotChannelCompatible
 import com.shilapi.xcertplay.transport.Iap2IdentificationConfig
 import com.shilapi.xcertplay.transport.Iap2LocationProvider
+import com.shilapi.xcertplay.transport.VehicleSpeedLocationProvider
+import com.shilapi.xcertplay.simhub.SimHubEndpoints
+import com.shilapi.xcertplay.simhub.SimHubLocationProvider
+import com.shilapi.xcertplay.simhub.SimHubVehicleSpeedSource
 import com.shilapi.xcertplay.transport.UsbDeviceId
 import java.io.File
 import java.text.SimpleDateFormat
@@ -124,10 +128,11 @@ class CarPlayHostActivity : ComponentActivity() {
             firmwareVersion = appVersionName(),
             hardwareVersion = "1.0",
             carPlayUsbInterfaceNumber = 3,
-            locationInformationEnabled = locationReportingEnabled,
-            // v2: SimHub telemetry will provide vehicle status (battery/range) and wheel speed.
+            locationInformationEnabled = locationReportingEnabled || simHubLocationSelected(),
+            // v2: SimHub telemetry will provide vehicle status (battery/range).
             vehicleStatusEnabled = false,
-            vehicleSpeedEnabled = false,
+            // Wheel speed ($PASCD, selector 20) from SimHub telemetry (#41).
+            vehicleSpeedEnabled = simHubLocationSelected(),
         ),
         label = "rigPlay",
         hostName = "rigplay-" + RigPlayBootstrap.deviceId(airPlayIdentity).replace(":", "").lowercase(),
@@ -140,8 +145,18 @@ class CarPlayHostActivity : ComponentActivity() {
         manualHotspotBand = manualHotspotBand,
         manualHotspotChannel = manualHotspotChannel,
         manualHotspotSecurity = manualHotspotSecurity,
-        locationReportingEnabled = locationReportingEnabled,
+        locationReportingEnabled = locationReportingEnabled || simHubLocationSelected(),
     )
+
+    /** Settings → Location source → SimHub (#41): position and wheel speed come from `telemetry`. */
+    private fun simHubLocationSelected(): Boolean =
+        AirPlayPersistence.loadLocationSource(this) == LocationSource.SIMHUB
+
+    /** GGA/RMC from the game car's position plus `$PASCD` when the iPhone asks for wheel speed (#41). */
+    private fun simHubLocationProvider(): Iap2LocationProvider {
+        val telemetry = SimHubEndpoints.telemetry
+        return VehicleSpeedLocationProvider(SimHubLocationProvider(telemetry), SimHubVehicleSpeedSource(telemetry))
+    }
 
     private val vpnConsent =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -2771,7 +2786,8 @@ class CarPlayHostActivity : ComponentActivity() {
         val locationProvider: Iap2LocationProvider? =
             when {
                 !config.locationReportingEnabled -> null
-                // v2: SimHub telemetry as the VehicleSpeedSource for VehicleSpeedLocationProvider.
+                // Same decision as the identification built above (SimHub declares wheel speed).
+                config.identification.vehicleSpeedEnabled -> simHubLocationProvider()
                 else -> AndroidCarPlayLocationProvider(this)
             }
         appendLog(
