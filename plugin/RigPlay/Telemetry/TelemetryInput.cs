@@ -42,6 +42,30 @@ namespace RigPlayPlugin.Telemetry
         /// <summary>Session type ("Practice", "Race", ...); read about once a second.</summary>
         public string SessionType;
 
+        // Read about once a second (#45, #46).
+
+        /// <summary>Fuel left in % of the tank as SimHub computes it (FuelPercent); NaN when unknown.</summary>
+        public double FuelPercent;
+
+        /// <summary>Fuel left and tank capacity, in SimHub's fuel unit (Fuel, MaxFuel); NaN when unknown.</summary>
+        public double Fuel;
+        public double MaxFuel;
+
+        /// <summary>SimHub's estimate of the laps the remaining fuel lasts (EstimatedFuelRemaingLaps); NaN when unknown.</summary>
+        public double FuelRemainingLaps;
+
+        /// <summary>Track length in metres (TrackLength, else ReportedTrackLength); NaN when unknown.</summary>
+        public double TrackLengthM;
+
+        /// <summary>In-game time of day, seconds since midnight; NaN when the game does not publish it.</summary>
+        public double TimeOfDaySec;
+
+        /// <summary>Headlights: 1 on, 0 off, -1 unknown.</summary>
+        public int Headlights;
+
+        /// <summary>The user's own night property (page setting): 1 night, 0 day, -1 unknown or not set.</summary>
+        public int CustomNight;
+
         /// <summary>A frame with nothing known: the state before the first DataUpdate, or with no game.</summary>
         public static TelemetryInput Empty => new TelemetryInput
         {
@@ -51,6 +75,14 @@ namespace RigPlayPlugin.Telemetry
             X = double.NaN,
             Y = double.NaN,
             Z = double.NaN,
+            FuelPercent = double.NaN,
+            Fuel = double.NaN,
+            MaxFuel = double.NaN,
+            FuelRemainingLaps = double.NaN,
+            TrackLengthM = double.NaN,
+            TimeOfDaySec = double.NaN,
+            Headlights = -1,
+            CustomNight = -1,
         };
     }
 }

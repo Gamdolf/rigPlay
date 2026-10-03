@@ -30,12 +30,13 @@ either test. A change to a message in the spec changes its fixture in the same c
 | `pairResult` | `pairResult.json` (ok), `pairResult.pinRequired.json`, `pairResult.wrongPin.json`, `pairResult.denied.json`, `pairResult.tokenInvalid.json` |
 | `heartbeat` | `heartbeat.json` |
 | `state` | `state.json`, `state.minimal.json` (required members only), `state.serverDown.json` |
-| `status` | `status.json`, `status.idle.json` (no phone), `status.liveStream.json` (null duration) |
+| `status` | `status.json`, `status.idle.json` (no phone), `status.liveStream.json` (null duration), `status.nav.json` (route guidance) |
 | `command` | `command.json` (media next), `command.playPause.json`, `command.previous.json`, `command.siri.json`, `command.showDashboard.json`, `command.showCarPlay.json` |
 | `telemetry` | `telemetry.json` (every field), `telemetry.partial.json` (absent and null fields) |
 | `error` | `error.json` (unsupportedProtocol), `error.notPaired.json`, `error.shutdown.json` |
 | `audioStart` | `audioStart.json` (media 48 kHz stereo), `audioStart.telephony.json` (16 kHz mono) |
 | `audioStop` | `audioStop.json` |
+| `artwork` | `artwork.json` (a tiny JPEG) |
 
 `micStart` and `micStop` are reserved and have no fixtures.
 
@@ -82,6 +83,8 @@ the line and keeps going, as in spec §14.2. `truncated.json` is deliberately no
 | `audioStart-unknown-stream.json` | `stream` value `navigation` is not defined. | §6.11 |
 | `audioStart-sampleRate-22050.json` | `sampleRate` must be a multiple of 100. | §6.11 |
 | `error-missing-code.json` | Required `code` missing. | §6.10 |
+| `artwork-mime-without-base64.json` | Required `base64` is `null`. | §6.14 |
 
 There is no invalid `telemetry` sample: telemetry is validated field by field and a bad field becomes
-`null` rather than rejecting the message (§6.9).
+`null` rather than rejecting the message (§6.9). The plugin is also lenient with `status.nav` (§6.7.1), so
+there is no invalid `nav` sample.

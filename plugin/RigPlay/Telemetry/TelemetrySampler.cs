@@ -2,7 +2,8 @@
 // TelemetrySampler.cs: from SimHub frames to the telemetry message (docs/protocol.md §6.9). Update() runs for every
 // DataUpdate (60 Hz, SimHub's data thread): it keeps the latest frame and feeds the heading tracker and the GPS
 // strategy, without allocating. Build() runs on the sender's 10 Hz timer: it applies the per-field switches of the
-// "Data to CarPlay" section and maps the sim's values to the wire (m/s, P/R/N/D, compass heading, position).
+// "Data to CarPlay" section and maps the sim's values to the wire (m/s, P/R/N/D, compass heading, position, night,
+// fuel level and range).
 // Pure: no SimHub or WPF types (compiled into RigPlay.Tests).
 using System;
 using System.Diagnostics;
@@ -125,6 +126,9 @@ namespace RigPlayPlugin.Telemetry
                 m.Lon = Round(Clamp(fix.Lon, -180, 180), 7);
                 if (!double.IsNaN(fix.Alt) && !double.IsInfinity(fix.Alt)) m.Alt = Round(fix.Alt, 1);
             }
+            if (settings.SendNight) m.Night = VehicleStatus.Night(settings.NightMode, ref input);
+            if (settings.SendFuel) m.FuelPercent = VehicleStatus.FuelPercent(input.FuelPercent, input.Fuel, input.MaxFuel);
+            if (settings.SendRange) m.RangeKm = VehicleStatus.RangeKm(input.FuelRemainingLaps, input.TrackLengthM);
             if (settings.SendRpm && IsFinite(input.Rpm) && input.Rpm >= 0) m.Rpm = Math.Round(input.Rpm);
             if (settings.SendTrackName && !string.IsNullOrWhiteSpace(input.TrackName)) m.TrackName = input.TrackName.Trim();
             if (settings.SendSessionType && !string.IsNullOrWhiteSpace(input.SessionType)) m.SessionType = input.SessionType.Trim();

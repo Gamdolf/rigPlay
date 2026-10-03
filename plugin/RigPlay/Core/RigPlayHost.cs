@@ -68,6 +68,9 @@ namespace RigPlayPlugin
         /// <summary>Features this plugin offers in welcome (spec §7.3).</summary>
         public static readonly string[] OfferedFeatures = { Features.Telemetry, Features.IdleDashboard };
 
+        /// <summary>The primary tablet's artwork as a file for dashboards (RigPlay.NowPlaying.ArtworkPath, spec §16.1).</summary>
+        public ArtworkFile Artwork { get; set; } = new ArtworkFile();
+
         /// <summary>Tests turn the periodic web dash probe off.</summary>
         public bool ProbeEnabled { get; set; } = true;
 
@@ -165,6 +168,7 @@ namespace RigPlayPlugin
             }));
             var primary = paired.FirstOrDefault(s => s.Id == primaryId);
             var status = primary?.LastStatus;
+            var artworkPath = Artwork.Show(primary?.LastArtwork);
             surface = new SurfaceSnapshot
             {
                 TabletConnected = paired.Count > 0,
@@ -173,6 +177,9 @@ namespace RigPlayPlugin
                 Screen = status?.Screen ?? Screens.Off,
                 NowPlaying = status?.NowPlaying,
                 StatusReceivedAtMs = primary?.LastStatusAtMs ?? 0,
+                Nav = status?.Nav,
+                NavEta = SurfaceSnapshot.FormatEta(status?.Nav?.EtaEpochS),
+                ArtworkPath = artworkPath,
             };
         }
 

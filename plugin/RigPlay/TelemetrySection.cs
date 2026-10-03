@@ -66,6 +66,25 @@ namespace RigPlayPlugin
             });
             FillStrategyRows();
 
+            var night = new ComboBox { Width = 220 };
+            var nightChoices = NightModes.All.Select(n => new Choice { Name = n, Label = NightModes.Label(n) }).ToList();
+            night.ItemsSource = nightChoices;
+            night.SelectedItem = nightChoices.FirstOrDefault(c => c.Name == Settings.NightMode) ?? nightChoices[0];
+            night.SelectionChanged += (s, e) => PageKit.Safe(() =>
+            {
+                var choice = night.SelectedItem as Choice;
+                if (choice == null || choice.Name == Settings.NightMode) return;
+                Change("Telemetry night mode set to " + choice.Name, () => Settings.NightMode = choice.Name);
+            });
+            var nightProperty = PageKit.CommitTextBox(Settings.NightProperty, 320, box =>
+            {
+                var value = (box.Text ?? "").Trim();
+                if (value == Settings.NightProperty) return;
+                Change("Telemetry night property set to '" + value + "'", () => Settings.NightProperty = value);
+            });
+            nightProperty.ToolTip = "Optional: a SimHub property that is true or non-zero at night, e.g. a game's headlight flag. "
+                + "In Auto it wins over the in-game clock and the headlights.";
+
             var section = Ui.Section("Data to CarPlay",
                 "SimHub data sent to the tablet while a game runs and an iPhone is connected (at most 10 times a second), so CarPlay "
                 + "shows the car's speed and gear, a made-up GPS position for Maps, and night mode.",
@@ -73,6 +92,10 @@ namespace RigPlayPlugin
                 Ui.Row("Fields", fields),
                 Ui.Row("Position (fake GPS)", strategy),
                 strategyRows,
+                Ui.Row("Night mode", Ui.VStack(4,
+                    night,
+                    Ui.Caption("Auto: night from 19:00 to 07:00 in-game time, else headlights on (games that publish them)."))),
+                Ui.Row("Night property (optional)", nightProperty),
                 Ui.Row("Now", Ui.VStack(4, statusText, lastText)));
             PageKit.Live(section, 500, Refresh);
             return section;

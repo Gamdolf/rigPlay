@@ -150,12 +150,18 @@ namespace RigPlayPlugin
                     if (slowCountdown-- <= 0)
                     {
                         slowCountdown = 60;
-                        trackName = d.TrackNameWithConfig;
-                        if (string.IsNullOrWhiteSpace(trackName)) trackName = d.TrackName;
-                        sessionType = d.SessionTypeName;
+                        ReadSlow(pluginManager, d);
                     }
                     input.TrackName = trackName;
                     input.SessionType = sessionType;
+                    input.FuelPercent = slow.FuelPercent;
+                    input.Fuel = slow.Fuel;
+                    input.MaxFuel = slow.MaxFuel;
+                    input.FuelRemainingLaps = slow.FuelRemainingLaps;
+                    input.TrackLengthM = slow.TrackLengthM;
+                    input.TimeOfDaySec = slow.TimeOfDaySec;
+                    input.Headlights = slow.Headlights;
+                    input.CustomNight = slow.CustomNight;
                 }
                 else
                 {
@@ -174,6 +180,38 @@ namespace RigPlayPlugin
         private string trackName;
         private string sessionType;
         private bool dataUpdateFailed;
+        private TelemetryInput slow = TelemetryInput.Empty;
+
+        /// <summary>
+        /// Once a second: names SimHub may build per read, fuel and track length (#46), and the night sources (#45),
+        /// which are property lookups by name and box their values.
+        /// </summary>
+        private void ReadSlow(PluginManager pluginManager, StatusDataBase d)
+        {
+            trackName = d.TrackNameWithConfig;
+            if (string.IsNullOrWhiteSpace(trackName)) trackName = d.TrackName;
+            sessionType = d.SessionTypeName;
+
+            slow.FuelPercent = d.FuelPercent;
+            slow.Fuel = d.Fuel;
+            slow.MaxFuel = d.MaxFuel;
+            var laps = d.EstimatedFuelRemaingLaps;
+            slow.FuelRemainingLaps = laps.HasValue ? laps.Value : double.NaN;
+            var length = d.TrackLength > 0 ? d.TrackLength : d.ReportedTrackLength;
+            slow.TrackLengthM = length > 0 ? length : double.NaN;
+
+            Func<string, object> read = name => pluginManager.GetPropertyValue(name);
+            slow.TimeOfDaySec = NightSources.FirstNumber(NightSources.TimeOfDayProperties, read);
+            var lights = NightSources.FirstNumber(NightSources.HeadlightProperties, read);
+            slow.Headlights = double.IsNaN(lights) ? -1 : lights != 0 ? 1 : 0;
+            var custom = Settings.Telemetry.NightProperty;
+            slow.CustomNight = string.IsNullOrEmpty(custom) ? -1 : NightSources.ToFlag(SafeRead(pluginManager, custom));
+        }
+
+        private static object SafeRead(PluginManager pluginManager, string name)
+        {
+            try { return pluginManager.GetPropertyValue(name); } catch (Exception) { return null; }
+        }
 
         public void End(PluginManager pluginManager)
         {

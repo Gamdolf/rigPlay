@@ -11,6 +11,12 @@ Protocol version: **1**. Revision: 2026-10-03.
 > as fatal are fatal without the flag; an incompatible `welcome.protocol`; `streamType` 4 from a tablet;
 > `\/` escapes; `hostId` and line-length details; SimHub property names ([§16](#16-simhub-surface));
 > firewall notes ([§15](#15-security)); `state.audio.enabled` without an output device.
+>
+> **Additions 2026-10-03** (no version change, [§7.2](#72-what-needs-a-new-version)): telemetry rate, stop
+> and staleness rules and field sources ([§6.9.1](#691-rate-start-and-stop)–[§6.9.3](#693-position-strategies-informative));
+> optional `status.nav` route guidance ([§6.7.1](#671-statusnav)); the tablet → plugin `artwork` message
+> ([§6.14](#614-artwork)); SimHub properties `RigPlay.Nav.*` and `RigPlay.NowPlaying.ArtworkPath`
+> ([§16.1](#161-properties)).
 
 This document is the contract between the rigPlay Android app (the *tablet*) and the rigPlay SimHub
 plugin running on the Windows PC (the *plugin*). Both implementations follow it; where an
@@ -222,13 +228,14 @@ Fixture names follow `<type>.json` or `<type>.<variant>.json` ([§17](#17-fixtur
 | [`pairResult`](#64-pairresult) | plugin → tablet | answer to each `pairRequest`; `denied` also unprompted | `pairResult`, `.pinRequired`, `.wrongPin`, `.denied`, `.tokenInvalid` |
 | [`heartbeat`](#65-heartbeat) | both | every 1 s after `welcome` | `heartbeat` |
 | [`state`](#66-state) | plugin → tablet | after pairing, then on every change | `state`, `.minimal`, `.serverDown` |
-| [`status`](#67-status) | tablet → plugin | after pairing, then on every change | `status`, `.idle`, `.liveStream` |
+| [`status`](#67-status) | tablet → plugin | after pairing, then on every change | `status`, `.idle`, `.liveStream`, `.nav` |
 | [`command`](#68-command) | plugin → tablet | on a SimHub action | `command`, `.playPause`, `.previous`, `.siri`, `.showDashboard`, `.showCarPlay` |
 | [`telemetry`](#69-telemetry) | plugin → tablet | ≤ 10 Hz while enabled | `telemetry`, `.partial` |
 | [`error`](#610-error) | both | see [§14](#14-error-handling) | `error`, `.notPaired`, `.shutdown` |
 | [`audioStart`](#611-audiostart) | tablet → plugin | before the first datagram of a stream | `audioStart`, `.telephony` |
 | [`audioStop`](#612-audiostop) | tablet → plugin | after the last datagram of a stream | `audioStop` |
 | [`micStart`, `micStop`](#613-reserved-micstart-and-micstop) | reserved | not used in protocol 1 | none |
+| [`artwork`](#614-artwork) | tablet → plugin | when the now-playing artwork changes (at most every 2 s), and again on link up | `artwork` |
 
 ## 6. Messages
 
@@ -412,6 +419,7 @@ advance of `nowPlaying.position` during playback is not a change; a seek is.
 | `nowPlaying.position` | decimal ≥ 0, seconds | yes | Playback position at the moment the message was serialised. `0` when unknown. |
 | `nowPlaying.duration` | decimal > 0, seconds, or `null` | yes | `null` for live streams or unknown length. |
 | `nowPlaying.updatedAt` | timestamp (ms) | yes | Tablet clock when `position` was taken. For ordering and diagnostics only ([§3](#3-encoding-conventions)). |
+| `nav` | object or `null` | no | CarPlay route guidance ([§6.7.1](#671-statusnav)). Absent or `null`: no route guidance is active. |
 
 `screen` values:
 
@@ -425,6 +433,44 @@ advance of `nowPlaying.position` during playback is not a change; a seek is.
 Position extrapolation on the plugin: while `playing`, `position_now = position + (now − receivedAt)`,
 clamped to `duration` when it is not `null`, where `receivedAt` is the plugin's own clock when the
 line arrived. LAN latency is ignored.
+
+#### 6.7.1 `status.nav`
+
+Route guidance the phone shows in CarPlay (the next maneuver), for SimHub dashboards
+([§16.1](#161-properties)). Fixture: [`status.nav.json`](../protocol/fixtures/status.nav.json).
+
+```json
+{"type":"status","phoneConnected":true,"phoneName":"Tim's iPhone","screen":"carplay","nowPlaying":null,"nav":{"maneuver":"slightRightTurn","distanceM":350,"road":"B258","etaEpochS":1791044100}}
+```
+
+`nav` is omitted when no route guidance is active (a phone is connected and CarPlay reports a current
+maneuver otherwise). When guidance ends, the next `status` has no `nav`.
+
+| Member | Type | Required | Description |
+|---|---|---|---|
+| `maneuver` | string, 1–64 characters | yes, in the object | The next maneuver: the lowerCamel name of Apple's `RouteGuidanceManeuverType`, see below. |
+| `distanceM` | integer ≥ 0, metres | no | Distance to the next maneuver. |
+| `road` | string | no | The road the maneuver leads onto. Omitted when blank. |
+| `etaEpochS` | integer ≥ 1, seconds | no | Estimated time of arrival, in **seconds** since the Unix epoch (UTC), from the phone. Omitted when unknown. It is a wall-clock time for display, not a `...At` timestamp: receivers show it and do not compare it with their own clock. |
+
+`maneuver` values, in `RouteGuidanceManeuverType` order (0–53): `noTurn`, `leftTurn`, `rightTurn`,
+`straightAhead`, `uTurn`, `followRoad`, `enterRoundabout`, `exitRoundabout`, `offRamp`, `onRamp`,
+`arriveEndOfNavigation`, `startRoute`, `arriveAtDestination`, `keepLeft`, `keepRight`, `enterFerry`,
+`exitFerry`, `changeFerry`, `startRouteWithUTurn`, `uTurnAtRoundabout`, `leftTurnAtEnd`,
+`rightTurnAtEnd`, `highwayOffRampLeft`, `highwayOffRampRight`, `arriveAtDestinationLeft`,
+`arriveAtDestinationRight`, `uTurnWhenPossible`, `arriveEndOfDirections`, `roundaboutExit1` …
+`roundaboutExit19`, `sharpLeftTurn`, `sharpRightTurn`, `slightLeftTurn`, `slightRightTurn`,
+`changeHighway`, `changeHighwayLeft`, `changeHighwayRight`. The tablet sends a type newer than this
+table as `noTurn`.
+
+Receiving rules (the plugin):
+
+- `nav` is validated leniently, like `telemetry`: a `nav` that is not an object is treated as absent,
+  and a member with the wrong JSON type or out of range is treated as absent. A bad `nav` never makes
+  the `status` invalid; the rest of the `status` is used.
+- Any `maneuver` string is accepted and passed on unchanged (shown as is), including names not in the
+  table. A decimal `distanceM` is rounded to whole metres; a blank `road` counts as absent.
+- `nav` changes are `status` changes, coalesced as above (at most one `status` per 250 ms).
 
 ### 6.8 `command`
 
@@ -517,6 +563,9 @@ is treated as `null` and the rest of the message is used.
 | `gear` | `Gear` mapped as in the table above; "in the pits" is `IsInPit` or `IsInPitLane`. `"R"`/`"-1"` → `R`, `"N"`/`"0"` → `P` or `N`, `"1"`… → `D`, a game's own `"P"`/`"D"` pass through | |
 | `heading` | `OrientationYaw` (degrees, normalised to 0 ≤ h < 360), once a frame of the session has shown a non-zero value (games without yaw report 0 forever). Otherwise the direction of the last movement of at least 1 m in `CarCoordinates` (x, z), and with neither, `0` when a position is sent and absent otherwise | 1 decimal |
 | `lat`, `lon`, `alt` | The GPS strategy chosen on the page; absent when it is off | 7 decimals; 1 for `alt` |
+| `night` | Page setting "Night mode": *Always day* → `false`, *Always night* → `true`. *Auto* (default): the user's own SimHub property when one is set on the page and readable (non-zero or `true` → `true`); else the in-game time of day (`DataCorePlugin.GameRawData.Telemetry.SessionTimeOfDay` for iRacing, `...Graphics.Clock` for ACC; night from 19:00 to 07:00); else the headlights (`...Graphics.LightsStage` for ACC, `mHeadlights` for rFactor 2 / Le Mans Ultimate); else absent | |
+| `fuelPercent` | `FuelPercent`; `Fuel` ÷ `MaxFuel` × 100 when that is missing; absent when the game publishes no fuel (all zero). Clamped to 0…100 | 1 decimal |
+| `rangeKm` | SimHub's `EstimatedFuelRemaingLaps` × `TrackLength` (else `ReportedTrackLength`, metres) ÷ 1000; absent when either is unknown | 1 decimal |
 | `rpm` | `Rpms` | integer value |
 | `trackName` | `TrackNameWithConfig`, else `TrackName` | |
 | `sessionType` | `SessionTypeName` | |
@@ -604,6 +653,43 @@ receiver ignores them as it ignores any unknown type. The intended shape, to be 
 - Feature `mic` gates both messages.
 
 There are no fixtures for them until they are specified.
+
+### 6.14 `artwork`
+
+Tablet → plugin, Paired only. The now-playing artwork, so SimHub dashboards can show it
+([§16.1](#161-properties), `RigPlay.NowPlaying.ArtworkPath`). Fixture:
+[`artwork.json`](../protocol/fixtures/artwork.json).
+
+```json
+{"type":"artwork","mime":"image/jpeg","base64":"/9j/4AAQSkZJRgABAgAAAQABAAD..."}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | yes | `"artwork"` |
+| `mime` | string | yes | `image/jpeg`. The rigPlay tablet sends JPEG only; the plugin also accepts `image/png`. |
+| `base64` | string, non-empty | yes | The image file, standard base64 (RFC 4648 §4, `+` and `/`, with `=` padding, no line breaks). |
+
+Rules:
+
+- **Size**: the whole line MUST fit the 65 536-byte line limit of [§5.1](#51-framing) (an image of
+  about 48 KiB at most). The tablet scales the artwork to at most 256 pixels on its longer side and
+  encodes it as JPEG quality 80, lowering the quality (60, then 40) until the line fits; if it still
+  does not fit, it sends nothing.
+- **When**: only when the now-playing artwork changes, at most once per **2 s** (a newer image
+  replaces one not yet sent, and the last one is always sent: trailing edge), and the latest artwork
+  again each time the link comes up (after `pairResult ok`).
+- **No clear**: there is no message that removes the artwork. The plugin keeps showing the last image
+  until a new one arrives or the session closes.
+- **No feature string**: the tablet sends `artwork` to any paired plugin. A plugin that does not know
+  the type ignores it as an unknown type without reply ([§14.2](#142-rules)).
+- **Validation** (plugin): a missing or non-string `mime` or `base64`, a `mime` other than
+  `image/jpeg` or `image/png`, or `base64` that is not valid base64 or decodes to nothing is
+  `badMessage`, and the previous artwork stays. The plugin does not check that the bytes really are a
+  JPEG or PNG; a dashboard simply fails to show a broken image.
+- Artwork belongs to its session: when the session closes, it is gone.
+- The plugin writes the artwork of the primary tablet ([§12](#12-several-tablets)) to
+  `%TEMP%\rigPlay\artwork.jpg` (or `artwork.png` for PNG), replacing the previous file atomically.
 
 ## 7. Version negotiation
 
@@ -1026,9 +1112,16 @@ NCalc formulas and control mappings use the prefixed names below (`RigPlay.Table
 | `RigPlay.NowPlaying.Playing` | bool | `status.nowPlaying.playing` | `false` |
 | `RigPlay.NowPlaying.Position` | double, seconds | Extrapolated as in [§6.7](#67-status) | `0` |
 | `RigPlay.NowPlaying.Duration` | double, seconds | `status.nowPlaying.duration` | `0` |
+| `RigPlay.NowPlaying.ArtworkPath` | string | Full path of the file holding the primary tablet's last `artwork` ([§6.14](#614-artwork)): `%TEMP%\rigPlay\artwork.jpg` or `artwork.png` | `""` |
+| `RigPlay.Nav.Active` | bool | `status.nav` is present (route guidance active) | `false` |
+| `RigPlay.Nav.Maneuver` | string | `status.nav.maneuver` | `""` |
+| `RigPlay.Nav.Distance` | double, metres | `status.nav.distanceM` | `0` |
+| `RigPlay.Nav.Road` | string | `status.nav.road` | `""` |
+| `RigPlay.Nav.Eta` | string | `status.nav.etaEpochS` as local time on the PC, `HH:mm` (24 h) | `""` |
 
 "Without data" means no Paired session, or, for `RigPlay.NowPlaying.*`, `nowPlaying: null` or the
-individual member `null`.
+individual member `null`; for `RigPlay.Nav.*`, no `nav` or the member absent; for `ArtworkPath`, no
+artwork received from the primary tablet on its current session.
 
 ### 16.2 Actions
 
