@@ -102,6 +102,36 @@ namespace RigPlayPlugin
         {
             if (name == GpsStrategies.Off) yield break;
             yield return OriginRow();
+            if (name == GpsStrategies.DeadReckoning) yield return DeadReckoningRow();
+        }
+
+        /// <summary>When dead reckoning puts the car back on the origin (#43), and a button to do it now.</summary>
+        private FrameworkElement DeadReckoningRow()
+        {
+            var radius = PageKit.CommitTextBox(Format(Settings.DriftRadiusKm), 60, box =>
+            {
+                double value;
+                if (GeoText.TryParse(box.Text, TelemetrySettings.MinDriftRadiusKm, TelemetrySettings.MaxDriftRadiusKm, out value) && value != Settings.DriftRadiusKm)
+                    Change("Telemetry drift radius set to " + Format(value) + " km", () => Settings.DriftRadiusKm = value);
+                box.Text = Format(Settings.DriftRadiusKm);
+            });
+            var still = PageKit.CommitTextBox(Settings.StationaryResetSec.ToString(), 60, box =>
+            {
+                int value;
+                if (int.TryParse((box.Text ?? "").Trim(), out value) && value >= 0 && value <= TelemetrySettings.MaxStationaryResetSec && value != Settings.StationaryResetSec)
+                    Change("Telemetry stationary reset set to " + value + " s", () => Settings.StationaryResetSec = value);
+                box.Text = Settings.StationaryResetSec.ToString();
+            });
+            radius.ToolTip = "Kilometres from the origin before the car is put back on it.";
+            still.ToolTip = "Seconds standing still before the car is put back on the origin; 0 never.";
+            var now = PageKit.SecondaryButton("Back to the origin now", () =>
+            {
+                plugin.Host?.TelemetrySampler.ResetMotion();
+                Log.Info("Telemetry position reset to the origin from the page");
+            });
+            return Ui.Row("Back to the origin", Ui.VStack(4,
+                Ui.HStack(8, Ui.Text("beyond"), radius, Ui.Text("km, or after"), still, Ui.Text("s standing still"), now),
+                Ui.Caption("Also on a session restart, a new track or session, and when leaving the pit lane.")));
         }
 
         /// <summary>

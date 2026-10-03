@@ -44,8 +44,11 @@ namespace RigPlayPlugin.Telemetry
         /// <summary>Strategy A (#42): always the origin set on the page.</summary>
         public const string Fixed = "fixed";
 
+        /// <summary>Strategy B (#43): dead reckoning from the origin with the sim's speed and heading.</summary>
+        public const string DeadReckoning = "deadReckoning";
+
         /// <summary>Every strategy, in the order the page lists them.</summary>
-        public static readonly string[] All = { Off, Fixed };
+        public static readonly string[] All = { Off, Fixed, DeadReckoning };
 
         public static bool IsKnown(string name)
         {
@@ -59,6 +62,7 @@ namespace RigPlayPlugin.Telemetry
             {
                 case Off: return "Off (no position)";
                 case Fixed: return "Fixed position (the origin below)";
+                case DeadReckoning: return "Drive around the origin (dead reckoning)";
                 default: return name;
             }
         }
@@ -69,6 +73,9 @@ namespace RigPlayPlugin.Telemetry
             switch (settings?.GpsStrategy)
             {
                 case Fixed: return new FixedOriginStrategy(settings.OriginLat, settings.OriginLon, settings.OriginAlt);
+                case DeadReckoning:
+                    return new DeadReckoningStrategy(settings.OriginLat, settings.OriginLon, settings.OriginAlt,
+                        settings.DriftRadiusKm * 1000.0, settings.StationaryResetSec);
                 default: return null;
             }
         }
@@ -82,7 +89,9 @@ namespace RigPlayPlugin.Telemetry
             if (settings == null) return Off;
             return settings.GpsStrategy + "|" + settings.OriginLat.ToString("R", CultureInfo.InvariantCulture)
                 + "|" + settings.OriginLon.ToString("R", CultureInfo.InvariantCulture)
-                + "|" + settings.OriginAlt.ToString("R", CultureInfo.InvariantCulture);
+                + "|" + settings.OriginAlt.ToString("R", CultureInfo.InvariantCulture)
+                + "|" + settings.DriftRadiusKm.ToString("R", CultureInfo.InvariantCulture)
+                + "|" + settings.StationaryResetSec.ToString(CultureInfo.InvariantCulture);
         }
     }
 

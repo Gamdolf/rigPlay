@@ -533,6 +533,10 @@ tablet cannot tell the strategies apart and does not need to.
 |---|---|
 | Off (default) | Absent. |
 | Fixed position (#42) | Always the origin entered on the page (default 50.3356, 6.9475, 617 m). Speed, gear and heading still come from the sim, so the phone's map shows the car at the origin with the real speed. |
+| Drive around the origin (#43) | Dead reckoning: starts at the origin and, on every game frame, moves `speed × Δt` along `heading` on a great circle (spherical earth, radius 6 371 008.8 m; frames more than 0.25 s apart are not integrated). Back to the origin when the game starts, on a session restart or a new track or session type, when the car leaves the pit lane, after standing still (< 0.5 m/s) for a set time (default 30 s, 0 = never), and when it is further than the drift radius (default 20 km) from the origin. `alt` is the origin's. |
+
+A reset makes the position jump back to the origin between two messages; the tablet passes positions
+on as they come and does not smooth or reject jumps.
 
 ### 6.10 `error`
 

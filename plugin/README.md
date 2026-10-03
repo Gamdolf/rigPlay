@@ -105,6 +105,10 @@ Position strategies (`Telemetry/GpsStrategy.cs`, `IGpsStrategy`; `Update` runs p
 - **Fixed position** (#42, `FixedOriginStrategy`): always the origin typed on the page (latitude, longitude,
   altitude; pasting "lat, lon" from a map into the latitude box fills both). Maps shows the car there while speed,
   gear and heading are the sim's; heading is 0 while the game publishes no yaw.
+- **Drive around the origin** (#43, `DeadReckoningStrategy.cs`): starts at the origin and integrates speed × heading
+  on every frame (great-circle step, `GeoMath`). Back to the origin on game start, session restart, a new track or
+  session type, pit exit, after standing still for the set time (default 30 s, 0 never), and beyond the drift radius
+  (default 20 km); the page also has a "Back to the origin now" button.
 
 ## Notes
 

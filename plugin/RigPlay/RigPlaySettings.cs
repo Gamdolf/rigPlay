@@ -187,6 +187,18 @@ namespace RigPlayPlugin
         /// <summary>Altitude in metres above mean sea level.</summary>
         public double OriginAlt { get; set; } = DefaultOriginAlt;
 
+        public const double DefaultDriftRadiusKm = 20;
+        public const double MinDriftRadiusKm = 0.5;
+        public const double MaxDriftRadiusKm = 1000;
+        public const int DefaultStationaryResetSec = 30;
+        public const int MaxStationaryResetSec = 3600;
+
+        /// <summary>Dead reckoning (#43): further than this from the origin, the car is put back on it.</summary>
+        public double DriftRadiusKm { get; set; } = DefaultDriftRadiusKm;
+
+        /// <summary>Dead reckoning: standing still this many seconds puts the car back on the origin; 0 never.</summary>
+        public int StationaryResetSec { get; set; } = DefaultStationaryResetSec;
+
         /// <summary>True when at least one data field would be sent (spec §6.9: nothing is sent otherwise).</summary>
         public bool AnyFieldEnabled()
         {
@@ -203,6 +215,8 @@ namespace RigPlayPlugin
                 OriginLon = DefaultOriginLon;
             }
             if (!Finite(OriginAlt) || OriginAlt < -1000 || OriginAlt > 10000) OriginAlt = DefaultOriginAlt;
+            if (!Finite(DriftRadiusKm) || DriftRadiusKm < MinDriftRadiusKm || DriftRadiusKm > MaxDriftRadiusKm) DriftRadiusKm = DefaultDriftRadiusKm;
+            if (StationaryResetSec < 0 || StationaryResetSec > MaxStationaryResetSec) StationaryResetSec = DefaultStationaryResetSec;
             return this;
         }
 
