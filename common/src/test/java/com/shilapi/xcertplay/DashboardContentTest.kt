@@ -3,7 +3,9 @@ package com.shilapi.xcertplay
 import com.shilapi.xcertplay.simhub.DashboardServer
 import com.shilapi.xcertplay.simhub.SimHubState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DashboardContentTest {
@@ -54,5 +56,34 @@ class DashboardContentTest {
         assertEquals("172.30.0.2" to 8888, DashboardUrls.endpoint("http://172.30.0.2:8888/d"))
         assertEquals("rig" to 80, DashboardUrls.endpoint("http://rig/d"))
         assertEquals("fe80::1" to 8888, DashboardUrls.endpoint("http://[fe80::1]:8888/d"))
+    }
+
+    // --- idle dashboard fallback chain (#39) ---
+
+    private val idleUrl = "http://172.30.0.2:8888/Dash#Rig%20Clock"
+
+    @Test fun idleUsesTheIdleDashboardFirst() = assertEquals(
+        DashboardContent.Load(idleUrl, "http://192.168.1.20:8888/Dash#Rig%20Clock"),
+        DashboardContent.resolveIdle(up.copy(idleDashboardUrl = idleUrl), paired = true),
+    )
+
+    @Test fun idleFallsBackToTheMainDashboard() {
+        assertEquals(DashboardContent.resolve(up, paired = true), DashboardContent.resolveIdle(up, paired = true))
+        assertTrue(DashboardContent.idleDashboardAvailable(up, paired = true))
+    }
+
+    @Test fun idleWithoutAnyDashboardMeansTheRigPlayScreen() {
+        val none = up.copy(dashboardUrl = null, idleDashboardUrl = null)
+        assertEquals(DashboardContent.NoDashboard, DashboardContent.resolveIdle(none, paired = true))
+        assertFalse(DashboardContent.idleDashboardAvailable(none, paired = true))
+    }
+
+    @Test fun idleNeedsTheLinkAndTheWebServer() {
+        val withIdle = up.copy(idleDashboardUrl = idleUrl)
+        val off = withIdle.copy(dashboardServer = DashboardServer(reachable = false, port = 8888))
+        assertEquals(DashboardContent.ServerOff, DashboardContent.resolveIdle(off, paired = true))
+        assertFalse(DashboardContent.idleDashboardAvailable(off, paired = true))
+        assertFalse(DashboardContent.idleDashboardAvailable(withIdle.copy(phase = SimHubState.Phase.WAITING), paired = true))
+        assertFalse(DashboardContent.idleDashboardAvailable(withIdle, paired = false))
     }
 }

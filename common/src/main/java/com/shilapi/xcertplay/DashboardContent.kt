@@ -35,6 +35,18 @@ sealed class DashboardContent {
             val url = state.dashboardUrl ?: return NoDashboard
             return Load(url, state.host?.let { DashboardUrls.withHost(url, it) })
         }
+
+        /**
+         * The idle dashboard (#39): `state.idleDashboardUrl`, else the main `state.dashboardUrl`. Anything
+         * but [Load] means the rigPlay idle screen is shown instead ([OfflineIdleActivity]).
+         */
+        fun resolveIdle(state: SimHubState, paired: Boolean): DashboardContent {
+            val url = state.idleDashboardUrl ?: state.dashboardUrl
+            return resolve(state.copy(dashboardUrl = url), paired)
+        }
+
+        /** True when [resolveIdle] has a URL to load. */
+        fun idleDashboardAvailable(state: SimHubState, paired: Boolean): Boolean = resolveIdle(state, paired) is Load
     }
 }
 

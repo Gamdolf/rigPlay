@@ -77,6 +77,8 @@ object AirPlayPersistence {
     private const val KEY_SIMHUB_CONTROL_PORT = "simhub_control_port"
     private const val KEY_SIMHUB_DISCOVERY_PORT = "simhub_discovery_port"
     private const val KEY_SIMHUB_TABLET_ID = "simhub_tablet_id"
+    private const val KEY_IDLE_MODE = "idle_mode"
+    private const val KEY_IDLE_SCREEN_OFF_MINUTES = "idle_screen_off_minutes"
     private const val SAFE_AREA_KEY_PREFIX = "safe_area_"
     private const val CUSTOM_ICON_FILE = "airplay-icon.png"
 
@@ -392,6 +394,29 @@ object AirPlayPersistence {
     }
 
     private fun sanitizePort(port: Int, fallback: Int): Int = if (port in 1..65535) port else fallback
+
+    /** Settings → "When no iPhone is connected" (#39). */
+    fun loadIdleMode(context: Context): IdleMode = IdleMode.fromKey(
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_IDLE_MODE, null),
+    )
+
+    fun saveIdleMode(context: Context, mode: IdleMode) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_IDLE_MODE, mode.key)
+            .apply()
+    }
+
+    /** Minutes before the rigPlay idle screen goes dark; 0 = never (#39). */
+    fun loadIdleScreenOffMinutes(context: Context): Int = IdleScreenOff.sanitize(
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt(KEY_IDLE_SCREEN_OFF_MINUTES, IdleScreenOff.DEFAULT),
+    )
+
+    fun saveIdleScreenOffMinutes(context: Context, minutes: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_IDLE_SCREEN_OFF_MINUTES, IdleScreenOff.sanitize(minutes))
+            .apply()
+    }
 
     fun loadLocationReportingEnabled(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
