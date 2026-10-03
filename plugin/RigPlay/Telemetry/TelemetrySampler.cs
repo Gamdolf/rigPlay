@@ -27,13 +27,16 @@ namespace RigPlayPlugin.Telemetry
         private double lastAt = double.NaN;
         private bool wasRunning;
         private IGpsStrategy gps;
-        private string gpsKey = GpsStrategies.Off;
+        private string gpsKey = GpsStrategies.Off; // no strategy yet: off
 
         /// <summary>Monotonic seconds, the time base of <see cref="Update(ref TelemetryInput)"/> and <see cref="Build(TelemetrySettings)"/>.</summary>
         public static double Now()
         {
             return Stopwatch.GetTimestamp() * TickSeconds;
         }
+
+        /// <summary>How many times the GPS strategy was (re)built because its settings changed.</summary>
+        public int StrategyChanges { get; private set; }
 
         /// <summary>Frames received since start, for the page.</summary>
         public long Frames { get; private set; }
@@ -138,10 +141,10 @@ namespace RigPlayPlugin.Telemetry
         private void EnsureStrategyLocked(TelemetrySettings settings)
         {
             var key = GpsStrategies.Key(settings);
-            if (gps != null && key == gpsKey) return;
-            if (gps == null && key == gpsKey && gpsKey == GpsStrategies.Off) return;
+            if (key == gpsKey) return;
             gps = GpsStrategies.Create(settings);
             gpsKey = key;
+            StrategyChanges++;
             PluginLog.Info("Telemetry position: " + GpsStrategies.Label(settings.GpsStrategy));
         }
 

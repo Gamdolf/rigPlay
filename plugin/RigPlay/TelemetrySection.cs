@@ -16,9 +16,16 @@ namespace RigPlayPlugin
     {
         private readonly RigPlay plugin;
         private readonly TextBlock statusText = Ui.Text("");
-        private readonly TextBlock lastText = Ui.Caption("");
+        private readonly TextBlock lastText = MakeLast();
         private readonly StackPanel strategyRows = new StackPanel { Orientation = Orientation.Vertical };
         private ComboBox strategy;
+
+        private static TextBlock MakeLast()
+        {
+            var block = Ui.Caption("");
+            block.MaxWidth = 560;
+            return block;
+        }
 
         public TelemetrySection(RigPlay plugin)
         {
@@ -66,7 +73,7 @@ namespace RigPlayPlugin
             });
             FillStrategyRows();
 
-            var night = new ComboBox { Width = 220 };
+            var night = new ComboBox { Width = 220, HorizontalAlignment = HorizontalAlignment.Left };
             var nightChoices = NightModes.All.Select(n => new Choice { Name = n, Label = NightModes.Label(n) }).ToList();
             night.ItemsSource = nightChoices;
             night.SelectedItem = nightChoices.FirstOrDefault(c => c.Name == Settings.NightMode) ?? nightChoices[0];
@@ -104,7 +111,10 @@ namespace RigPlayPlugin
         private void AddField(UniformGrid grid, string label, bool value, Action<bool> set)
         {
             var toggle = Ui.Toggle(value, on => Change("Telemetry field " + label + " " + (on ? "on" : "off"), () => set(on)));
-            var cell = Ui.HStack(8, toggle, Ui.Text(label));
+            // SHToggleButton draws a little past its layout box, so the label keeps a wider gap.
+            var text = Ui.Text(label);
+            text.Margin = new Thickness(14, 0, 0, 0);
+            var cell = Ui.HStack(8, toggle, text);
             cell.Margin = new Thickness(0, 0, 24, 6);
             grid.Children.Add(cell);
         }

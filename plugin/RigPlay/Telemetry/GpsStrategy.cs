@@ -86,7 +86,7 @@ namespace RigPlayPlugin.Telemetry
         /// </summary>
         public static string Key(TelemetrySettings settings)
         {
-            if (settings == null) return Off;
+            if (settings == null || settings.GpsStrategy == Off || !IsKnown(settings.GpsStrategy)) return Off;
             return settings.GpsStrategy + "|" + settings.OriginLat.ToString("R", CultureInfo.InvariantCulture)
                 + "|" + settings.OriginLon.ToString("R", CultureInfo.InvariantCulture)
                 + "|" + settings.OriginAlt.ToString("R", CultureInfo.InvariantCulture)

@@ -60,6 +60,31 @@ namespace RigPlayPlugin.Tests
             Assert.Equal(90.0, off.Heading);
         }
 
+        [Fact]
+        public void TheStrategyIsRebuiltOnlyWhenItsSettingsChange()
+        {
+            // Found on the VM: with the strategy off, every message rebuilt (and logged) the strategy.
+            var settings = new TelemetrySettings();
+            var sampler = new TelemetrySampler();
+            var f = TelemetryTests.Frame();
+            sampler.Update(ref f, 1.0);
+            for (var i = 0; i < 5; i++) sampler.Build(settings, 1.0);
+            settings.OriginLat = 10; // irrelevant while off
+            sampler.Build(settings, 1.0);
+            Assert.Equal(0, sampler.StrategyChanges);
+            settings.GpsStrategy = GpsStrategies.DeadReckoning;
+            for (var i = 0; i < 3; i++) sampler.Build(settings, 1.0);
+            Assert.Equal(1, sampler.StrategyChanges);
+            settings.OriginLat = 11;
+            sampler.Build(settings, 1.0);
+            sampler.Build(settings, 1.0);
+            Assert.Equal(2, sampler.StrategyChanges);
+            settings.GpsStrategy = GpsStrategies.Off;
+            sampler.Build(settings, 1.0);
+            sampler.Build(settings, 1.0);
+            Assert.Equal(3, sampler.StrategyChanges);
+        }
+
         [Theory]
         [InlineData("50.3356, 6.9475", 50.3356, 6.9475)]
         [InlineData("50.3356 6.9475", 50.3356, 6.9475)]
