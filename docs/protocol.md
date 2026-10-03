@@ -524,6 +524,16 @@ is treated as `null` and the rest of the message is used.
 The yaw and coordinate axes are whatever the game reports, so `heading` is consistent within a session
 but is not a true compass direction; it only has to agree with the made-up position.
 
+#### 6.9.3 Position strategies (informative)
+
+Sims publish no GPS position, so the plugin makes one up; the user picks how on the plugin page. The
+tablet cannot tell the strategies apart and does not need to.
+
+| Strategy | `lat`, `lon`, `alt` |
+|---|---|
+| Off (default) | Absent. |
+| Fixed position (#42) | Always the origin entered on the page (default 50.3356, 6.9475, 617 m). Speed, gear and heading still come from the sim, so the phone's map shows the car at the origin with the real speed. |
+
 ### 6.10 `error`
 
 Both directions. [§14](#14-error-handling) lists the codes and when each is sent.

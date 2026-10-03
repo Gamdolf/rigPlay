@@ -100,7 +100,57 @@ namespace RigPlayPlugin
 
         private IEnumerable<FrameworkElement> StrategyRows(string name)
         {
-            yield break;
+            if (name == GpsStrategies.Off) yield break;
+            yield return OriginRow();
+        }
+
+        /// <summary>
+        /// Latitude, longitude and altitude of the origin (#42). Pasting "lat, lon" as copied from a map into the latitude
+        /// box fills both. A value out of range is refused and the box shows the stored value again.
+        /// </summary>
+        private FrameworkElement OriginRow()
+        {
+            TextBox lat = null, lon = null;
+            lat = PageKit.CommitTextBox(Format(Settings.OriginLat), 110, box =>
+            {
+                double a, b;
+                if (GeoText.TryParseLatLon(box.Text, out a, out b))
+                {
+                    if (a != Settings.OriginLat || b != Settings.OriginLon)
+                        Change("Telemetry origin set to " + Format(a) + ", " + Format(b), () => { Settings.OriginLat = a; Settings.OriginLon = b; });
+                    box.Text = Format(Settings.OriginLat);
+                    lon.Text = Format(Settings.OriginLon);
+                    return;
+                }
+                CommitNumber(box, -90, 90, () => Settings.OriginLat, v => Settings.OriginLat = v, "latitude");
+            });
+            lon = PageKit.CommitTextBox(Format(Settings.OriginLon), 110, box =>
+                CommitNumber(box, -180, 180, () => Settings.OriginLon, v => Settings.OriginLon = v, "longitude"));
+            var alt = PageKit.CommitTextBox(Format(Settings.OriginAlt), 70, box =>
+                CommitNumber(box, -1000, 10000, () => Settings.OriginAlt, v => Settings.OriginAlt = v, "altitude"));
+            lat.ToolTip = "Latitude in degrees (dot as decimal separator). Paste \"lat, lon\" from a map here to fill both.";
+            lon.ToolTip = "Longitude in degrees.";
+            alt.ToolTip = "Altitude in metres above sea level.";
+            return Ui.Row("Origin (lat, lon, alt m)", Ui.VStack(4,
+                Ui.HStack(8, lat, lon, alt),
+                Ui.Caption("Where the car is placed on the map. Paste \"lat, lon\" from a map into the first box.")));
+        }
+
+        private void CommitNumber(TextBox box, double min, double max, Func<double> get, Action<double> set, string what)
+        {
+            double value;
+            if (!GeoText.TryParse(box.Text, min, max, out value))
+            {
+                box.Text = Format(get());
+                return;
+            }
+            if (value != get()) Change("Telemetry origin " + what + " set to " + Format(value), () => set(value));
+            box.Text = Format(get());
+        }
+
+        private static string Format(double value)
+        {
+            return value.ToString("0.#######", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         private void Change(string what, Action apply)

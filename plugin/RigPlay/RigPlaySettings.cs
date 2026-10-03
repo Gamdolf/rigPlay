@@ -173,6 +173,20 @@ namespace RigPlayPlugin
         /// <summary>How lat/lon/alt are made up (<see cref="Telemetry.GpsStrategies"/>); "off" sends no position.</summary>
         public string GpsStrategy { get; set; } = global::RigPlayPlugin.Telemetry.GpsStrategies.Off;
 
+        /// <summary>Default origin: the Nürburgring, a place every sim racer knows.</summary>
+        public const double DefaultOriginLat = 50.3356;
+        public const double DefaultOriginLon = 6.9475;
+        public const double DefaultOriginAlt = 617.0;
+
+        /// <summary>The origin of the fake GPS (#42): latitude in degrees, WGS 84.</summary>
+        public double OriginLat { get; set; } = DefaultOriginLat;
+
+        /// <summary>Longitude in degrees, WGS 84.</summary>
+        public double OriginLon { get; set; } = DefaultOriginLon;
+
+        /// <summary>Altitude in metres above mean sea level.</summary>
+        public double OriginAlt { get; set; } = DefaultOriginAlt;
+
         /// <summary>True when at least one data field would be sent (spec §6.9: nothing is sent otherwise).</summary>
         public bool AnyFieldEnabled()
         {
@@ -183,7 +197,18 @@ namespace RigPlayPlugin
         public TelemetrySettings Normalize()
         {
             if (!global::RigPlayPlugin.Telemetry.GpsStrategies.IsKnown(GpsStrategy)) GpsStrategy = global::RigPlayPlugin.Telemetry.GpsStrategies.Off;
+            if (!Finite(OriginLat) || OriginLat < -90 || OriginLat > 90 || !Finite(OriginLon) || OriginLon < -180 || OriginLon > 180)
+            {
+                OriginLat = DefaultOriginLat;
+                OriginLon = DefaultOriginLon;
+            }
+            if (!Finite(OriginAlt) || OriginAlt < -1000 || OriginAlt > 10000) OriginAlt = DefaultOriginAlt;
             return this;
+        }
+
+        private static bool Finite(double value)
+        {
+            return !double.IsNaN(value) && !double.IsInfinity(value);
         }
     }
 

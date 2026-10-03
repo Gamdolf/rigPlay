@@ -5,6 +5,7 @@
 // compass heading the strategies and the heading field share.
 // Pure: no SimHub or WPF types (compiled into RigPlay.Tests).
 using System;
+using System.Globalization;
 
 namespace RigPlayPlugin.Telemetry
 {
@@ -40,8 +41,11 @@ namespace RigPlayPlugin.Telemetry
         /// <summary>No position: lat/lon/alt are not sent.</summary>
         public const string Off = "off";
 
+        /// <summary>Strategy A (#42): always the origin set on the page.</summary>
+        public const string Fixed = "fixed";
+
         /// <summary>Every strategy, in the order the page lists them.</summary>
-        public static readonly string[] All = { Off };
+        public static readonly string[] All = { Off, Fixed };
 
         public static bool IsKnown(string name)
         {
@@ -54,6 +58,7 @@ namespace RigPlayPlugin.Telemetry
             switch (name)
             {
                 case Off: return "Off (no position)";
+                case Fixed: return "Fixed position (the origin below)";
                 default: return name;
             }
         }
@@ -63,6 +68,7 @@ namespace RigPlayPlugin.Telemetry
         {
             switch (settings?.GpsStrategy)
             {
+                case Fixed: return new FixedOriginStrategy(settings.OriginLat, settings.OriginLon, settings.OriginAlt);
                 default: return null;
             }
         }
@@ -73,7 +79,10 @@ namespace RigPlayPlugin.Telemetry
         /// </summary>
         public static string Key(TelemetrySettings settings)
         {
-            return settings == null ? Off : settings.GpsStrategy;
+            if (settings == null) return Off;
+            return settings.GpsStrategy + "|" + settings.OriginLat.ToString("R", CultureInfo.InvariantCulture)
+                + "|" + settings.OriginLon.ToString("R", CultureInfo.InvariantCulture)
+                + "|" + settings.OriginAlt.ToString("R", CultureInfo.InvariantCulture);
         }
     }
 
@@ -134,6 +143,61 @@ namespace RigPlayPlugin.Telemetry
             if (h < 0) h += 360.0;
             if (h >= 360.0) h -= 360.0;
             return h;
+        }
+    }
+}
+
+namespace RigPlayPlugin.Telemetry
+{
+    /// <summary>
+    /// Strategy A (#42): the car sits at the origin entered on the page (home, say), while speed, gear and heading
+    /// come from the sim, so Maps shows the car at home with the real speed. Heading is the sim's when known, else 0.
+    /// </summary>
+    public sealed class FixedOriginStrategy : IGpsStrategy
+    {
+        private readonly GpsFix origin;
+
+        public FixedOriginStrategy(double lat, double lon, double alt)
+        {
+            origin = new GpsFix { Lat = lat, Lon = lon, Alt = alt };
+        }
+
+        public void Update(ref TelemetryInput input, double headingDeg, double dtSec) { }
+
+        public bool TryGetFix(out GpsFix fix)
+        {
+            fix = origin;
+            return true;
+        }
+
+        public void Reset() { }
+    }
+
+    /// <summary>Reads coordinates typed or pasted on the page.</summary>
+    public static class GeoText
+    {
+        private static readonly char[] Separators = { ',', ' ', ';', '\t' };
+
+        /// <summary>
+        /// "50.3356, 6.9475" or "50.3356 6.9475" (as copied from a map) into a latitude and a longitude. Invariant
+        /// culture: the decimal separator is a dot.
+        /// </summary>
+        public static bool TryParseLatLon(string text, out double lat, out double lon)
+        {
+            lat = lon = double.NaN;
+            if (string.IsNullOrWhiteSpace(text)) return false;
+            var parts = text.Split(Separators, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length != 2) return false;
+            return TryParse(parts[0], -90, 90, out lat) && TryParse(parts[1], -180, 180, out lon);
+        }
+
+        /// <summary>One number in [min, max].</summary>
+        public static bool TryParse(string text, double min, double max, out double value)
+        {
+            value = double.NaN;
+            if (string.IsNullOrWhiteSpace(text)) return false;
+            if (!double.TryParse(text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out value)) return false;
+            return !double.IsNaN(value) && !double.IsInfinity(value) && value >= min && value <= max;
         }
     }
 }

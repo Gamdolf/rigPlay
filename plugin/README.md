@@ -97,6 +97,14 @@ fuel level, range, RPM, track name, session type; `gameRunning` is always sent),
 | `gear` | `Gear`: R → `R`, 1.. → `D`, N → `P` in the pit lane or box, else `N` |
 | `heading` | `OrientationYaw` once it is non-zero in the session, else the direction of movement in `CarCoordinates` |
 | `rpm`, `trackName`, `sessionType` | `Rpms`, `TrackNameWithConfig` (else `TrackName`), `SessionTypeName` |
+| `lat`, `lon`, `alt` | The position strategy (below) |
+
+Position strategies (`Telemetry/GpsStrategy.cs`, `IGpsStrategy`; `Update` runs per frame, `TryGetFix` at 10 Hz):
+
+- **Off**: no position.
+- **Fixed position** (#42, `FixedOriginStrategy`): always the origin typed on the page (latitude, longitude,
+  altitude; pasting "lat, lon" from a map into the latitude box fills both). Maps shows the car there while speed,
+  gear and heading are the sim's; heading is 0 while the game publishes no yaw.
 
 ## Notes
 
