@@ -50,6 +50,13 @@ class TelemetrySettingsTest {
         assertTrue(AirPlayPersistence.loadNightFromSimHub(context))
     }
 
+    @Test fun vehicleStatusIsOptIn() {
+        AirPlayPersistence.saveLocationSource(context, LocationSource.SIMHUB)
+        assertFalse("declares an EV, so never on by default", AirPlayPersistence.loadSimHubVehicleStatus(context))
+        AirPlayPersistence.saveSimHubVehicleStatus(context, true)
+        assertTrue(AirPlayPersistence.loadSimHubVehicleStatus(context))
+    }
+
     @Test fun deniedPreciseLocationTurnsTheTabletSourceOff() {
         AirPlayPersistence.saveLocationSource(context, LocationSource.TABLET)
         // What the permission callbacks do when precise location is refused.

@@ -863,6 +863,12 @@ class RigPlayActivity : ComponentActivity() {
         // #45: applies live, no reconnect.
         toggle(card, getString(R.string.telemetry_night_from_simhub), getString(R.string.telemetry_night_from_simhub_desc),
             AirPlayPersistence.loadNightFromSimHub(this)) { AirPlayPersistence.saveNightFromSimHub(this, it) }
+        // #46: part of the iAP2 identification, so a running session reconnects.
+        toggle(card, getString(R.string.telemetry_vehicle_status), getString(R.string.telemetry_vehicle_status_desc),
+            AirPlayPersistence.loadSimHubVehicleStatus(this)) {
+            AirPlayPersistence.saveSimHubVehicleStatus(this, it)
+            reconnectForLocation()
+        }
     }
 
     private fun hasPreciseLocation() =

@@ -70,6 +70,7 @@ object AirPlayPersistence {
     private const val KEY_LOCATION_REPORTING_ENABLED = "location_reporting_enabled"
     private const val KEY_LOCATION_SOURCE = "location_source"
     private const val KEY_NIGHT_FROM_SIMHUB = "night_from_simhub"
+    private const val KEY_SIMHUB_VEHICLE_STATUS = "simhub_vehicle_status"
     private const val KEY_AUDIO_OUTPUT_TARGET = "audio_output_target"
     private const val KEY_SIMHUB_HOST_ID = "simhub_host_id"
     private const val KEY_SIMHUB_HOST = "simhub_host"
@@ -438,6 +439,17 @@ object AirPlayPersistence {
     fun saveNightFromSimHub(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_NIGHT_FROM_SIMHUB, enabled)
+            .apply()
+    }
+
+    /** "Fuel and range to CarPlay" (#46). Off by default: CarPlay is told the rig is an electric car. */
+    fun loadSimHubVehicleStatus(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_SIMHUB_VEHICLE_STATUS, false)
+
+    fun saveSimHubVehicleStatus(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_SIMHUB_VEHICLE_STATUS, enabled)
             .apply()
     }
 

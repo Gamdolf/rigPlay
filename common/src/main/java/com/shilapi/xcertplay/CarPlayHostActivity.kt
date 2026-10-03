@@ -88,6 +88,8 @@ import com.shilapi.xcertplay.simhub.SimHubLocationProvider
 import com.shilapi.xcertplay.simhub.SimHubNightMode
 import com.shilapi.xcertplay.simhub.SimHubTelemetryStore
 import com.shilapi.xcertplay.simhub.SimHubVehicleSpeedSource
+import com.shilapi.xcertplay.simhub.SimHubVehicleStatusProvider
+import com.shilapi.xcertplay.transport.VehicleStatusProvider
 import com.shilapi.xcertplay.transport.UsbDeviceId
 import java.io.File
 import java.text.SimpleDateFormat
@@ -131,8 +133,8 @@ class CarPlayHostActivity : ComponentActivity() {
             hardwareVersion = "1.0",
             carPlayUsbInterfaceNumber = 3,
             locationInformationEnabled = locationReportingEnabled || simHubLocationSelected(),
-            // v2: SimHub telemetry will provide vehicle status (battery/range).
-            vehicleStatusEnabled = false,
+            // Fuel % and range from SimHub (#46); declared only once a reading exists (withVehicleStatusFrom).
+            vehicleStatusEnabled = AirPlayPersistence.loadSimHubVehicleStatus(this),
             // Wheel speed ($PASCD, selector 20) from SimHub telemetry (#41).
             vehicleSpeedEnabled = simHubLocationSelected(),
         ),
@@ -153,6 +155,10 @@ class CarPlayHostActivity : ComponentActivity() {
     /** Settings → Location source → SimHub (#41): position and wheel speed come from `telemetry`. */
     private fun simHubLocationSelected(): Boolean =
         AirPlayPersistence.loadLocationSource(this) == LocationSource.SIMHUB
+
+    /** #46: fuel and range from SimHub telemetry, when the setting is on. */
+    private fun simHubVehicleStatusProvider(config: CarPlayRuntimeConfig): VehicleStatusProvider? =
+        if (config.identification.vehicleStatusEnabled) SimHubVehicleStatusProvider(SimHubEndpoints.telemetry) else null
 
     /** GGA/RMC from the game car's position plus `$PASCD` when the iPhone asks for wheel speed (#41). */
     private fun simHubLocationProvider(): Iap2LocationProvider {
@@ -2855,8 +2861,7 @@ class CarPlayHostActivity : ComponentActivity() {
             savePairRecord = { record -> AirPlayPersistence.saveLockdownRecord(this, record) },
             clearPairRecord = { AirPlayPersistence.clearLockdownRecord(this) },
             locationProvider = locationProvider,
-            // v2: SimHub telemetry as the VehicleStatusProvider.
-            vehicleStatusProvider = null,
+            vehicleStatusProvider = simHubVehicleStatusProvider(config),
         )
         controller = next
         CarPlayMediaKeys.attach(this, next)
