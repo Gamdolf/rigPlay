@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// RigPlay.cs: the SimHub plugin class. Reads and saves RigPlaySettings, and offers the rigPlay page in SimHub's
-// left menu. Discovery, pairing, dashboard push and audio arrive with the later E2 tickets (#20-#25); this is
-// the skeleton they hang off. No IDataPlugin: nothing here reads telemetry.
+// RigPlay.cs: the SimHub plugin class. Reads and saves RigPlaySettings, offers the rigPlay page in SimHub's left
+// menu, starts the tablet server (PluginBridge: discovery, pairing, dashboards, SimHub surface) and the audio
+// pipeline, and connects the two (AudioGlue). No IDataPlugin: nothing here reads telemetry.
 using System;
 using System.Linq;
 using System.Reflection;
@@ -26,6 +26,7 @@ namespace RigPlayPlugin
         private ImageSource icon;
         private bool iconLoaded;
         private PluginBridge bridge;
+        private global::RigPlayPlugin.Audio.AudioGlue audioGlue;
 
         /// <summary>Discovery, control server and tablet state; null before Init and after End.</summary>
         public RigPlayHost Host => bridge?.Host;
@@ -81,15 +82,43 @@ namespace RigPlayPlugin
                 + ", audio port " + Settings.AudioPort + ", " + Settings.PairedTablets.Count + " paired tablet(s)");
             bridge = new PluginBridge(this);
             bridge.Start(pluginManager);
-            // TODO(merge): wire RigPlay.Audio to Host: Host.AudioEnabled, Host.AudioStart/AudioStop/SessionLost,
-            // Receiver.SourceFilter = Host.IsPairedAddress, Receiver.AutoStartOnFirstFlag = false (see RigPlayHost).
             // Writes the normalised file back, so a repaired or first-run file is on disk from the start.
             SaveSettings();
             Audio = new global::RigPlayPlugin.Audio.AudioPipeline(() => Settings);
+            AttachAudio();
+        }
+
+        /// <summary>
+        /// Audio plays only for paired tablets: datagrams from other sources are dropped and a stream starts only with
+        /// its audioStart. state.audio.enabled is true while the audio port is bound, even with no output device (the
+        /// page then shows why nothing plays). Without a tablet server no source is accepted.
+        /// </summary>
+        private void AttachAudio()
+        {
+            try
+            {
+                var host = Host;
+                if (host == null)
+                {
+                    Audio.Receiver.AutoStartOnFirstFlag = false;
+                    Audio.Receiver.SourceFilter = address => false;
+                    Log.Warn("Audio is received from no tablet: the tablet server did not start");
+                    return;
+                }
+                audioGlue = new global::RigPlayPlugin.Audio.AudioGlue(host, Audio.Receiver);
+                Audio.PortChanged += audioGlue.ListenerChanged;
+                Log.Info("Audio receiver wired to the tablet server: " + (Audio.Receiver.Listening ? "UDP " + Audio.Receiver.BoundPort + ", paired tablets only" : "not listening, tablets play locally"));
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Connecting the audio receiver to the tablet server failed", ex);
+            }
         }
 
         public void End(PluginManager pluginManager)
         {
+            audioGlue?.Dispose();
+            audioGlue = null;
             Audio?.Dispose();
             SaveSettings();
             bridge?.Stop();

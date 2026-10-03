@@ -99,13 +99,30 @@ namespace RigPlayPlugin.Audio
                 Log.Info("Audio " + (on ? "muted" : "unmuted") + " from the settings page");
             });
 
+            var port = PageKit.CommitTextBox(Settings.AudioPort.ToString(), 90, box =>
+            {
+                int value;
+                if (!int.TryParse(box.Text, out value) || value < ProtocolDefaults.MinPort || value > ProtocolDefaults.MaxPort
+                    || value == ProtocolDefaults.DiscoveryPort || value == Settings.ControlPort)
+                {
+                    box.Text = Settings.AudioPort.ToString();
+                    return;
+                }
+                if (value == Settings.AudioPort) return;
+                Settings.AudioPort = value;
+                plugin.SaveSettings();
+                Log.Info("Audio port changed to " + value + "; rebinding the audio receiver");
+                plugin.Audio?.ApplyPort(); // pushes the new state.audio.port to paired tablets
+                RefreshStats();
+            });
+
             RefreshStats();
             return Ui.Section("Audio",
                 "Plays the tablet's CarPlay audio (music, Siri, calls) on an output device of this PC. Siri and calls lower the music while they play.",
                 Ui.Row("Output device", Ui.HStack(8, devices, refresh)),
                 Ui.Row("Volume", Ui.HStack(12, slider, volumeText)),
                 Ui.Row("Mute", mute),
-                Ui.Row("Audio port (UDP)", portText),
+                Ui.Row("Audio port (UDP)", Ui.HStack(12, port, portText)),
                 Ui.Row("Output", outputText),
                 Ui.Row("Music and media", mediaText),
                 Ui.Row("Siri", altText),
@@ -171,11 +188,11 @@ namespace RigPlayPlugin.Audio
             var stats = audio?.Stats ?? AudioStats.Empty;
             if (audio == null)
             {
-                portText.Text = Settings.AudioPort + " · not started";
+                portText.Text = "not started";
             }
             else
             {
-                portText.Text = (stats.Port == 0 ? Settings.AudioPort : stats.Port) + (stats.Listening ? " · listening" : " · not listening");
+                portText.Text = stats.Listening ? "listening on " + (stats.Port == 0 ? Settings.AudioPort : stats.Port) + ", paired tablets only" : "not listening (see Last error)";
             }
             outputText.Text = stats.Output;
             mediaText.Text = Line(stats, AudioStreamType.Media);

@@ -12,8 +12,6 @@ namespace RigPlayPlugin
     {
         private readonly RigPlay plugin;
 
-        private RigPlaySettings Settings => plugin.Settings;
-
         public SettingsControl(RigPlay plugin)
         {
             this.plugin = plugin;
@@ -68,30 +66,10 @@ namespace RigPlayPlugin
             return new DashboardSection(plugin).Build();
         }
 
-        private FrameworkElement BuildAudio()
-        {
-            var mute = Ui.Toggle(Settings.Muted, on =>
-            {
-                Settings.Muted = on;
-                plugin.SaveSettings();
-                Log.Info("Audio " + (on ? "muted" : "unmuted") + " from the settings page");
-            });
-            return Ui.Section("Audio",
-                "Plays the tablet's CarPlay audio (music, navigation, calls) on an output device of this PC.",
-                Ui.Row("Output device", Display(Settings.AudioDeviceId, "Windows default")),
-                Ui.Row("Volume", Settings.Volume + " %"),
-                Ui.Row("Mute", mute));
-        }
-
         private static FrameworkElement BuildData()
         {
             return Ui.Section("Data (v2)",
                 "SimHub telemetry sent to the tablet for its own widgets. Planned for a later version.");
-        }
-
-        private static string Display(string value, string whenEmpty)
-        {
-            return string.IsNullOrEmpty(value) ? whenEmpty : value;
         }
     }
 }

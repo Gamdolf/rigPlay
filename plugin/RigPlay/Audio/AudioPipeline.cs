@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // AudioPipeline.cs: wires the audio receiver (UDP + jitter buffers) to the NAudio output, points their logs at
-// SimHub's log and starts them. The plugin creates one in Init and disposes it in End; the control server (#20)
-// forwards audioStart / audioStop / link loss through it. Constructing it never throws: without NAudio or a
+// SimHub's log and starts them. The plugin creates one in Init and disposes it in End; AudioGlue connects its
+// receiver to the control server's sessions (audioStart / audioStop / session loss, state.audio). Constructing it never throws: without NAudio or a
 // sound card the receiver still runs and the page shows why nothing plays.
 using System;
 using System.Runtime.CompilerServices;
@@ -81,11 +81,16 @@ namespace RigPlayPlugin.Audio
             Receiver.OnLinkLost();
         }
 
-        /// <summary>The audio port setting changed.</summary>
+        /// <summary>The receiver was rebound by <see cref="ApplyPort"/>; state.audio may have changed.</summary>
+        public event Action PortChanged;
+
+        /// <summary>The audio port setting changed: rebinds the receiver and raises <see cref="PortChanged"/>.</summary>
         public void ApplyPort()
         {
             var s = settings();
-            if (s != null) Receiver.Rebind(s.AudioPort);
+            if (s == null) return;
+            Receiver.Rebind(s.AudioPort);
+            try { PortChanged?.Invoke(); } catch (Exception ex) { Log.Warn("A port change listener failed: " + ex.Message); }
         }
 
         public void Dispose()

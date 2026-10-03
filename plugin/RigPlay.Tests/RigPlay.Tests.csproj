@@ -34,6 +34,7 @@
     <Compile Include="../RigPlay/Audio/AudioMath.cs" Link="Plugin/Audio/AudioMath.cs" />
     <Compile Include="../RigPlay/Audio/AudioStats.cs" Link="Plugin/Audio/AudioStats.cs" />
     <Compile Include="../RigPlay/Audio/AudioReceiver.cs" Link="Plugin/Audio/AudioReceiver.cs" />
+    <Compile Include="../RigPlay/Audio/AudioGlue.cs" Link="Plugin/Audio/AudioGlue.cs" />
   </ItemGroup>
 
   <ItemGroup>

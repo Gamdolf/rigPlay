@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // AudioReceiver.cs: receives the tablet's audio datagrams (docs/protocol.md §10) on the audio UDP port, on a
 // dedicated thread, and keeps one AudioStream (format + JitterBuffer) per stream type. Streams are started and
-// stopped by the control channel through OnAudioStart / OnAudioStop / OnLinkLost; until the control server
-// (#20) calls them, a datagram with the start flag starts its stream on its own (AutoStartOnFirstFlag, a
-// documented fallback). A stream joins the output mix (IAudioSink) when its datagrams arrive and leaves it on
-// audioStop, link loss or 2 s without datagrams. Every 500 ms the receiver publishes an AudioStats snapshot.
+// stopped by the control channel through OnAudioStart / OnAudioStop / OnSourceLost / OnLinkLost. A stream
+// started by audioStart belongs to the tablet IP that sent it: only that source's datagrams feed it, and only
+// that source's audioStop or session loss stops it. Without a control channel (tests, AutoStartOnFirstFlag) a
+// datagram with the start flag starts its stream on its own, with no owner. A stream joins the output mix
+// (IAudioSink) when its datagrams arrive and leaves it on audioStop, link loss or 2 s without datagrams. Every 500 ms the receiver publishes an AudioStats snapshot.
 // No NAudio, SimHub or WPF types here (compiled into RigPlay.Tests); AudioOutput.cs is the NAudio side.
 using System;
 using System.Collections.Generic;
@@ -35,8 +36,9 @@ namespace RigPlayPlugin.Audio
     /// <summary>One started stream: its announced format and its play-out buffer. A format change makes a new one.</summary>
     public sealed class AudioStream
     {
-        internal AudioStream(AudioStreamType type, int sampleRate, int channels, AudioFormat format, bool autoStarted, int targetMs, int maxMs)
+        internal AudioStream(AudioStreamType type, int sampleRate, int channels, AudioFormat format, bool autoStarted, int targetMs, int maxMs, IPAddress source = null)
         {
+            Source = source;
             Type = type;
             SampleRate = sampleRate;
             Channels = channels;
@@ -51,6 +53,9 @@ namespace RigPlayPlugin.Audio
         public AudioFormat Format { get; }
         public bool AutoStarted { get; }
         public JitterBuffer Buffer { get; }
+
+        /// <summary>The tablet IP whose audioStart started this stream; null for a stream started by its first datagram.</summary>
+        public IPAddress Source { get; }
 
         /// <summary>In the output mix.</summary>
         public bool Active { get; internal set; }
@@ -125,9 +130,9 @@ namespace RigPlayPlugin.Audio
         }
 
         /// <summary>
-        /// Fallback until the control server (#20) delivers audioStart: a datagram with the start flag for a stream
-        /// that was not started starts it with the datagram's format. The control server may turn this off once it
-        /// calls <see cref="OnAudioStart(AudioStreamType,int,int,AudioFormat)"/>.
+        /// Fallback for a receiver without a control channel: a datagram with the start flag for a stream that was not
+        /// started starts it with the datagram's format. The plugin turns this off (AudioGlue): streams then start only
+        /// through <see cref="OnAudioStart(AudioStreamType,int,int,AudioFormat,IPAddress)"/>.
         /// </summary>
         public bool AutoStartOnFirstFlag { get; set; } = true;
 
@@ -176,6 +181,15 @@ namespace RigPlayPlugin.Audio
         /// </summary>
         public bool OnAudioStart(AudioStreamType stream, int sampleRate, int channels, AudioFormat format)
         {
+            return OnAudioStart(stream, sampleRate, channels, format, null);
+        }
+
+        /// <summary>
+        /// audioStart from the tablet at <paramref name="source"/>: the stream then accepts datagrams from that IP only.
+        /// A stream of the same type owned by another tablet is replaced (one stream per type; the last audioStart wins).
+        /// </summary>
+        public bool OnAudioStart(AudioStreamType stream, int sampleRate, int channels, AudioFormat format, IPAddress source)
+        {
             if (stream != AudioStreamType.Media && stream != AudioStreamType.Alt && stream != AudioStreamType.Telephony)
             {
                 AudioLog.Warn("audioStart ignored: stream " + AudioHeader.StreamName(stream) + " cannot be received");
@@ -188,13 +202,18 @@ namespace RigPlayPlugin.Audio
             }
             lock (gate)
             {
-                StartLocked(stream, sampleRate, channels, format, false);
+                StartLocked(stream, sampleRate, channels, format, false, Normalize(source));
             }
             return true;
         }
 
         /// <summary>audioStart with the JSON member values: stream "media"/"alt"/"telephony", format "pcm_s16le".</summary>
         public bool OnAudioStart(string stream, string format, int sampleRate, int channels)
+        {
+            return OnAudioStart(stream, format, sampleRate, channels, null);
+        }
+
+        public bool OnAudioStart(string stream, string format, int sampleRate, int channels, IPAddress source)
         {
             AudioStreamType type;
             AudioFormat fmt;
@@ -203,7 +222,7 @@ namespace RigPlayPlugin.Audio
                 AudioLog.Warn("audioStart ignored: stream \"" + stream + "\" format \"" + format + "\"");
                 return false;
             }
-            return OnAudioStart(type, sampleRate, channels, fmt);
+            return OnAudioStart(type, sampleRate, channels, fmt, source);
         }
 
         /// <summary>audioStop for one stream (§6.12): it leaves the mix at once and its buffer is discarded.</summary>
@@ -219,6 +238,43 @@ namespace RigPlayPlugin.Audio
         {
             AudioStreamType type;
             if (AudioHeader.TryParseStreamName(stream, out type)) OnAudioStop(type);
+        }
+
+        /// <summary>audioStop from the tablet at <paramref name="source"/>: ignored when another tablet owns the stream.</summary>
+        public void OnAudioStop(string stream, IPAddress source)
+        {
+            AudioStreamType type;
+            if (!AudioHeader.TryParseStreamName(stream, out type)) return;
+            source = Normalize(source);
+            lock (gate)
+            {
+                AudioStream current;
+                if (!streams.TryGetValue(type, out current)) return;
+                if (source != null && current.Source != null && !current.Source.Equals(source))
+                {
+                    AudioLog.Info("audioStop " + stream + " from " + source + " ignored: the stream belongs to " + current.Source);
+                    return;
+                }
+                StopLocked(type, "audioStop");
+            }
+        }
+
+        /// <summary>
+        /// The session of the tablet at <paramref name="source"/> closed while other tablets stay paired: the streams it
+        /// started stop, the others play on.
+        /// </summary>
+        public void OnSourceLost(IPAddress source)
+        {
+            source = Normalize(source);
+            if (source == null) return;
+            lock (gate)
+            {
+                foreach (var type in StreamTypes)
+                {
+                    AudioStream stream;
+                    if (streams.TryGetValue(type, out stream) && source.Equals(stream.Source)) StopLocked(type, "session of " + source + " closed");
+                }
+            }
         }
 
         /// <summary>The session's link was lost (§9): every stream stops, as after audioStop.</summary>
@@ -281,7 +337,13 @@ namespace RigPlayPlugin.Audio
                         LogOnce("notstarted:" + header.StreamType, "Dropped " + AudioHeader.StreamName(header.StreamType) + " audio: the stream was not started (no audioStart)");
                         return;
                     }
-                    stream = StartLocked(header.StreamType, header.SampleRate, header.Channels, header.Format, true);
+                    stream = StartLocked(header.StreamType, header.SampleRate, header.Channels, header.Format, true, null);
+                }
+                else if (stream.Source != null && !stream.Source.Equals(Normalize(from)))
+                {
+                    Interlocked.Increment(ref rejected);
+                    LogOnce("owner:" + header.StreamType + ":" + from, "Dropped " + AudioHeader.StreamName(header.StreamType) + " audio from " + from + ": that stream was started by " + stream.Source);
+                    return;
                 }
                 else if (!stream.Matches(header))
                 {
@@ -395,7 +457,7 @@ namespace RigPlayPlugin.Audio
             }
         }
 
-        private AudioStream StartLocked(AudioStreamType type, int sampleRate, int channels, AudioFormat format, bool auto)
+        private AudioStream StartLocked(AudioStreamType type, int sampleRate, int channels, AudioFormat format, bool auto, IPAddress source)
         {
             AudioStream old;
             if (streams.TryGetValue(type, out old))
@@ -403,10 +465,10 @@ namespace RigPlayPlugin.Audio
                 Deactivate(old);
                 streams.Remove(type);
             }
-            var stream = new AudioStream(type, sampleRate, channels, format, auto, targetMs, maxMs);
+            var stream = new AudioStream(type, sampleRate, channels, format, auto, targetMs, maxMs, source);
             stream.Meter.Add(clockMs() / 1000.0, 0, 0); // so the first snapshot already has a rate
             streams[type] = stream;
-            AudioLog.Info("Audio stream " + stream + (old == null ? "" : " (restarted)") + " started" + (auto ? " by its first datagram (fallback until the control channel sends audioStart)" : ""));
+            AudioLog.Info("Audio stream " + stream + (old == null ? "" : " (restarted)") + " started" + (auto ? " by its first datagram (no control channel)" : source != null ? " by " + source : ""));
             return stream;
         }
 
@@ -546,6 +608,18 @@ namespace RigPlayPlugin.Audio
                 if (!loggedOnce.Add(key)) return;
             }
             AudioLog.Warn(message);
+        }
+
+        /// <summary>The formats this receiver plays, most preferred first (state.audio.formats, spec §6.6).</summary>
+        public static List<string> SupportedFormats()
+        {
+            return new List<string> { AudioHeader.FormatName(AudioFormat.PcmS16le) };
+        }
+
+        private static IPAddress Normalize(IPAddress address)
+        {
+            if (address != null && address.AddressFamily == AddressFamily.InterNetworkV6 && address.IsIPv4MappedToIPv6) return address.MapToIPv4();
+            return address;
         }
 
         private static long StopwatchMs()

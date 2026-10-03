@@ -68,10 +68,17 @@ namespace RigPlayPlugin
         public DiscoveryBeacon Beacon { get; private set; }
 
         /// <summary>
-        /// Whether the audio receiver is running and plays what tablets send (state.audio.enabled, spec §6.6). The audio
-        /// receiver (#24) sets this; until it does, tablets are told to play locally.
+        /// Whether the audio receiver takes what tablets send (state.audio.enabled, spec §6.6). AudioGlue sets it to "the
+        /// receiver's UDP port is bound"; until then, tablets are told to play locally. Call <see cref="PushState"/> after
+        /// changing what it returns.
         /// </summary>
         public Func<bool> AudioEnabled { get; set; } = () => false;
+
+        /// <summary>The UDP port for state.audio.port; null (or no delegate) means Settings.AudioPort.</summary>
+        public Func<int?> AudioPort { get; set; }
+
+        /// <summary>The receiver's formats for state.audio.formats, most preferred first; null means pcm_s16le.</summary>
+        public Func<List<string>> AudioFormats { get; set; }
 
         /// <summary>Tests: listen on this port instead of Settings.ControlPort (0 picks a free one).</summary>
         public int? ControlPortOverride { get; set; }
@@ -237,6 +244,12 @@ namespace RigPlayPlugin
         {
             bool audio;
             try { audio = AudioEnabled != null && AudioEnabled(); } catch (Exception) { audio = false; }
+            int? audioPort = null;
+            try { audioPort = AudioPort?.Invoke(); } catch (Exception) { }
+            if (audioPort == null || audioPort < 1 || audioPort > 65535) audioPort = Settings.AudioPort;
+            List<string> formats = null;
+            try { formats = AudioFormats?.Invoke(); } catch (Exception) { }
+            if (formats == null || formats.Count == 0) formats = new List<string> { AudioStreams.PcmS16Le };
             var port = EffectiveWebDashPort;
             var local = session.Local?.Address;
             return new StateMessage
@@ -245,7 +258,7 @@ namespace RigPlayPlugin
                 DashboardUrl = DashboardUrls.Build(local, port, Settings.SelectedDashboard),
                 IdleDashboardUrl = session.HasFeature(Features.IdleDashboard) ? DashboardUrls.Build(local, port, Settings.IdleDashboard) : null,
                 DashboardServer = Probe.Current,
-                Audio = new AudioInfo { Enabled = audio, Port = Settings.AudioPort, Formats = new List<string> { AudioStreams.PcmS16Le } },
+                Audio = new AudioInfo { Enabled = audio, Port = audioPort.Value, Formats = formats },
             };
         }
 

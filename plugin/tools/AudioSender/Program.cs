@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // AudioSender: streams audio to the rigPlay plugin's audio port the way the tablet does (docs/protocol.md §10):
 // 12-byte big-endian header, s16 little-endian payload, 5 ms datagrams by default, the start flag on the first
-// one, seq and timestamp from 0. There is no control channel here; the plugin's receiver starts the stream from
-// the start flag (its documented fallback until the control server sends audioStart).
+// one, seq and timestamp from 0. There is no control channel here: the plugin accepts audio only from the IP of a
+// paired tablet that sent audioStart for the stream, so pair a (fake) tablet from the same address and send
+// audioStart on its control connection first; otherwise the datagrams are counted as rejected.
 //
 //   dotnet run -- <host> <port> <file.wav> [options]
 //   dotnet run -- <host> <port> --tone 440 [options]
