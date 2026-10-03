@@ -1,36 +1,51 @@
-name: Connection, display or audio problem
-description: Help us reproduce an issue on your head unit.
+name: Bug report
+description: Something on the tablet, the SimHub plugin or the link between them does not work.
 title: '[Bug] '
 body:
   - type: markdown
     attributes:
-      value: 'Test while parked. Reports are public: review diagnostic files and remove personal information before attaching them. Never post credentials.'
+      value: 'Reports are public: review diagnostic files and remove personal information before attaching them. Never post credentials, pairing codes or keystores.'
   - type: input
-    id: version
-    attributes: {label: DiPlay version, placeholder: '0.1.0'}
+    id: rigplay-version
+    attributes: {label: rigPlay app version, description: 'Settings → About on the tablet.', placeholder: '0.1.0'}
     validations: {required: true}
   - type: input
-    id: car
-    attributes: {label: Car and head-unit model, placeholder: 'Car model/year, DiLink version, Android version'}
+    id: plugin-version
+    attributes: {label: RigPlay plugin version, description: 'Shown on the RigPlay settings page in SimHub.', placeholder: '0.1.0'}
+    validations: {required: true}
+  - type: input
+    id: simhub-version
+    attributes: {label: SimHub version, placeholder: '9.x.y'}
+    validations: {required: true}
+  - type: input
+    id: tablet
+    attributes: {label: Tablet model and Android version, placeholder: 'e.g. Galaxy Tab S9, Android 14'}
     validations: {required: true}
   - type: input
     id: phone
-    attributes: {label: iPhone model and exact iOS version}
+    attributes: {label: iPhone model and exact iOS version, placeholder: 'e.g. iPhone 15, iOS 26.0.1'}
     validations: {required: true}
   - type: dropdown
     id: transport
     attributes:
-      label: Connection
-      options: [Wireless, USB, Both]
+      label: Phone connection
+      options: [Wi-Fi Direct (wireless), USB, Both]
+    validations: {required: true}
+  - type: dropdown
+    id: pc-state
+    attributes:
+      label: What the PC was doing
+      description: 'State of the SimHub PC when the problem happened.'
+      options: [On with SimHub running, On without SimHub, Sleeping, 'Off', 'Changing state (going to sleep, waking, shutting down)']
     validations: {required: true}
   - type: textarea
     id: reproduce
     attributes:
       label: What happened and how to reproduce it
-      description: 'Include expected behavior, steps, display settings and whether the car is also connected to a Wi-Fi network. For wireless, include the band/channel if the report shows it.'
+      description: 'Expected vs. actual behaviour and the exact steps. Mention whether the tablet and PC are on the same network and anything else running on the rig.'
     validations: {required: true}
   - type: textarea
     id: diagnostics
     attributes:
-      label: Diagnostic report or recording
-      description: 'Settings → Save diagnostic report; Android 10+ saves to Downloads/DiPlay. Attach the reviewed file here. If export fails, describe exactly when.'
+      label: Diagnostics
+      description: 'Tablet: Settings → Save diagnostic report (saved to Downloads/rigPlay). PC: the RigPlay lines from the SimHub log. Attach the reviewed files here. If export fails, describe exactly when.'
