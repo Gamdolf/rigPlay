@@ -3,6 +3,7 @@ package com.shilapi.xcertplay
 import android.app.Activity
 import android.app.Application
 import android.os.Bundle
+import com.shilapi.xcertplay.orchestration.CarPlayController
 
 /**
  * Creates the process-wide SimHub link owner at process start, before any activity or receiver runs,
@@ -13,6 +14,11 @@ class RigPlayApplication : Application() {
         super.onCreate()
         RigSessionCoordinator.init(this)
         registerActivityLifecycleCallbacks(ForegroundTracker())
+        // CarPlay's OEM icon ("SimHub") opens the dashboard instead of the launcher (#30).
+        CarPlayController.hostUiOpener = { context ->
+            RigSessionCoordinator.showDashboard(context)
+            true
+        }
     }
 
     private class ForegroundTracker : ActivityLifecycleCallbacks {
@@ -38,6 +44,7 @@ class RigPlayApplication : Application() {
     companion object {
         fun foregroundOf(activity: Activity): RigSessionLifecycle.Foreground = when (activity) {
             is CarPlayHostActivity -> RigSessionLifecycle.Foreground.CARPLAY
+            is DashboardActivity -> RigSessionLifecycle.Foreground.DASHBOARD
             else -> RigSessionLifecycle.Foreground.HOME
         }
     }

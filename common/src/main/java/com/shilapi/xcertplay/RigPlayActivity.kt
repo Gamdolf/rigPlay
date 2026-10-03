@@ -280,8 +280,12 @@ class RigPlayActivity : ComponentActivity() {
         }
     }
 
-    /** Buttons added by later tickets between "Choose iPhone" and "Settings". */
-    private fun homeExtraActions(actions: LinearLayout) = Unit
+    /** The SimHub button (#30): the dashboard chosen in SimHub. */
+    private fun homeExtraActions(actions: LinearLayout) {
+        actions.addView(button(getString(R.string.rig_dashboard_simhub), false) {
+            RigSessionCoordinator.showDashboard(this)
+        }, matchButton(12, 60))
+    }
 
     private fun phoneStatusText(): String {
         val running = CarPlayBackgroundSession.hasSession()

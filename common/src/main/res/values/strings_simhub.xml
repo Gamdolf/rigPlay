@@ -77,4 +77,14 @@
     <string name="rig_notification_simhub_connected">SimHub: %1$s</string>
     <string name="rig_notification_simhub_waiting">Waiting for SimHub</string>
     <string name="rig_notification_simhub_unpaired">SimHub not paired</string>
+
+    <!-- SimHub dashboard (#30) -->
+    <string name="rig_dashboard_simhub">SimHub</string>
+    <string name="rig_dashboard_carplay">CarPlay</string>
+    <string name="rig_dashboard_retry">Retry</string>
+    <string name="rig_dashboard_no_dashboard">No dashboard selected on the PC. Choose one on the rigPlay page in SimHub.</string>
+    <string name="rig_dashboard_server_off">SimHub\'s web dash server is off. Turn it on in SimHub: Settings → Web dash server.</string>
+    <string name="rig_dashboard_unreachable">Could not load %1$s. SimHub\'s web dash server is off or blocked: Settings → Web dash server, and allow SimHub on private networks in Windows Firewall.</string>
+    <string name="rig_dashboard_disconnected">SimHub is not connected. The dashboard appears when the PC is back.</string>
+    <string name="rig_dashboard_not_paired">Pair rigPlay with SimHub to show its dashboards.</string>
 </resources>

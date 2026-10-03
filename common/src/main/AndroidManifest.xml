@@ -32,6 +32,16 @@
             android:theme="@style/Theme.Xcertplay"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- SimHub dashboard (#30); cleartext http to the LAN is allowed by :shared's usesCleartextTraffic. -->
+        <activity
+            android:name="com.shilapi.xcertplay.DashboardActivity"
+            android:configChanges="density|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:hardwareAccelerated="true"
+            android:launchMode="singleTop"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@style/Theme.Xcertplay" />
+
         <activity
             android:name="com.shilapi.xcertplay.ImageCropActivity"
             android:exported="false"

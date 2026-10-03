@@ -98,6 +98,15 @@ object RigSessionCoordinator {
         flow = SimHubPairingFlow(linkPort) { notifyObservers() }
         lifecycle = RigSessionLifecycle(linkPort, RigPhoneSession(app), AppScreens(app)) { Log.i(TAG, it) }
         lifecycle.mediaCommandHandler = pendingMediaHandler
+        // TODO(merge): SimHubEndpoints (#32) — route media commands through the bridge, keeping
+        // mediaCommandHandler as the seam:
+        //   mediaCommandHandler = { cmd ->
+        //       if (SimHubEndpoints.mediaBridge.onCommand(cmd) == SimHubMediaBridge.Result.UNAVAILABLE)
+        //           link.sendCommandUnavailable()
+        //   }
+        // TODO(merge): SimHubEndpoints (#31/#32) — the link exists from here on:
+        //   SimHubEndpoints.audioTransport = SimHubLinkAudioTransport(link)
+        //   SimHubEndpoints.statusSink = SimHubLinkStatus(link)
         CarPlayBackgroundSession.onChanged = { main.post(::onPhoneSessionChanged) }
         pairing = AirPlayPersistence.loadSimHubPairing(app)
         pairing?.let(::startPaired)
@@ -124,10 +133,15 @@ object RigSessionCoordinator {
      */
     fun onManualConnect(): Boolean = initialized && lifecycle.onManualConnect(paired = isPaired)
 
+    /** The SimHub button, CarPlay's OEM icon and `command showDashboard` (#30). Any thread. */
+    fun showDashboard(context: Context) = DashboardActivity.open(context.applicationContext ?: context)
+
     /** Which rigPlay screen is in the foreground; from [RigPlayApplication]'s activity callbacks. */
     fun onForegroundChanged(foreground: RigSessionLifecycle.Foreground) {
         if (!initialized) return
         lifecycle.onForegroundChanged(foreground)
+        // TODO(merge): SimHubEndpoints (#32) — SimHubEndpoints.statusSink?.updateScreen(lifecycle.currentStatus().screen)
+        // (or drop RigSessionLifecycle.publishStatus in favour of SimHubLinkStatus; one owner of `status`).
     }
 
     private fun onPhoneSessionChanged() {
@@ -152,10 +166,7 @@ object RigSessionCoordinator {
     }
 
     private class AppScreens(private val context: Context) : RigSessionLifecycle.Screens {
-        // Replaced by the dashboard screen in #30.
-        override fun showDashboard() {
-            linkPort.sendCommandUnavailable("dashboard screen not available")
-        }
+        override fun showDashboard() = DashboardActivity.open(context)
 
         override fun showCarPlay() {
             context.startActivity(
@@ -340,6 +351,8 @@ object RigSessionCoordinator {
         }
 
         override fun stop() {
+            // TODO(merge): SimHubEndpoints (#31/#32) — on a deliberate stop (Forget), clear the endpoints:
+            //   SimHubEndpoints.audioTransport = null; SimHubEndpoints.statusSink = null
             epoch++
             delegate.stop()
         }
@@ -360,6 +373,8 @@ object RigSessionCoordinator {
             this@RigSessionCoordinator.onTokenRevoked(hostId, code)
         }
         override fun onLinkUp(state: SimHubState) = fromLink {
+            // TODO(merge): SimHubEndpoints (#31/#32) — paired: ensure audioTransport/statusSink are set
+            // (SimHubLinkAudioTransport(link), SimHubLinkStatus(link)) if they were cleared by stop().
             // Only the stored PC drives the phone; onPaired ran just before and stored it.
             if (pairing != null) lifecycle.onLinkUp()
             notifyObservers()
@@ -369,6 +384,8 @@ object RigSessionCoordinator {
             lifecycle.onLinkLost()
             notifyObservers()
         }
+        // TODO(merge): SimHubEndpoints (#32) — media commands reach the bridge through mediaCommandHandler
+        // (see init); showDashboard/showCarPlay stay in RigSessionLifecycle.
         override fun onCommand(command: SimHubCommand) = fromLink { lifecycle.onCommand(command) }
     }
 
