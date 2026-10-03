@@ -30,6 +30,7 @@ namespace RigPlayPlugin
         private bool iconLoaded;
         private PluginBridge bridge;
         private global::RigPlayPlugin.Audio.AudioGlue audioGlue;
+        private global::RigPlayPlugin.Audio.MicGlue micGlue;
 
         /// <summary>Discovery, control server and tablet state; null before Init and after End.</summary>
         public RigPlayHost Host => bridge?.Host;
@@ -41,6 +42,9 @@ namespace RigPlayPlugin
 
         /// <summary>The audio receiver and output (#24); the control server forwards audioStart / audioStop to it.</summary>
         public global::RigPlayPlugin.Audio.AudioPipeline Audio { get; private set; }
+
+        /// <summary>The PC microphone to the phone (#34): micStart / micStop from tablets; null without a tablet server.</summary>
+        public global::RigPlayPlugin.Audio.MicSender Mic { get; private set; }
 
         public string LeftMenuTitle => "rigPlay";
 
@@ -89,6 +93,25 @@ namespace RigPlayPlugin
             SaveSettings();
             Audio = new global::RigPlayPlugin.Audio.AudioPipeline(() => Settings);
             AttachAudio();
+            AttachMic();
+        }
+
+        /// <summary>The PC microphone (#34): tablets with feature mic get it on micStart while "Microphone to the phone" is on.</summary>
+        private void AttachMic()
+        {
+            try
+            {
+                var host = Host;
+                if (host == null) return;
+                Mic = new global::RigPlayPlugin.Audio.MicSender(() => Settings, global::RigPlayPlugin.Audio.MicCaptureFactory.TryCreate(), host.Clock);
+                micGlue = new global::RigPlayPlugin.Audio.MicGlue(host, Mic);
+                Mic.StartTimer();
+                Log.Info("Microphone to the phone " + (Settings.MicEnabled ? "on" : "off") + ", " + (Mic.Available ? "an input device is present" : "no input device found"));
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Setting up the PC microphone failed", ex);
+            }
         }
 
         /// <summary>
@@ -215,6 +238,9 @@ namespace RigPlayPlugin
 
         public void End(PluginManager pluginManager)
         {
+            micGlue?.Dispose();
+            micGlue = null;
+            Mic?.Dispose();
             audioGlue?.Dispose();
             audioGlue = null;
             Audio?.Dispose();

@@ -36,6 +36,8 @@
     <Compile Include="../RigPlay/Audio/AudioStats.cs" Link="Plugin/Audio/AudioStats.cs" />
     <Compile Include="../RigPlay/Audio/AudioReceiver.cs" Link="Plugin/Audio/AudioReceiver.cs" />
     <Compile Include="../RigPlay/Audio/AudioGlue.cs" Link="Plugin/Audio/AudioGlue.cs" />
+    <!-- The PC microphone (#34): packetizer, stream lifecycle and glue. MicCapture.cs and MicSection.cs need NAudio and WPF and stay out. -->
+    <Compile Include="../RigPlay/Audio/MicSender.cs" Link="Plugin/Audio/MicSender.cs" />
   </ItemGroup>
 
   <ItemGroup>

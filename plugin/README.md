@@ -167,3 +167,24 @@ dotnet run --project plugin/tools/AudioSender -- 127.0.0.1 23712 --tone 440 --se
 The plugin plays these only after a tablet on the sender's address has paired and sent `audioStart` for the
 stream (for example a scripted fake tablet on the same PC, then the sender to 127.0.0.1); anything else shows
 up as "rejected" in the Audio section's datagram counter.
+
+## PC microphone to the phone (#34)
+
+The other direction (docs/protocol.md §6.13, §10.4): a tablet with feature `mic` sends `micStart` when the
+phone opens its microphone for Siri or a call, and the plugin sends the PC microphone to the tablet's UDP port
+(23713) as 5 ms datagrams with the §10.2 header, `streamType` 4, 1 channel, at the rate the tablet asked for.
+
+- `MicSender.cs` (pure, unit-tested): `MicPacketizer` cuts mono s16 into 5 ms datagrams (seq and timestamp
+  from 0 per `micStart`, start flag on the first); `MicSender` runs one stream at a time (the latest
+  `micStart` takes it over) and stops on `micStop` from the owning session, when that session closes, after
+  2 s without a line from it, or when **Microphone to the phone** is switched off; it keeps the page's stats
+  and level meter. `MicGlue` connects it to the host's `MicStart`/`MicStop`/`PairedSessionClosed` events and
+  sets `state.mic.enabled` (setting on and an input device present), pushed to tablets when it changes.
+- `MicCapture.cs` (NAudio, Windows only): `WasapiCapture` in shared mode on the chosen input device
+  (`MMDeviceEnumerator`, `DataFlow.Capture`; the Windows default recording device when none is chosen or the
+  chosen one is unplugged), mixed down to mono and resampled with `WdlResamplingSampleProvider`. Without an
+  input device `micStart` fails, the plugin logs it once and `state.mic.enabled` turns false, so tablets use
+  their own microphone.
+- `MicSection.cs`: the page's Microphone section (the switch, the input device picker, state, level, last event).
+- Settings (schema 4): `MicEnabled` (default on: nothing is captured until a tablet asks) and `MicDeviceId`.
+- No echo cancellation: with PC speakers a caller can hear themselves. Recommend a headset.

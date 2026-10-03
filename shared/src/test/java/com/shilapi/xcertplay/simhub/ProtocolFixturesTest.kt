@@ -33,7 +33,7 @@ class ProtocolFixturesTest {
 
     @Test fun everyValidFixtureDecodesToItsTypeAndRoundTrips() {
         val files = validFiles
-        assertTrue("expected the fixture set, found ${files.size}", files.size >= 32)
+        assertTrue("expected the fixture set, found ${files.size}", files.size >= 35)
         val seenTypes = mutableSetOf<String>()
         for (file in files) {
             val text = file.readText(Charsets.UTF_8)
@@ -65,7 +65,7 @@ class ProtocolFixturesTest {
 
     @Test fun everyInvalidFixtureIsRejected() {
         val files = invalidFiles
-        assertTrue("expected the invalid set, found ${files.size}", files.size >= 22)
+        assertTrue("expected the invalid set, found ${files.size}", files.size >= 28)
         for (file in files) {
             val result = SimHubProtocol.parse(file.readText(Charsets.UTF_8))
             assertFalse("${file.name}: must not decode, got $result", result is SimHubParseResult.Ok)
@@ -88,10 +88,11 @@ class ProtocolFixturesTest {
         val vectors = JSONObject(File(fixtures, AUDIO_HEADER).readText(Charsets.UTF_8))
         assertEquals(AudioHeader.SIZE, vectors.getInt("headerSize"))
         val valid = vectors.getJSONArray("valid")
-        assertTrue(valid.length() >= 4)
+        assertTrue(valid.length() >= 6)
         for (index in 0 until valid.length()) {
             val vector = valid.getJSONObject(index)
             val name = vector.getString("name")
+            val direction = vector.direction()
             val fields = vector.getJSONObject("header")
             val header = AudioHeader(
                 seq = fields.getInt("seq"),
@@ -111,27 +112,31 @@ class ProtocolFixturesTest {
             assertEquals("$name datagram", vector.getString("datagramHex"), datagram.hex())
             assertEquals("$name payload", vector.getString("payloadHex"), datagram.copyOfRange(AudioHeader.SIZE, datagram.size).hex())
 
-            val decoded = SimHubAudioCodec.decode(vector.getString("datagramHex").unhex())
+            val decoded = SimHubAudioCodec.decode(vector.getString("datagramHex").unhex(), direction)
                 ?: fail("$name: decode rejected a valid datagram") as Nothing
+            assertEquals("$name direction", direction, decoded.header.stream.direction)
+            // streamType fixes the direction (§10.2): read the other way, the same bytes are dropped.
+            val other = if (direction == AudioDirection.PC_TO_TABLET) AudioDirection.TABLET_TO_PC else AudioDirection.PC_TO_TABLET
+            assertNull("$name read the other way", SimHubAudioCodec.decode(vector.getString("datagramHex").unhex(), other))
             assertEquals("$name decoded header", header, decoded.header)
             assertEquals("$name sampleRate field", fields.getInt("sampleRateField"), decoded.header.sampleRateHz / 100)
             assertEquals("$name frames", vector.getInt("frames"), decoded.frames)
             assertArrayEquals("$name samples", samples, decoded.samples())
         }
         val invalid = vectors.getJSONArray("invalid")
-        assertTrue(invalid.length() >= 10)
+        assertTrue(invalid.length() >= 12)
         for (index in 0 until invalid.length()) {
             val vector = invalid.getJSONObject(index)
             assertNull(
                 "${vector.getString("name")}: ${vector.getString("reason")}",
-                SimHubAudioCodec.decode(vector.getString("datagramHex").unhex()),
+                SimHubAudioCodec.decode(vector.getString("datagramHex").unhex(), vector.direction()),
             )
         }
     }
 
     @Test fun reservedHeaderFlagBitsAreIgnoredOnDecode() {
         val datagram = "000001ff0000000001e002010100ffff".unhex()
-        val decoded = SimHubAudioCodec.decode(datagram)!!
+        val decoded = SimHubAudioCodec.decode(datagram, AudioDirection.TABLET_TO_PC)!!
         assertTrue(decoded.header.start)
         assertEquals("000001010000000001e00201", SimHubAudioCodec.encodeHeader(decoded.header).hex())
     }
@@ -193,6 +198,25 @@ class ProtocolFixturesTest {
         assertFalse(SimHubMessage.Artwork("image/jpeg", "QUJD".repeat(1_000)).toString().contains("QUJD"))
     }
 
+    @Test fun micMessagesAndStateMic() {
+        assertEquals(
+            """{"type":"micStart","streamType":4,"format":"pcm_s16le","sampleRate":24000,"channels":1,"port":23713}""",
+            SimHubProtocol.encode(SimHubMessage.MicStart(sampleRate = 24_000)),
+        )
+        assertEquals("""{"type":"micStop","streamType":4}""", SimHubProtocol.encode(SimHubMessage.MicStop()))
+        assertMalformed("""{"type":"micStop","streamType":3}""", "micStop")
+        assertMalformed("""{"type":"micStart","streamType":4,"format":"opus","sampleRate":16000,"channels":1,"port":23713}""", "micStart")
+        assertMalformed("""{"type":"micStart","streamType":4,"format":"pcm_s16le","sampleRate":16000,"channels":1,"port":0}""", "micStart")
+        // `mic` is a datagram stream only: audioStart and audioStop cannot name it.
+        assertMalformed("""{"type":"audioStart","stream":"mic","format":"pcm_s16le","sampleRate":16000,"channels":1}""", "audioStart")
+        assertMalformed("""{"type":"audioStop","stream":"mic"}""", "audioStop")
+        val state = SimHubProtocol.parseOrNull(
+            """{"type":"state","dashboardUrl":null,"audio":{"enabled":true,"port":23712,"formats":["pcm_s16le"]}}""",
+        ) as SimHubMessage.State
+        assertNull("no state.mic without the feature", state.mic)
+        assertFalse(SimHubProtocol.encode(state).contains("mic"))
+    }
+
     @Test fun versionCompatibility() {
         assertTrue(SimHubProtocol.isCompatible(1, 1))
         assertTrue(SimHubProtocol.isCompatible(1, 3))
@@ -223,6 +247,10 @@ class ProtocolFixturesTest {
         }
     }
 
+    /** The fixtures README: a vector flows tablet → plugin unless its `direction` says `pcToTablet`. */
+    private fun JSONObject.direction(): AudioDirection =
+        if (optString("direction") == "pcToTablet") AudioDirection.PC_TO_TABLET else AudioDirection.TABLET_TO_PC
+
     private fun ByteArray.hex(): String = joinToString("") { "%02x".format(it.toInt() and 0xFF) }
 
     private fun String.unhex(): ByteArray = ByteArray(length / 2) { substring(it * 2, it * 2 + 2).toInt(16).toByte() }
@@ -245,6 +273,8 @@ class ProtocolFixturesTest {
             "audioStart" to SimHubMessage.AudioStart::class.java,
             "audioStop" to SimHubMessage.AudioStop::class.java,
             "artwork" to SimHubMessage.Artwork::class.java,
+            "micStart" to SimHubMessage.MicStart::class.java,
+            "micStop" to SimHubMessage.MicStop::class.java,
         )
 
         /** Gradle runs unit tests in the module directory; walk up to the repository root. */

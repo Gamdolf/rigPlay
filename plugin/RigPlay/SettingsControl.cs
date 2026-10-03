@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // SettingsControl.cs: the rigPlay page in SimHub's left menu, built in code (no XAML, see plugin/README.md).
-// A header with the plugin version, then the Status, Pairing, Dashboards, Audio and "Data to CarPlay" sections
-// (#20 status, #21 pairing, #23 dashboards, #24 audio, #40 telemetry). A change writes the settings object and saves
-// it at once.
+// A header with the plugin version, then the Status, Pairing, Dashboards, Audio, Microphone and "Data to CarPlay"
+// sections (#20 status, #21 pairing, #23 dashboards, #24 audio, #34 microphone, #40 telemetry). A change writes the
+// settings object and saves it at once.
 using System.Windows;
 using System.Windows.Controls;
 
@@ -28,6 +28,7 @@ namespace RigPlayPlugin
                 BuildPairing(),
                 BuildDashboards(),
                 new global::RigPlayPlugin.Audio.AudioSection(plugin),
+                new global::RigPlayPlugin.Audio.MicSection(plugin).Build(),
                 BuildData());
             page.Margin = new Thickness(Theme.PagePadding);
             page.MaxWidth = Theme.PageMaxWidth;

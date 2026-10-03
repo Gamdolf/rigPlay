@@ -30,12 +30,17 @@ namespace RigPlayPlugin.Protocol
         public const string AudioStart = "audioStart";
         public const string AudioStop = "audioStop";
         public const string Artwork = "artwork";
+        public const string MicStart = "micStart";
+        public const string MicStop = "micStop";
 
         /// <summary>Types the tablet sends to the plugin on the control channel.</summary>
         public static readonly HashSet<string> TabletToPlugin = new HashSet<string>(StringComparer.Ordinal)
         {
-            Hello, PairRequest, Heartbeat, Status, Error, AudioStart, AudioStop, Artwork,
+            Hello, PairRequest, Heartbeat, Status, Error, AudioStart, AudioStop, Artwork, MicStart, MicStop,
         };
+
+        /// <summary>Types only a session with feature <c>mic</c> may send (spec §6.13).</summary>
+        public static readonly HashSet<string> MicFeature = new HashSet<string>(StringComparer.Ordinal) { MicStart, MicStop };
     }
 
     /// <summary>Feature strings (spec §7.3).</summary>
@@ -118,6 +123,9 @@ namespace RigPlayPlugin.Protocol
         public const string Alt = "alt";
         public const string Telephony = "telephony";
         public const string PcmS16Le = "pcm_s16le";
+
+        /// <summary>The datagram streamType of the PC microphone (spec §6.13, §10.4): the only value micStart / micStop allow.</summary>
+        public const int MicStreamType = 4;
 
         public static readonly HashSet<string> All = new HashSet<string>(StringComparer.Ordinal) { Media, Alt, Telephony };
         public static readonly HashSet<string> Formats = new HashSet<string>(StringComparer.Ordinal) { PcmS16Le };
@@ -227,6 +235,12 @@ namespace RigPlayPlugin.Protocol
         public List<string> Formats { get; set; } = new List<string> { AudioStreams.PcmS16Le };
     }
 
+    /// <summary><c>state.mic</c> (spec §6.6): whether the plugin answers micStart with microphone audio.</summary>
+    public sealed class MicInfo
+    {
+        public bool Enabled { get; set; }
+    }
+
     public sealed class StateMessage : Message
     {
         public override string Type => MessageTypes.State;
@@ -237,6 +251,9 @@ namespace RigPlayPlugin.Protocol
         public string IdleDashboardUrl { get; set; }
         public DashboardServerInfo DashboardServer { get; set; }
         public AudioInfo Audio { get; set; } = new AudioInfo();
+
+        /// <summary>Optional; sent only to sessions with feature <c>mic</c> (spec §6.6).</summary>
+        public MicInfo Mic { get; set; }
     }
 
     public sealed class NowPlaying
@@ -406,6 +423,24 @@ namespace RigPlayPlugin.Protocol
         public string Stream { get; set; }
     }
 
+    /// <summary>Tablet → plugin (spec §6.13): send the PC microphone to the tablet's <see cref="Port"/>.</summary>
+    public sealed class MicStartMessage : Message
+    {
+        public override string Type => MessageTypes.MicStart;
+        public int StreamType { get; set; } = AudioStreams.MicStreamType;
+        public string Format { get; set; } = AudioStreams.PcmS16Le;
+        public int SampleRate { get; set; }
+        public int Channels { get; set; } = 1;
+        public int Port { get; set; }
+    }
+
+    /// <summary>Tablet → plugin (spec §6.13): the phone closed its microphone.</summary>
+    public sealed class MicStopMessage : Message
+    {
+        public override string Type => MessageTypes.MicStop;
+        public int StreamType { get; set; } = AudioStreams.MicStreamType;
+    }
+
     /// <summary>Why a line did not decode to a valid message.</summary>
     public enum DecodeFailure
     {
@@ -567,6 +602,7 @@ namespace RigPlayPlugin.Protocol
                         ["port"] = audio.Port,
                         ["formats"] = new JArray((audio.Formats ?? new List<string>()).Cast<object>().ToArray()),
                     };
+                    if (m.Mic != null) o["mic"] = new JObject { ["enabled"] = m.Mic.Enabled };
                     break;
                 case StatusMessage m:
                     o["phoneConnected"] = m.PhoneConnected;
@@ -641,6 +677,16 @@ namespace RigPlayPlugin.Protocol
                 case AudioStopMessage m:
                     o["stream"] = m.Stream;
                     break;
+                case MicStartMessage m:
+                    o["streamType"] = m.StreamType;
+                    o["format"] = m.Format;
+                    o["sampleRate"] = m.SampleRate;
+                    o["channels"] = m.Channels;
+                    o["port"] = m.Port;
+                    break;
+                case MicStopMessage m:
+                    o["streamType"] = m.StreamType;
+                    break;
                 default:
                     throw new ArgumentException("Unknown message class " + message.GetType().Name);
             }
@@ -690,6 +736,8 @@ namespace RigPlayPlugin.Protocol
             [MessageTypes.AudioStart] = DecodeAudioStart,
             [MessageTypes.AudioStop] = o => new AudioStopMessage { Stream = ReqEnum(o, "stream", AudioStreams.All) },
             [MessageTypes.Artwork] = DecodeArtwork,
+            [MessageTypes.MicStart] = DecodeMicStart,
+            [MessageTypes.MicStop] = o => new MicStopMessage { StreamType = (int)ReqInt(o, "streamType", AudioStreams.MicStreamType, AudioStreams.MicStreamType) },
         };
 
         private static Message DecodeBeacon(JObject o)
@@ -789,6 +837,8 @@ namespace RigPlayPlugin.Protocol
                 Port = (int)ReqInt(audio, "port", 1, 65535),
                 Formats = ReqStringArray(audio, "formats"),
             };
+            var mic = OptObject(o, "mic");
+            if (mic != null) m.Mic = new MicInfo { Enabled = ReqBool(mic, "enabled") };
             return m;
         }
 
@@ -926,6 +976,20 @@ namespace RigPlayPlugin.Protocol
                 Format = ReqEnum(o, "format", AudioStreams.Formats),
                 SampleRate = (int)ReqInt(o, "sampleRate", 8000, 48000),
                 Channels = (int)ReqInt(o, "channels", 1, 2),
+            };
+            if (m.SampleRate % 100 != 0) throw new ProtocolException("sampleRate must be a multiple of 100");
+            return m;
+        }
+
+        private static Message DecodeMicStart(JObject o)
+        {
+            var m = new MicStartMessage
+            {
+                StreamType = (int)ReqInt(o, "streamType", AudioStreams.MicStreamType, AudioStreams.MicStreamType),
+                Format = ReqEnum(o, "format", AudioStreams.Formats),
+                SampleRate = (int)ReqInt(o, "sampleRate", 8000, 48000),
+                Channels = (int)ReqInt(o, "channels", 1, 1),
+                Port = (int)ReqInt(o, "port", 1, 65535),
             };
             if (m.SampleRate % 100 != 0) throw new ProtocolException("sampleRate must be a multiple of 100");
             return m;

@@ -91,6 +91,8 @@ namespace RigPlayPlugin.Net
         public event Action<ClientSession, AudioStartMessage> AudioStartReceived;
         public event Action<ClientSession, AudioStopMessage> AudioStopReceived;
         public event Action<ClientSession, ArtworkMessage> ArtworkReceived;
+        public event Action<ClientSession, MicStartMessage> MicStartReceived;
+        public event Action<ClientSession, MicStopMessage> MicStopReceived;
 
         /// <summary>Starts listening. False (with Status.Error set) when the port cannot be bound.</summary>
         public bool Start()
@@ -284,6 +286,20 @@ namespace RigPlayPlugin.Net
                     if (stopHandler != null)
                     {
                         try { stopHandler(session, stop); } catch (Exception ex) { PluginLog.Error("An audioStop handler failed", ex); }
+                    }
+                    break;
+                case MicStartMessage micStart:
+                    var micStartHandler = MicStartReceived;
+                    if (micStartHandler != null)
+                    {
+                        try { micStartHandler(session, micStart); } catch (Exception ex) { PluginLog.Error("A micStart handler failed", ex); }
+                    }
+                    break;
+                case MicStopMessage micStop:
+                    var micStopHandler = MicStopReceived;
+                    if (micStopHandler != null)
+                    {
+                        try { micStopHandler(session, micStop); } catch (Exception ex) { PluginLog.Error("A micStop handler failed", ex); }
                     }
                     break;
             }
