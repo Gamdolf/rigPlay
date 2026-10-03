@@ -25,12 +25,12 @@ namespace RigPlayPlugin.Tests
         }
 
         [Theory]
-        [InlineData("192.168.1.20", 8888, "Pit Board", "http://192.168.1.20:8888/dashboard/Pit%20Board")]
-        [InlineData("::ffff:10.0.0.5", 8888, "Pit Board", "http://10.0.0.5:8888/dashboard/Pit%20Board")]
-        [InlineData("127.0.0.1", 9999, "SimHub - FordGT", "http://127.0.0.1:9999/dashboard/SimHub%20-%20FordGT")]
-        [InlineData("10.0.0.5", 8888, "a/b?c#d%e&f+g", "http://10.0.0.5:8888/dashboard/a%2Fb%3Fc%23d%25e%26f%2Bg")]
-        [InlineData("10.0.0.5", 8888, "Nürburgring", "http://10.0.0.5:8888/dashboard/N%C3%BCrburgring")]
-        [InlineData("fe80::1", 8888, "A", "http://[fe80::1]:8888/dashboard/A")]
+        [InlineData("192.168.1.20", 8888, "Pit Board", "http://192.168.1.20:8888/Dash#Pit%20Board")]
+        [InlineData("::ffff:10.0.0.5", 8888, "Pit Board", "http://10.0.0.5:8888/Dash#Pit%20Board")]
+        [InlineData("127.0.0.1", 9999, "SimHub - FordGT", "http://127.0.0.1:9999/Dash#SimHub%20-%20FordGT")]
+        [InlineData("10.0.0.5", 8888, "a/b?c#d%e&f+g", "http://10.0.0.5:8888/Dash#a%2Fb%3Fc%23d%25e%26f%2Bg")]
+        [InlineData("10.0.0.5", 8888, "Nürburgring", "http://10.0.0.5:8888/Dash#N%C3%BCrburgring")]
+        [InlineData("fe80::1", 8888, "A", "http://[fe80::1]:8888/Dash#A")]
         public void UrlsUseTheConnectionsLocalAddressAndEncodeTheName(string ip, int port, string name, string expected)
         {
             Assert.Equal(expected, DashboardUrls.Build(IPAddress.Parse(ip), port, name));
@@ -44,11 +44,14 @@ namespace RigPlayPlugin.Tests
         }
 
         [Fact]
-        public void TheFixtureUrlIsWhatTheBuilderProduces()
+        public void BuiltUrlsAreValidStateUrls()
         {
-            var state = (StateMessage)MessageCodec.Decode(File.ReadAllText(Path.Combine(ProtocolFixturesTests.FixturesDir, "state.json")));
-            Assert.Equal(state.DashboardUrl, DashboardUrls.Build(IPAddress.Parse("192.168.1.20"), 8888, "Pit Board"));
-            Assert.Equal(state.IdleDashboardUrl, DashboardUrls.Build(IPAddress.Parse("192.168.1.20"), 8888, "Rig Clock"));
+            // The fixtures still show the spec's /dashboard/<name> form, a 404 on SimHub 9.12.6; the plugin sends
+            // /Dash#<name> (DashboardUrls.DashPagePrefix). Either way the URL must pass the state validation.
+            var url = DashboardUrls.Build(IPAddress.Parse("192.168.1.20"), 8888, "Pit Board");
+            var state = new StateMessage { DashboardUrl = url, IdleDashboardUrl = url, Audio = new AudioInfo { Port = 23712 } };
+            var decoded = (StateMessage)MessageCodec.Decode(MessageCodec.Encode(state));
+            Assert.Equal(url, decoded.DashboardUrl);
         }
 
         [Theory]
@@ -213,7 +216,7 @@ namespace RigPlayPlugin.Tests
                         t.Send(new PairRequestMessage { Pin = "123456" });
                         Assert.True(t.Expect<PairResultMessage>().Ok);
                         var state = t.Expect<StateMessage>();
-                        Assert.Equal("http://127.0.0.1:" + http.Port + "/dashboard/Pit%20Board", state.DashboardUrl);
+                        Assert.Equal("http://127.0.0.1:" + http.Port + "/Dash#Pit%20Board", state.DashboardUrl);
                         Assert.Null(state.IdleDashboardUrl);
                         Assert.True(state.DashboardServer.Reachable);
                         Assert.Equal(http.Port, state.DashboardServer.Port);
@@ -224,9 +227,9 @@ namespace RigPlayPlugin.Tests
                         host.DashboardSettingsChanged();
                         state = t.Expect<StateMessage>();
                         Assert.True((DateTime.UtcNow - before).TotalMilliseconds < 1000);
-                        Assert.Equal("http://127.0.0.1:" + http.Port + "/dashboard/Rig%20Clock", state.DashboardUrl);
+                        Assert.Equal("http://127.0.0.1:" + http.Port + "/Dash#Rig%20Clock", state.DashboardUrl);
                         // The fake tablet named idleDashboard, so it gets the idle URL.
-                        Assert.Equal("http://127.0.0.1:" + http.Port + "/dashboard/Pit%20Board", state.IdleDashboardUrl);
+                        Assert.Equal("http://127.0.0.1:" + http.Port + "/Dash#Pit%20Board", state.IdleDashboardUrl);
 
                         settings.SelectedDashboard = "";
                         host.DashboardSettingsChanged();
