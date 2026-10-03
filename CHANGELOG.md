@@ -24,8 +24,10 @@ works with SimHub on the PC. This build is for testing on a rig; the end-to-end 
 
 Known limits of this pre-release:
 
-- The APK attached to the release is built by CI: it is unsigned and carries no accessory identity,
-  so it cannot connect to an iPhone. Build it yourself with the identity as described in
+- The APK attached to the release, `rigPlay-0.1.0-rc.1.apk`, is built and signed locally and carries
+  the same experimental accessory identity DiPlay ships, so it connects to an iPhone. It is not an
+  Apple-issued identity; see `docs/THIRD_PARTY_NOTICES.md` ("Experimental authentication data") and
+  `SECURITY.md`. APKs built by CI carry no identity and cannot connect; to build your own, see
   `docs/BUILD.md` ("Accessory identity").
 - Wireless CarPlay on a tablet that is also on home Wi-Fi is not verified yet (#33); wired USB is
   the fallback.
