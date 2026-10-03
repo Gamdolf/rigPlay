@@ -34,6 +34,9 @@ SimHub, and say what you checked in the pull request.
 On the development host, `scripts/vm.sh plugin` builds, installs and restarts SimHub on the VM; see
 [docs/testing-vm.md](docs/testing-vm.md).
 
+`scripts/ci-local.sh` runs the same commands as `.github/workflows/ci.yml` (public-tree check, Gradle tests/lint/debug build, `dotnet test`, Release build). Run it before pushing; `--android` or `--plugin` runs one half.
+
+
 Never commit credentials, keystores, accessory identity files or APKs;
 `scripts/check_public_tree.py` fails CI if you do.
 
