@@ -164,9 +164,9 @@ namespace RigPlayPlugin.Tests
             Assert.NotNull(repaired.Telemetry);
             Assert.Equal(GpsStrategies.Off, new RigPlaySettings { Telemetry = new TelemetrySettings { GpsStrategy = "teleport" } }.Normalize().Telemetry.GpsStrategy);
 
-            // A schema 2 file has no Telemetry: it gets the defaults and moves to schema 3.
+            // A schema 2 file has no Telemetry: it gets the defaults and moves to the current schema.
             var old = JsonConvert.DeserializeObject<RigPlaySettings>("{\"SchemaVersion\":2,\"ControlPort\":23711,\"AudioPort\":23712}").Normalize();
-            Assert.Equal(3, old.SchemaVersion);
+            Assert.Equal(RigPlaySettings.CurrentSchemaVersion, old.SchemaVersion);
             Assert.True(old.Telemetry.SendSpeed);
 
             var custom = new RigPlaySettings { Telemetry = new TelemetrySettings { Enabled = false, SendRpm = false } }.Normalize();

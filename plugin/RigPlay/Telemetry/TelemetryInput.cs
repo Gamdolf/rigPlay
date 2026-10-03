@@ -33,6 +33,12 @@ namespace RigPlayPlugin.Telemetry
         public double Y;
         public double Z;
 
+        /// <summary>
+        /// Fraction of the lap driven, 0 ≤ p &lt; 1 (TrackPositionPercent; most games, iRacing included); NaN when unknown.
+        /// Strategy C (#44) maps it onto a recorded centreline.
+        /// </summary>
+        public double TrackPct;
+
         /// <summary>SimHub saw the session restart (StatusDataBase.IsSessionRestart).</summary>
         public bool SessionRestart;
 
@@ -41,6 +47,12 @@ namespace RigPlayPlugin.Telemetry
 
         /// <summary>Session type ("Practice", "Race", ...); read about once a second.</summary>
         public string SessionType;
+
+        /// <summary>The game's own track id (TrackCode, e.g. "spa gp" or "ks_nurburgring"); read about once a second.</summary>
+        public string TrackCode;
+
+        /// <summary>SimHub's game name (GameData.GameName, e.g. "IRacing", "AssettoCorsa"); read about once a second.</summary>
+        public string GameName;
 
         // Read about once a second (#45, #46).
 
@@ -75,6 +87,7 @@ namespace RigPlayPlugin.Telemetry
             X = double.NaN,
             Y = double.NaN,
             Z = double.NaN,
+            TrackPct = double.NaN,
             FuelPercent = double.NaN,
             Fuel = double.NaN,
             MaxFuel = double.NaN,
