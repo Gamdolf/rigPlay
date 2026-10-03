@@ -8,10 +8,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <application>
+    <application android:name="com.shilapi.xcertplay.RigPlayApplication">
         <activity android:name="com.shilapi.xcertplay.RigPlayActivity"
             android:exported="true" android:launchMode="singleTop"
             android:configChanges="density|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+            android:screenOrientation="sensorLandscape"
             android:theme="@style/Theme.Xcertplay">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -27,9 +28,19 @@
             android:exported="true"
             android:launchMode="singleTask"
             android:resizeableActivity="true"
-            android:screenOrientation="fullSensor"
+            android:screenOrientation="sensorLandscape"
             android:theme="@style/Theme.Xcertplay"
             android:windowSoftInputMode="adjustResize" />
+
+        <!-- SimHub dashboard (#30); cleartext http to the LAN is allowed by :shared's usesCleartextTraffic. -->
+        <activity
+            android:name="com.shilapi.xcertplay.DashboardActivity"
+            android:configChanges="density|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:hardwareAccelerated="true"
+            android:launchMode="singleTop"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@style/Theme.Xcertplay" />
 
         <activity
             android:name="com.shilapi.xcertplay.ImageCropActivity"

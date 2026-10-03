@@ -114,3 +114,35 @@ class SimHubLinkStatusTest {
         )
     }
 }
+
+/**
+ * Test sink: keeps the whole `status` (§6.7) and hands every change to [SimHubLink.send], so the
+ * bridge → link → plugin path can be checked end to end. Not used by the app, where
+ * `RigSessionLifecycle.publishStatus` is the single `status` sender.
+ */
+private class SimHubLinkStatus(private val link: SimHubLink) : SimHubStatusSink {
+    private var status: SimHubMessage.Status = SimHubMessage.Status.IDLE
+
+    val current: SimHubMessage.Status get() = synchronized(this) { status }
+
+    override fun updateNowPlaying(nowPlaying: NowPlaying?) = update { it.copy(nowPlaying = nowPlaying) }
+
+    override fun updatePhone(connected: Boolean, phoneName: String?) = update {
+        it.copy(
+            phoneConnected = connected,
+            phoneName = if (connected) phoneName else null,
+            nowPlaying = if (connected) it.nowPlaying else null,
+        )
+    }
+
+    fun updateScreen(screen: Screen) = update { it.copy(screen = screen) }
+
+    private inline fun update(change: (SimHubMessage.Status) -> SimHubMessage.Status) {
+        synchronized(this) {
+            val next = change(status)
+            if (next == status) return
+            status = next
+            link.send(next)
+        }
+    }
+}

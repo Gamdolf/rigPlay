@@ -664,7 +664,7 @@ class CarPlayHostActivity : ComponentActivity() {
             wifiRecoveryButton = this
         }, LinearLayout.LayoutParams(dp(300), dp(64)).apply { bottomMargin = dp(12) })
         panel.addView(Button(this).apply {
-            text = getString(R.string.back_to_rigplay); isAllCaps = false; textSize = 18f
+            text = getString(R.string.rig_rigplay_home); isAllCaps = false; textSize = 18f
             setTextColor(Color.rgb(12, 17, 27))
             background = GradientDrawable().apply { setColor(Color.rgb(166, 200, 255)); cornerRadius = dp(20).toFloat() }
             setOnClickListener { showRigPlayHome() }
@@ -2968,6 +2968,11 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun maybeStartCarPlay() {
         if (shuttingDown.get()) return
+        // #29: SimHub went away and dropped the phone; wait for it (or for a manual Connect phone).
+        if (controller == null && !CarPlayBackgroundSession.hasSession() && !RigSessionCoordinator.phoneConnectionAllowed) {
+            setConnectionStage(getString(R.string.rig_waiting_for_simhub))
+            return
+        }
         if (CarPlayBackgroundSession.hasSession() && !CarPlayBackgroundSession.isOwner(this)) {
             if (!adoptBackgroundSession()) mainHandler.postDelayed({ maybeStartCarPlay() }, 500)
             return
@@ -2992,6 +2997,10 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun reconnectAfterLoss(reason: String) {
         if (!CarPlayBackgroundSession.isOwner(this)) return
+        if (!RigSessionCoordinator.phoneConnectionAllowed) {
+            appendLog("$reason; not reconnecting while SimHub is down")
+            return
+        }
         if (shuttingDown.get() || menuOpen || handshakeResetInProgress) return
         if (reconnectScheduled) return
         reconnectScheduled = true
@@ -3417,7 +3426,14 @@ internal data class CarPlaySessionDisplay(
 
 /** Process-local hand-off for keeping the CarPlay session alive while no Activity is visible. */
 internal object CarPlayBackgroundSession {
+    /** Told (on any thread) when [active] or the stored session changes; set by RigSessionCoordinator (#29). */
+    @Volatile var onChanged: (() -> Unit)? = null
     @Volatile var active = false
+        set(value) {
+            val changed = field != value
+            field = value
+            if (changed) onChanged?.invoke()
+        }
     private var stopAction: (((() -> Unit)) -> Unit)? = null
     private var stopping = false
     private var owner: Any? = null
@@ -3474,6 +3490,7 @@ internal object CarPlayBackgroundSession {
         this.width = width
         this.height = height
         this.display = display
+        onChanged?.invoke()
     }
 
     @Synchronized
@@ -3486,5 +3503,6 @@ internal object CarPlayBackgroundSession {
         width = 0
         height = 0
         display = null
+        onChanged?.invoke()
     }
 }

@@ -2,13 +2,14 @@ package com.shilapi.xcertplay.simhub
 
 /**
  * Process-wide plug points between the CarPlay session and whoever owns the [SimHubLink] (the rig
- * session coordinator). The owner sets [audioTransport] and [statusSink] when it creates the link,
- * clears them when it stops the link, and forwards `command media` to [mediaBridge]:
+ * session coordinator, `RigSessionCoordinator`). The owner sets [audioTransport] when it creates the
+ * link and clears (and closes) it when it stops the link, plugs a [statusSink] into its single `status`
+ * sender, and forwards `command media` to [mediaBridge]:
  *
  * ```
  * SimHubEndpoints.audioTransport = SimHubLinkAudioTransport(link)
- * SimHubEndpoints.statusSink = SimHubLinkStatus(link)
- * // in SimHubLink.Listener.onCommand:
+ * SimHubEndpoints.statusSink = sinkFeedingTheOneStatusSender
+ * // on `command media`:
  * if (SimHubEndpoints.mediaBridge.onCommand(command) == SimHubMediaBridge.Result.UNAVAILABLE) {
  *     link.sendCommandUnavailable()
  * }

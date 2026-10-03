@@ -14,6 +14,7 @@ import com.shilapi.xcertplay.media.AudioOutputTarget
 import com.shilapi.xcertplay.orchestration.ManualHotspotBand
 import com.shilapi.xcertplay.orchestration.ManualHotspotSecurity
 import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
+import com.shilapi.xcertplay.simhub.SimHubProtocol
 import com.shilapi.xcertplay.transport.LockdownPairRecord
 import java.io.File
 
@@ -68,6 +69,14 @@ object AirPlayPersistence {
     private const val KEY_AUTO_START_ON_BOOT = "auto_start_on_boot"
     private const val KEY_LOCATION_REPORTING_ENABLED = "location_reporting_enabled"
     private const val KEY_AUDIO_OUTPUT_TARGET = "audio_output_target"
+    private const val KEY_SIMHUB_HOST_ID = "simhub_host_id"
+    private const val KEY_SIMHUB_HOST = "simhub_host"
+    private const val KEY_SIMHUB_PORT = "simhub_port"
+    private const val KEY_SIMHUB_NAME = "simhub_name"
+    private const val KEY_SIMHUB_TOKEN = "simhub_token"
+    private const val KEY_SIMHUB_CONTROL_PORT = "simhub_control_port"
+    private const val KEY_SIMHUB_DISCOVERY_PORT = "simhub_discovery_port"
+    private const val KEY_SIMHUB_TABLET_ID = "simhub_tablet_id"
     private const val SAFE_AREA_KEY_PREFIX = "safe_area_"
     private const val CUSTOM_ICON_FILE = "airplay-icon.png"
 
@@ -287,13 +296,102 @@ object AirPlayPersistence {
 
     fun loadAutoStartOnBoot(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getBoolean(KEY_AUTO_START_ON_BOOT, false)
+            .getBoolean(KEY_AUTO_START_ON_BOOT, true)
 
     fun saveAutoStartOnBoot(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_AUTO_START_ON_BOOT, enabled)
             .apply()
     }
+
+    // --- SimHub pairing (#27) -----------------------------------------------------------------
+    //
+    // simhub_token is a bearer credential (docs/protocol.md §15): whoever holds it can act as this
+    // tablet towards the paired PC. It lives in this app-private file like the CarPlay pairing keys,
+    // is excluded from backups (allowBackup=false), is never logged, and is only sent to the host
+    // whose welcome carries simhub_host_id.
+
+    /** The paired SimHub PC, or `null` while unpaired (no host id or no token). */
+    fun loadSimHubPairing(context: Context): SimHubPairing? {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val hostId = prefs.getString(KEY_SIMHUB_HOST_ID, null)?.takeIf { it.isNotBlank() } ?: return null
+        val token = prefs.getString(KEY_SIMHUB_TOKEN, null)?.takeIf { it.isNotBlank() } ?: return null
+        val host = prefs.getString(KEY_SIMHUB_HOST, null)?.takeIf { it.isNotBlank() } ?: return null
+        return SimHubPairing(
+            hostId = hostId,
+            host = host,
+            port = prefs.getInt(KEY_SIMHUB_PORT, loadSimHubControlPort(context)),
+            name = prefs.getString(KEY_SIMHUB_NAME, null)?.takeIf { it.isNotBlank() } ?: host,
+            token = token,
+        )
+    }
+
+    fun saveSimHubPairing(context: Context, pairing: SimHubPairing) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_SIMHUB_HOST_ID, pairing.hostId)
+            .putString(KEY_SIMHUB_HOST, pairing.host)
+            .putInt(KEY_SIMHUB_PORT, pairing.port)
+            .putString(KEY_SIMHUB_NAME, pairing.name)
+            .putString(KEY_SIMHUB_TOKEN, pairing.token)
+            .apply()
+    }
+
+    /** A beacon showed the paired PC at a new address (§9); keeps the credentials. */
+    fun saveSimHubAddress(context: Context, host: String, port: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_SIMHUB_HOST, host)
+            .putInt(KEY_SIMHUB_PORT, port)
+            .apply()
+    }
+
+    /** Forget on the tablet, `tokenInvalid` or `forgotten` (§8): drop the credentials and the PC. */
+    fun clearSimHubPairing(context: Context) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .remove(KEY_SIMHUB_HOST_ID)
+            .remove(KEY_SIMHUB_HOST)
+            .remove(KEY_SIMHUB_PORT)
+            .remove(KEY_SIMHUB_NAME)
+            .remove(KEY_SIMHUB_TOKEN)
+            .apply()
+    }
+
+    /** Default TCP port for a manually entered address without a port (Settings → SimHub → Advanced). */
+    fun loadSimHubControlPort(context: Context): Int = sanitizePort(
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt(KEY_SIMHUB_CONTROL_PORT, SimHubProtocol.CONTROL_PORT),
+        SimHubProtocol.CONTROL_PORT,
+    )
+
+    fun saveSimHubControlPort(context: Context, port: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_SIMHUB_CONTROL_PORT, sanitizePort(port, SimHubProtocol.CONTROL_PORT))
+            .apply()
+    }
+
+    /** UDP port the tablet listens on for beacons (Settings → SimHub → Advanced). */
+    fun loadSimHubDiscoveryPort(context: Context): Int = sanitizePort(
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt(KEY_SIMHUB_DISCOVERY_PORT, SimHubProtocol.DISCOVERY_PORT),
+        SimHubProtocol.DISCOVERY_PORT,
+    )
+
+    fun saveSimHubDiscoveryPort(context: Context, port: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_SIMHUB_DISCOVERY_PORT, sanitizePort(port, SimHubProtocol.DISCOVERY_PORT))
+            .apply()
+    }
+
+    /** Stable `hello.tabletId` (§6.1), created on first use. Survives Forget, as the PC keys tablets by it. */
+    @Synchronized
+    fun loadSimHubTabletId(context: Context): String {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        prefs.getString(KEY_SIMHUB_TABLET_ID, null)?.takeIf { it.isNotBlank() }?.let { return it }
+        val created = java.util.UUID.randomUUID().toString()
+        prefs.edit().putString(KEY_SIMHUB_TABLET_ID, created).apply()
+        return created
+    }
+
+    private fun sanitizePort(port: Int, fallback: Int): Int = if (port in 1..65535) port else fallback
 
     fun loadLocationReportingEnabled(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -606,4 +704,19 @@ object AirPlayPersistence {
 
     private fun safeAreaKey(widthPixels: Int, heightPixels: Int): String =
         "$SAFE_AREA_KEY_PREFIX${widthPixels}x$heightPixels"
+}
+
+/**
+ * The SimHub PC this tablet paired with (#27). [token] is a bearer credential: never log it (use
+ * [SimHubProtocol.redactToken]).
+ */
+data class SimHubPairing(
+    val hostId: String,
+    val host: String,
+    val port: Int,
+    val name: String,
+    val token: String,
+) {
+    override fun toString(): String =
+        "SimHubPairing(hostId=$hostId, host=$host, port=$port, name=$name, token=${SimHubProtocol.redactToken(token)})"
 }

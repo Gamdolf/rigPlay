@@ -317,16 +317,24 @@ class CarPlayController(
             uiListener?.onDeviceInfo(session, info)
         }
 
-        // The user tapped the car icon in CarPlay: show the head unit's own menu, like its Home button.
-        // The session keeps running in the background, so returning to rigPlay resumes CarPlay.
+        // The user tapped the OEM icon in CarPlay. The app supplies what it opens ([hostUiOpener]: the
+        // SimHub dashboard in rigPlay); without one, the launcher. The session keeps running.
         override fun onHostUiRequested(session: AirPlaySession) {
-            debugLog("CarPlay requested the car UI; opening the head-unit home screen")
-            runCatching {
-                appContext.startActivity(
-                    Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                )
-            }.onFailure { debugLog("Car home screen could not open: ${it.javaClass.simpleName}") }
+            val opener = hostUiOpener
+            val opened = opener != null && runCatching { opener(appContext) }
+                .onFailure { debugLog("Host UI could not open: ${it.javaClass.simpleName}") }
+                .getOrDefault(false)
+            if (opened) {
+                debugLog("CarPlay requested the host UI; opened the app's screen")
+            } else {
+                debugLog("CarPlay requested the host UI; opening the home screen")
+                runCatching {
+                    appContext.startActivity(
+                        Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }.onFailure { debugLog("Home screen could not open: ${it.javaClass.simpleName}") }
+            }
             uiListener?.onHostUiRequested(session)
         }
 
@@ -1958,6 +1966,12 @@ class CarPlayController(
 
     companion object {
         const val CONNECTION_DIAGNOSTIC_PREFIX = "CONNECTION_DIAGNOSTIC"
+
+        /**
+         * Opens the app's own screen when the user taps the OEM icon in CarPlay; returns true when
+         * it did. Set once by the app (rigPlay: the SimHub dashboard, #30). Called on a session thread.
+         */
+        @Volatile var hostUiOpener: ((Context) -> Boolean)? = null
         private val diagnosticAttempts = AtomicInteger()
         private const val IAP2_IPHONE_UUID = "00000000-deca-fade-deca-deafdecacafe"
         private const val HOTSPOT_START_TIMEOUT_MILLIS = 60_000L

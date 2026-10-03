@@ -54,14 +54,12 @@
     <string name="about_public_preview_prefix">Public preview ·\u0020</string>
     <string name="msg_tablet_hotspot_connect">rigPlay connects through the tablet hotspot “%1$s”. Turn it on in the tablet’s settings, then connect.</string>
     <string name="edit_saved_hotspot_prefix">Edit saved hotspot ·\u0020</string>
-    <string name="status_ready_for_prefix">Ready for\u0020</string>
     <string name="audio_stream_unavailable">Stream type %1$d is unavailable here (state=%2$d)</string>
     <string name="resolution_handshake_prefix">Handshake resolution:\u0020</string>
     <string name="safe_area_full_screen_at">Safe area: full screen at\u0020</string>
     <string name="safe_area_mapping_summary">Safe area: %1$d x %2$d at (%3$d, %4$d) in %5$d x %6$d</string>
     <string name="settings_android9_compat">The following settings are unavailable and hidden on Android 9 (API 28):\n• Wi-Fi P2P (5 GHz) — LocalOnlyHotspot is used instead.\n• HEVC software decoder — hardware decoding is used instead.</string>
     <string name="app_name">rigPlay</string>
-    <string name="carplay_on_your_rig">CarPlay on your rig.</string>
     <string name="a_previous_wi_fi_direct_connection_is_still_running_reset">A previous Wi-Fi Direct connection is still running. Reset it to connect.</string>
     <string name="about">About</string>
     <string name="about_rigplay">About rigPlay</string>
@@ -85,13 +83,10 @@
     <string name="auto">Auto</string>
     <string name="auto_start_on_boot">Auto-start on boot</string>
     <string name="automatic_connection">Automatic connection</string>
-    <string name="boot_start_may_be_blocked">Some tablets block apps from starting at boot. Check the tablet’s startup and battery settings.</string>
     <string name="back">Back</string>
-    <string name="back_to_rigplay">Back to rigPlay</string>
     <string name="band">Band</string>
     <string name="bluetooth_settings">Bluetooth settings</string>
     <string name="cancel">Cancel</string>
-    <string name="home_screen">Home screen</string>
     <string name="tablet_hotspot_details">Tablet hotspot details</string>
     <string name="tablet_hotspot_is_off">Tablet hotspot is off</string>
     <string name="carplay">CarPlay</string>
@@ -99,7 +94,6 @@
     <string name="carplay_connected">CarPlay connected</string>
     <string name="carplay_control_running">CarPlay control running</string>
     <string name="carplay_control_window_ended">CarPlay control window ended</string>
-    <string name="carplay_icon">CarPlay icon</string>
     <string name="carplay_service_already_running">CarPlay service already running</string>
     <string name="carplay_session_already_running">CarPlay session already running</string>
     <string name="carplay_session_ended_reconnecting">CarPlay session ended; reconnecting</string>
@@ -193,7 +187,6 @@
     <string name="longest_height">Longest height</string>
     <string name="looking_for_your_paired_iphone">Looking for your paired iPhone…</string>
     <string name="made_possible_by_open_source">Made possible by open source</string>
-    <string name="make_rigplay_feel_right_for_your_rig">Make rigPlay feel right for your rig.</string>
     <string name="manual_hotspot">Manual hotspot</string>
     <string name="manufacturer">Manufacturer</string>
     <string name="mfi_authentication_ready">MFi authentication ready</string>
@@ -206,7 +199,6 @@
     <string name="oem_label">OEM label</string>
     <string name="on_your_iphone_open_settings_bluetooth_and_pair_with_the_tablet">On your iPhone, open Settings → Bluetooth and pair with the tablet. Then return to rigPlay and choose Connect phone.</string>
     <string name="open">Open</string>
-    <string name="open_when_the_tablet_boots">Open when the tablet boots</string>
     <string name="open_bluetooth">Open Bluetooth</string>
     <string name="open_tablet_hotspot_settings">Open tablet hotspot settings</string>
     <string name="open_tablet_settings">Open tablet settings</string>
@@ -226,7 +218,6 @@
     <string name="physical_length">Physical length</string>
     <string name="physical_size_basis">Physical size basis</string>
     <string name="place_carplay_dock_on_the_right">Place CarPlay’s dock on the right side of the screen.</string>
-    <string name="plug_your_iphone_into_the_tablet_usb_port">Plug your iPhone into the tablet’s USB port.\nAllow CarPlay when your iPhone asks.</string>
     <string name="prefer_a_cable">Prefer a cable?</string>
     <string name="preparing_mfi_authentication">Preparing MFi authentication</string>
     <string name="ready">Ready</string>
@@ -305,7 +296,6 @@
     <string name="use_hevc_leave_off_for_the_widest_tablet_compatibility">Use HEVC. Leave off for the widest tablet compatibility.</string>
     <string name="use_software_hevc_decoder">Use software HEVC decoder</string>
     <string name="use_usage_content_type_routing_instead_of_stream_type">Use usage / content-type routing instead of stream type</string>
-    <string name="use_your_last_connection_type_and_selected_iphone">Use your last connection type and selected iPhone.</string>
     <string name="vpn_consent_was_denied">VPN consent was denied</string>
     <string name="waiting_for_iphone_over_usb">Waiting for iPhone over USB</string>
     <string name="waiting_for_paired_iphone">Waiting for paired iPhone</string>
@@ -314,7 +304,6 @@
     <string name="wi_fi_session">Wi-Fi session</string>
     <string name="widest_width">Widest width</string>
     <string name="window">Window</string>
-    <string name="wireless_carplay">WIRELESS CARPLAY</string>
     <string name="wireless_carplay_2">Wireless CarPlay</string>
     <string name="wireless_carplay_active">Wireless CarPlay active</string>
     <string name="wireless_carplay_control_running">Wireless CarPlay control running</string>
@@ -328,8 +317,6 @@
     <string name="wpa3_transition">WPA3 transition</string>
     <string name="your_rig_your_way">Your rig, your way.</string>
     <string name="your_iphone_isn_t_available_unlock_it_and_check_bluetooth">Your iPhone isn’t available. Unlock it and check Bluetooth.</string>
-    <string name="your_maps_music_and_conversations_carplay_right_here_on_yo">Your maps, music and conversations.\nCarPlay, right here on the tablet on your rig.</string>
-    <string name="your_phone_your_rig">YOUR PHONE. YOUR RIG.</string>
     <string name="your_report_was_saved_to_the_selected_location">Your report was saved to the selected location.</string>
     <string name="option_size_large">Large</string>
     <string name="option_size_medium">Medium</string>
