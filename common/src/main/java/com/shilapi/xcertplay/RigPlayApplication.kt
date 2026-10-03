@@ -7,9 +7,18 @@ import com.shilapi.xcertplay.orchestration.CarPlayController
 
 /**
  * Creates the process-wide SimHub link owner at process start, before any activity or receiver runs,
- * and tells it which rigPlay screen is in the foreground (`status.screen`, #29).
+ * and tells it which rigPlay screen is in the foreground (`status.screen`, #29). Owns the dashboard
+ * page (#51), created on the first dashboard SimHub names and kept loaded between opens.
  */
 class RigPlayApplication : Application() {
+    private var dashboardCreated = false
+
+    /** The process's dashboard page; [DashboardActivity] shows it. Main thread. */
+    val dashboard: DashboardWebViewHolder<DashboardWebViewSurface> by lazy {
+        dashboardCreated = true
+        DashboardWebViewSurface.newHolder(this)
+    }
+
     override fun onCreate() {
         super.onCreate()
         RigSessionCoordinator.init(this)
@@ -19,6 +28,20 @@ class RigPlayApplication : Application() {
             RigSessionCoordinator.showDashboard(context)
             true
         }
+        // Warm load (#51): the page starts loading when SimHub names a dashboard, not on the first tap.
+        RigSessionCoordinator.addObserver(::onSimHubChanged)
+        onSimHubChanged()
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (dashboardCreated) dashboard.onTrimMemory(level)
+    }
+
+    private fun onSimHubChanged() {
+        val content = DashboardContent.resolve(RigSessionCoordinator.state, RigSessionCoordinator.isPaired)
+        // No WebView at all until there is a dashboard to load.
+        if (content is DashboardContent.Load || dashboardCreated) dashboard.update(content)
     }
 
     private class ForegroundTracker : ActivityLifecycleCallbacks {

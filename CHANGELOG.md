@@ -2,6 +2,8 @@
 
 - Dashboard screen: SimHub's web dash toolbar and swipe help are hidden, so the dashboard fills
   the tablet without tapping Fullscreen (#50).
+- Dashboard screen: the page loads as soon as SimHub names a dashboard and stays loaded between
+  opens, so the SimHub button and the CarPlay car icon show it at once instead of reloading it (#51).
 
 # rigPlay 0.1.0-rc.1 — 2026-10-03
 
