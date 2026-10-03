@@ -32,7 +32,8 @@ sealed class DashboardContent {
             if (!paired) return NotPaired
             if (!state.paired) return Disconnected
             if (!state.dashboardServerReachable) return ServerOff
-            val url = state.dashboardUrl ?: return NoDashboard
+            // SimHub's own toolbar off (#50): the dashboard fills the screen with no tap.
+            val url = SimHubDashPage.withoutChrome(state.dashboardUrl ?: return NoDashboard)
             return Load(url, state.host?.let { DashboardUrls.withHost(url, it) })
         }
     }
@@ -46,7 +47,7 @@ object DashboardUrls {
      * forward): the address the tablet connected to is then the one that works.
      */
     fun withHost(url: String, host: String): String? {
-        val uri = runCatching { URI(url) }.getOrNull() ?: return null
+        val uri = parse(url) ?: return null
         val current = uri.host ?: return null
         val bare = host.removePrefix("[").removeSuffix("]")
         if (current.removePrefix("[").removeSuffix("]").equals(bare, ignoreCase = true)) return null
@@ -56,16 +57,22 @@ object DashboardUrls {
         val rest = buildString {
             append(uri.rawPath ?: "")
             uri.rawQuery?.let { append('?').append(it) }
-            uri.rawFragment?.let { append('#').append(it) }
+            if ('#' in url) append('#').append(url.substringAfter('#'))
         }
         return "${uri.scheme}://$userInfo$authorityHost$port$rest"
     }
 
     /** Host and port to probe for [url] (default 80 for http). */
     fun endpoint(url: String): Pair<String, Int>? {
-        val uri = runCatching { URI(url) }.getOrNull() ?: return null
+        val uri = parse(url) ?: return null
         val host = uri.host?.removePrefix("[")?.removeSuffix("]") ?: return null
         val port = if (uri.port >= 0) uri.port else if (uri.scheme.equals("https", true)) 443 else 80
         return host to port
     }
+
+    /**
+     * [url] without its fragment, which is kept verbatim by the callers: SimHub's `|` flags (#50)
+     * are not legal in a java.net.URI fragment.
+     */
+    private fun parse(url: String): URI? = runCatching { URI(url.substringBefore('#')) }.getOrNull()
 }

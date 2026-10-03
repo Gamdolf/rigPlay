@@ -13,6 +13,7 @@ import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -43,6 +44,9 @@ class DashboardActivity : ComponentActivity() {
     private var overlayText: TextView? = null
     private var retryButton: Button? = null
     private var returnButton: Button? = null
+    private var root: FrameLayout? = null
+    private var fullscreenView: View? = null
+    private var fullscreenCallback: WebChromeClient.CustomViewCallback? = null
     private var shown: DashboardContent? = null
     private var attempt: Attempt? = null
     private val observer: () -> Unit = { render() }
@@ -61,7 +65,9 @@ class DashboardActivity : ComponentActivity() {
         RigSessionCoordinator.init(this)
         setContentView(buildContent())
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() = returnToCarPlay()
+            override fun handleOnBackPressed() {
+                if (fullscreenView != null) exitFullscreen() else returnToCarPlay()
+            }
         })
     }
 
@@ -100,6 +106,7 @@ class DashboardActivity : ComponentActivity() {
             settings.useWideViewPort = true
             settings.loadWithOverviewMode = true
             webViewClient = Client()
+            webChromeClient = Chrome()
         }
         root.addView(web, FrameLayout.LayoutParams(-1, -1))
         val message = LinearLayout(this).apply {
@@ -133,6 +140,7 @@ class DashboardActivity : ComponentActivity() {
         root.addView(back, FrameLayout.LayoutParams(-2, dp(44), Gravity.TOP or Gravity.END).apply {
             topMargin = dp(12); marginEnd = dp(12)
         })
+        this.root = root
         webView = web; overlay = message; overlayText = messageText; retryButton = retry; returnButton = back
         return root
     }
@@ -165,7 +173,7 @@ class DashboardActivity : ComponentActivity() {
         Log.i(TAG, "loading dashboard ${next.url}${if (next.usingFallback) " (connected host)" else ""}")
         overlay?.visibility = View.GONE
         webView?.visibility = View.VISIBLE
-        webView?.loadUrl(next.url)
+        webView?.let { loadDocument(it, next.url) }
         val fallback = next.content.fallbackUrl
         if (!next.usingFallback && fallback != null) probe(next)
     }
@@ -225,12 +233,67 @@ class DashboardActivity : ComponentActivity() {
 
         override fun onPageFinished(view: WebView, url: String) {
             val current = attempt ?: return
-            if (url == "about:blank" || failedSerial == current.serial || loaded) return
+            if (url == "about:blank" || failedSerial == current.serial) return
             // A failed URL as given still reports onPageFinished after the switch to the fallback.
             if (DashboardUrls.endpoint(url)?.first != DashboardUrls.endpoint(current.url)?.first) return
+            // Every load of the page, including SimHub's own reloads; `#` changes keep the document.
+            hideChrome(view, url)
+            if (loaded) return
             loaded = true
             Log.i(TAG, "dashboard loaded from ${if (current.usingFallback) "the connected host" else "the URL as given"}: ${current.url}")
         }
+    }
+
+    /**
+     * Loads [url] as a new document. From `/Dash#A` to `/Dash#B` loadUrl would only change the
+     * fragment, which SimHub's page ignores: the page is replaced and reloaded instead.
+     */
+    private fun loadDocument(view: WebView, url: String) {
+        if (SimHubDashPage.sameDocument(view.url, url)) {
+            view.evaluateJavascript(SimHubDashPage.reloadScript(url), null)
+        } else {
+            view.loadUrl(url)
+        }
+    }
+
+    /** SimHub's toolbar off even if its `nocontrols` flag is ignored (#50, see [SimHubDashPage]). */
+    private fun hideChrome(view: WebView, url: String) {
+        val script = SimHubDashPage.scriptAfterLoad(url) ?: return
+        view.evaluateJavascript(script) { result -> Log.d(TAG, "web dash chrome: $result") }
+    }
+
+    /**
+     * The Fullscreen API (#50): without onShowCustomView a page's `requestFullscreen()` goes nowhere.
+     * The WebView is already immersive and edge to edge, so the full-screen view simply covers it.
+     */
+    private inner class Chrome : WebChromeClient() {
+        override fun onShowCustomView(view: View, callback: CustomViewCallback) {
+            val parent = root
+            if (parent == null || fullscreenView != null) {
+                callback.onCustomViewHidden()
+                return
+            }
+            fullscreenView = view
+            fullscreenCallback = callback
+            view.setBackgroundColor(Color.BLACK)
+            // Below the return button, which stays the last child.
+            parent.addView(view, parent.childCount - 1, FrameLayout.LayoutParams(-1, -1))
+            RigTabletWindow.immersive(window, edgeToEdge = true)
+        }
+
+        override fun onHideCustomView() = removeFullscreenView()
+    }
+
+    private fun exitFullscreen() {
+        val callback = fullscreenCallback
+        removeFullscreenView()
+        callback?.onCustomViewHidden()
+    }
+
+    private fun removeFullscreenView() {
+        fullscreenView?.let { root?.removeView(it) }
+        fullscreenView = null
+        fullscreenCallback = null
     }
 
     /** Back to CarPlay without touching the session, or to the rigPlay home when no phone is connected. */

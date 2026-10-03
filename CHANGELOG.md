@@ -1,6 +1,7 @@
 # rigPlay 0.1.0 — unreleased
 
-- Nothing yet since 0.1.0-rc.1. Changes for the final 0.1.0 go here.
+- Dashboard screen: SimHub's web dash toolbar and swipe help are hidden, so the dashboard fills
+  the tablet without tapping Fullscreen (#50).
 
 # rigPlay 0.1.0-rc.1 — 2026-10-03
 
