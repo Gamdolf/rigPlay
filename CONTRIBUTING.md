@@ -62,3 +62,9 @@ ships with; leave it empty while undecided.
 - User-visible changes get a line in `CHANGELOG.md` under the upcoming
   `# rigPlay X.Y.Z — unreleased` section.
 
+## Releases
+
+`VERSION` holds the version. Pushing a tag `v<VERSION>` (for example `v0.1.0`, or `v0.1.0-rc.1`
+for a pre-release) runs `.github/workflows/release.yml`. It refuses the tag unless it matches
+`VERSION` and `CHANGELOG.md` has a section for it, then publishes the APK and `rigPlay-plugin.zip`.
+A tag on a commit that is not on `main` produces a draft release, which is how to test the workflow.

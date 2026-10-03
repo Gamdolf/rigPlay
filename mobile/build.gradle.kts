@@ -46,7 +46,10 @@ android {
             optimization {
                 enable = false
             }
-            signingConfig = signingConfigs.getByName("release")
+            // Signed only when a keystore is provided; otherwise assembleRelease yields an unsigned APK.
+            if (providers.environmentVariable("ANDROID_KEYSTORE_PATH").isPresent) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {
