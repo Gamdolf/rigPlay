@@ -29,9 +29,6 @@ import android.widget.*
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
 import java.io.File
@@ -60,6 +57,7 @@ class RigPlayActivity : ComponentActivity() {
     private var simhubContainer: LinearLayout? = null
     private var simhubRendered: Any? = null
     private var simhubStatusView: TextView? = null
+    private var homeSimHubStatus: TextView? = null
     private val simhubObserver: () -> Unit = { onSimHubChanged() }
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         connect(notificationTransport)
@@ -89,12 +87,9 @@ class RigPlayActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         languagePreferenceAtCreate = AppLocale.preference(this)
-        WindowCompat.setDecorFitsSystemWindows(window, true)
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.statusBarColor = BG; window.navigationBarColor = BG
-        WindowInsetsControllerCompat(window, window.decorView).apply {
-            isAppearanceLightStatusBars = false
-            hide(WindowInsetsCompat.Type.statusBars())
-        }
+        RigTabletWindow.immersive(window)
         setupError = runCatching { RigPlayBootstrap.ensure(this) }.exceptionOrNull()?.let {
             android.util.Log.e("RigPlaySetup", "CarPlay authentication could not be loaded", it)
             getString(R.string.setup_error_auth)
@@ -138,6 +133,11 @@ class RigPlayActivity : ComponentActivity() {
             }
         }
     }
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) RigTabletWindow.immersive(window)
+    }
+
     override fun onPause() {
         handler.removeCallbacks(tick)
         RigSessionCoordinator.removeObserver(simhubObserver)
@@ -182,17 +182,16 @@ class RigPlayActivity : ComponentActivity() {
 
     private fun render() {
         status = null; connectButton = null; disconnectButton = null; lastRunning = null
-        simhubContainer = null; simhubRendered = null; simhubStatusView = null
+        simhubContainer = null; simhubRendered = null; simhubStatusView = null; homeSimHubStatus = null
         val scroll = ScrollView(this).apply { setBackgroundColor(BG); isFillViewport = true; clipToPadding = false }
         val content = column().apply { setPadding(dp(32), dp(24), dp(32), dp(32)) }
         scroll.addView(content)
         val header = row().apply { gravity = Gravity.CENTER_VERTICAL }
         header.addView(ImageView(this).apply { setImageResource(R.drawable.ic_rigplay); contentDescription = getString(R.string.carplay) }, LinearLayout.LayoutParams(dp(36), dp(36)))
         header.addView(label(getString(R.string.rigplay), 26, TEXT, true).apply { setPadding(dp(12), 0, 0, 0) }, LinearLayout.LayoutParams(0, dp(56), 1f))
-        header.addView(button(if (page == "home") getString(R.string.car_home) else getString(R.string.back), false) {
-            if (page == "home") startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME))
-            else showPage("home")
-        }, LinearLayout.LayoutParams(dp(130), dp(56)))
+        if (page != "home") {
+            header.addView(button(getString(R.string.back), false) { showPage("home") }, LinearLayout.LayoutParams(dp(130), dp(56)))
+        }
         content.addView(header)
         content.addView(space(24))
         when (page) {
@@ -206,76 +205,93 @@ class RigPlayActivity : ComponentActivity() {
         refreshStatus()
     }
 
+    /** The rig control panel (#28): SimHub and iPhone status on the left, actions on the right. */
     private fun home(content: LinearLayout) {
         val wide = resources.configuration.screenWidthDp >= 850
-        val body = column()
-        val left = column()
-        left.addView(label(getString(R.string.your_phone_your_drive), 12, ACCENT, true).apply { letterSpacing = .16f })
-        left.addView(label(getString(R.string.a_familiar_drive), if (wide) 42 else 36, TEXT, true).apply { setPadding(0, dp(12), 0, dp(10)) })
-        left.addView(label(getString(R.string.your_maps_music_and_conversations_carplay_right_here_on_yo), 19, MUTED))
-        val card = card()
-        card.addView(label(getString(R.string.wireless_carplay), 12, ACCENT, true).apply { letterSpacing = .12f })
-        status = label(getString(R.string.ready_when_you_are), 24, TEXT, true).apply { setPadding(0, dp(10), 0, dp(16)) }
-        card.addView(status)
-        connectButton = button(getString(R.string.connect_phone), true) {
-            if (CarPlayBackgroundSession.hasSession()) openProjection()
-            else connect(true)
+        val statusColumn = column()
+
+        val simhubCard = card()
+        simhubCard.addView(label(getString(R.string.rig_home_simhub_label), 12, ACCENT, true).apply { letterSpacing = .12f })
+        homeSimHubStatus = label(simHubStatusText(), 24, TEXT, true).apply {
+            setPadding(0, dp(10), 0, 0); accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         }
-        card.addView(connectButton, matchButton())
+        simhubCard.addView(homeSimHubStatus)
+        if (!RigSessionCoordinator.isPaired) {
+            simhubCard.addView(button(getString(R.string.rig_settings_simhub_pair), false) {
+                RigSessionCoordinator.onboardingSkipped = false
+                showPage("simhub")
+            }, matchButton(16, 56))
+        }
+        statusColumn.addView(simhubCard)
+        statusColumn.addView(space(18))
+
+        val phoneCard = card()
+        phoneCard.addView(label(getString(R.string.rig_home_phone_label), 12, ACCENT, true).apply { letterSpacing = .12f })
+        status = label(getString(R.string.ready_when_you_are), 24, TEXT, true).apply {
+            setPadding(0, dp(10), 0, 0); accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        phoneCard.addView(status)
         val connectionHint = when (AirPlayPersistence.loadWirelessHotspotMode(this)) {
             WirelessHotspotMode.MANUAL -> getString(R.string.hotspot_hint_manual)
             WirelessHotspotMode.LOCAL_ONLY_HOTSPOT -> getString(R.string.hotspot_hint_local)
             else -> getString(R.string.hotspot_hint_p2p)
         }
-        card.addView(label(connectionHint, 15, MUTED).apply { setPadding(0, dp(14), 0, 0) })
+        phoneCard.addView(label(connectionHint, 15, MUTED).apply { setPadding(0, dp(12), 0, 0) })
         if (carHotspotOff()) {
-            card.addView(label(getString(R.string.msg_car_hotspot_off, AirPlayPersistence.loadManualHotspotSsid(this)), 15, WARNING).apply { setPadding(0, dp(14), 0, 0) })
-            card.addView(button(getString(R.string.open_car_hotspot_settings), false) { openCarWifiSettings() }, matchButton(10, 56))
+            phoneCard.addView(label(getString(R.string.msg_car_hotspot_off, AirPlayPersistence.loadManualHotspotSsid(this)), 15, WARNING).apply { setPadding(0, dp(14), 0, 0) })
+            phoneCard.addView(button(getString(R.string.open_car_hotspot_settings), false) { openCarWifiSettings() }, matchButton(10, 56))
         }
-        card.addView(button(getString(R.string.choose_iphone), false) { choosePhone() }, matchButton(16, 56))
         disconnectButton = button(getString(R.string.disconnect), false) {
             disconnectButton?.isEnabled = false
             CarPlayBackgroundSession.stop { runOnUiThread { refreshStatus() } }
         }.apply { visibility = View.GONE }
-        card.addView(disconnectButton, matchButton(10, 56))
-        val right = column().apply { gravity = Gravity.CENTER_HORIZONTAL }
-        val logo = ImageView(this).apply {
-            setImageResource(R.drawable.ic_rigplay)
-            contentDescription = getString(R.string.carplay_icon)
-            scaleType = ImageView.ScaleType.FIT_CENTER
+        phoneCard.addView(disconnectButton, matchButton(16, 56))
+        statusColumn.addView(phoneCard)
+        setupError?.let { statusColumn.addView(label(it, 16, WARNING).apply { setPadding(0, dp(16), 0, 0) }) }
+
+        val actions = column()
+        connectButton = button(getString(R.string.connect_phone), true) {
+            if (CarPlayBackgroundSession.hasSession()) openProjection()
+            else connect(true)
         }
-        val branding = column().apply {
-            gravity = Gravity.CENTER
-            addView(logo, LinearLayout.LayoutParams(dp(96), dp(96)))
-        }
-        right.addView(button(getString(R.string.connect_with_usb), false) { connect(false) }, matchButton())
-        right.addView(label(getString(R.string.plug_your_iphone_into_a_usb_data_port_allow_carplay_when_y), 14, MUTED).apply { gravity = Gravity.CENTER; setPadding(dp(8), dp(10), dp(8), dp(24)) })
-        right.addView(button(getString(R.string.settings), false) { page = "settings"; render() }, matchButton())
-        right.addView(label(getString(R.string.make_rigplay_feel_right_for_your_car), 14, MUTED).apply { gravity = Gravity.CENTER; setPadding(0, dp(10), 0, dp(24)) })
-        right.addView(label("${getString(R.string.home_public_preview)}${version()}", 12, MUTED).apply { letterSpacing = .08f })
+        actions.addView(connectButton, matchButton())
+        actions.addView(button(getString(R.string.connect_with_usb), false) { connect(false) }, matchButton(12, 60))
+        actions.addView(button(getString(R.string.choose_iphone), false) { choosePhone() }, matchButton(12, 60))
+        homeExtraActions(actions)
+        actions.addView(button(getString(R.string.settings), false) { showPage("settings") }, matchButton(12, 60))
+        actions.addView(button(getString(R.string.about), false) { showPage("about") }, matchButton(12, 60))
+        actions.addView(label("${getString(R.string.home_public_preview)}${version()}", 12, MUTED).apply {
+            letterSpacing = .08f; gravity = Gravity.CENTER; setPadding(0, dp(16), 0, 0)
+        })
+
         if (wide) {
-            // Both rows share column widths. The USB button starts at the wireless
-            // card's top edge, independently of hero wrapping or font scaling.
-            fun columns(first: View, second: View, stretchSecond: Boolean = false) = row().apply {
+            content.addView(row().apply {
                 gravity = Gravity.TOP
-                addView(first, LinearLayout.LayoutParams(0, -2, 1.6f))
+                addView(statusColumn, LinearLayout.LayoutParams(0, -2, 1.6f))
                 addView(space(40), LinearLayout.LayoutParams(dp(40), 1))
-                addView(second, LinearLayout.LayoutParams(0, if (stretchSecond) -1 else -2, 1f))
-            }
-            body.addView(columns(left, branding, true))
-            body.addView(space(26))
-            body.addView(columns(card, right))
+                addView(actions, LinearLayout.LayoutParams(0, -2, 1f))
+            })
         } else {
-            body.addView(left)
-            body.addView(space(26))
-            body.addView(card)
-            body.addView(space(26))
-            body.addView(branding)
-            body.addView(space(24))
-            body.addView(right)
+            content.addView(statusColumn)
+            content.addView(space(24))
+            content.addView(actions)
         }
-        setupError?.let { body.addView(label(it, 16, WARNING).apply { setPadding(0, dp(16), 0, 0) }) }
-        content.addView(body)
+    }
+
+    /** Buttons added by later tickets between "Choose iPhone" and "Settings". */
+    private fun homeExtraActions(actions: LinearLayout) = Unit
+
+    private fun phoneStatusText(): String {
+        val running = CarPlayBackgroundSession.hasSession()
+        val chosen = RigPlayPreferences.phoneAddress(this) != null
+        val name = RigPlayPreferences.phoneName(this)
+        return when {
+            setupError != null -> getString(R.string.setup_needs_attention)
+            CarPlayBackgroundSession.active -> if (chosen) getString(R.string.rig_home_phone_connected, name) else getString(R.string.carplay_connected)
+            running -> if (chosen) getString(R.string.rig_home_phone_connecting, name) else getString(R.string.connecting_to_your_iphone)
+            chosen -> getString(R.string.rig_home_phone_waiting, name)
+            else -> getString(R.string.rig_home_phone_none)
+        }
     }
 
     private fun settings(content: LinearLayout) {
@@ -297,8 +313,8 @@ class RigPlayActivity : ComponentActivity() {
             card.addView(label(destination + getString(R.string.nothing_is_sent_automatically_protocol_payloads_and_creden), 14, MUTED).apply { setPadding(0, dp(12), 0, 0) })
         }
         section(content, getString(R.string.automatic_connection), R.drawable.ic_dp_automation) { card ->
-            toggle(card, getString(R.string.connect_when_rigplay_opens), getString(R.string.use_your_last_connection_type_and_selected_iphone), RigPlayPreferences.autoConnect(this)) { RigPlayPreferences.saveAutoConnect(this, it) }
-            toggle(card, getString(R.string.open_after_the_car_starts), getString(R.string.availability_depends_on_your_head_unit_s_startup_settings), AirPlayPersistence.loadAutoStartOnBoot(this)) { AirPlayPersistence.saveAutoStartOnBoot(this, it) }
+            toggle(card, getString(R.string.connect_when_rigplay_opens), getString(R.string.rig_connect_automatically_desc), RigPlayPreferences.autoConnect(this)) { RigPlayPreferences.saveAutoConnect(this, it) }
+            toggle(card, getString(R.string.rig_open_after_boot), getString(R.string.rig_open_after_boot_desc), AirPlayPersistence.loadAutoStartOnBoot(this)) { AirPlayPersistence.saveAutoStartOnBoot(this, it) }
             card.addView(button("${getString(R.string.choose_iphone_prefix)}${RigPlayPreferences.phoneName(this)}", false) { choosePhone() }, matchButton(12, 60))
         }
         section(content, getString(R.string.display_and_performance), R.drawable.ic_dp_display) { card ->
@@ -989,14 +1005,9 @@ class RigPlayActivity : ComponentActivity() {
 
     private fun refreshStatus() {
         simhubStatusView?.text = simHubStatusText()
+        homeSimHubStatus?.text = simHubStatusText()
         val running = CarPlayBackgroundSession.hasSession()
-        status?.text = when {
-            setupError != null -> getString(R.string.setup_needs_attention)
-            CarPlayBackgroundSession.active -> getString(R.string.carplay_connected)
-            running -> getString(R.string.connecting_to_your_iphone)
-            RigPlayPreferences.phoneAddress(this) != null -> "${getString(R.string.status_ready_for_prefix)}${RigPlayPreferences.phoneName(this)}"
-            else -> getString(R.string.ready_when_you_are)
-        }
+        status?.text = phoneStatusText()
         if (lastRunning != running) {
             connectButton?.text = if (running) getString(R.string.open_carplay) else getString(R.string.connect_phone)
             disconnectButton?.visibility = if (running) View.VISIBLE else View.GONE

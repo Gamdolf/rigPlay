@@ -674,7 +674,7 @@ class CarPlayHostActivity : ComponentActivity() {
             wifiRecoveryButton = this
         }, LinearLayout.LayoutParams(dp(300), dp(64)).apply { bottomMargin = dp(12) })
         panel.addView(Button(this).apply {
-            text = getString(R.string.back_to_rigplay); isAllCaps = false; textSize = 18f
+            text = getString(R.string.rig_rigplay_home); isAllCaps = false; textSize = 18f
             setTextColor(Color.rgb(12, 17, 27))
             background = GradientDrawable().apply { setColor(Color.rgb(166, 200, 255)); cornerRadius = dp(20).toFloat() }
             setOnClickListener { showRigPlayHome() }

@@ -53,7 +53,7 @@ internal object RigPlayPreferences {
     fun savePhone(context: Context, address: String, name: String) {
         prefs(context).edit().putString("phone_address", address).putString("phone_name", name).apply()
     }
-    fun autoConnect(context: Context) = prefs(context).getBoolean("auto_connect", false)
+    fun autoConnect(context: Context) = prefs(context).getBoolean("auto_connect", true)
     fun saveAutoConnect(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean("auto_connect", value).apply()
     }

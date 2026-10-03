@@ -55,4 +55,16 @@
     <string name="rig_settings_simhub_discovery_port">Discovery port (UDP) · %1$d</string>
     <string name="rig_settings_simhub_port_invalid">Enter a port between 1 and 65535.</string>
     <string name="rig_settings_simhub_ports_note">Change these only if you changed them in the plugin. The control port is used for addresses entered without a port; a paired PC\'s port follows its beacon.</string>
+
+    <!-- Rig home and tablet settings (#28) -->
+    <string name="rig_home_simhub_label">SIMHUB</string>
+    <string name="rig_home_phone_label">IPHONE</string>
+    <string name="rig_home_phone_connected">%1$s connected</string>
+    <string name="rig_home_phone_connecting">Connecting to %1$s…</string>
+    <string name="rig_home_phone_waiting">Waiting for %1$s</string>
+    <string name="rig_home_phone_none">No iPhone chosen yet</string>
+    <string name="rig_rigplay_home">rigPlay home</string>
+    <string name="rig_open_after_boot">Open rigPlay when the tablet starts</string>
+    <string name="rig_open_after_boot_desc">Brings rigPlay back to the screen after a reboot.</string>
+    <string name="rig_connect_automatically_desc">Uses your last connection type and selected iPhone. With a paired SimHub PC, the iPhone connects whenever SimHub is running.</string>
 </resources>
