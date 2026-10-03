@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.media
 
 import com.shilapi.xcertplay.simhub.AudioDatagram
+import com.shilapi.xcertplay.simhub.AudioDirection
 import com.shilapi.xcertplay.simhub.AudioHeader
 import com.shilapi.xcertplay.simhub.AudioStream
 import com.shilapi.xcertplay.simhub.SimHubAudioCodec
@@ -13,7 +14,7 @@ import org.junit.Test
 class PcmPacketizerTest {
     private fun collect(packetizer: PcmPacketizer, block: (PcmPacketizer, (ByteArray, Int) -> Unit) -> Unit): List<AudioDatagram> {
         val out = mutableListOf<AudioDatagram>()
-        block(packetizer) { bytes, length -> out.add(SimHubAudioCodec.decode(bytes, 0, length)!!) }
+        block(packetizer) { bytes, length -> out.add(SimHubAudioCodec.decode(bytes, AudioDirection.TABLET_TO_PC, 0, length)!!) }
         return out
     }
 
@@ -85,7 +86,7 @@ class PcmPacketizerTest {
         val packetizer = PcmPacketizer(AudioStream.MEDIA, 8_000, 1, framesPerDatagram = 1)
         val frame = byteArrayOf(0, 0)
         var last: AudioDatagram? = null
-        repeat(65_537) { packetizer.push(frame) { bytes, length -> last = SimHubAudioCodec.decode(bytes, 0, length) } }
+        repeat(65_537) { packetizer.push(frame) { bytes, length -> last = SimHubAudioCodec.decode(bytes, AudioDirection.TABLET_TO_PC, 0, length) } }
         assertEquals(0, last!!.header.seq)
         assertEquals(65_536L, last!!.header.timestamp)
         assertEquals(1, packetizer.seq)

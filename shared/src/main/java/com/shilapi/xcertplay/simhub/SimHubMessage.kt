@@ -95,6 +95,8 @@ sealed class SimHubMessage {
         val idleDashboardUrl: String? = null,
         val dashboardServer: DashboardServer? = null,
         val audio: AudioSettings,
+        /** `state.mic` (§6.6): only for sessions with feature `mic`; `null` (omitted) otherwise. */
+        val mic: MicSettings? = null,
     ) : SimHubMessage() {
         override val type get() = SimHubProtocol.TYPE_STATE
     }
@@ -162,9 +164,28 @@ sealed class SimHubMessage {
         override val type get() = SimHubProtocol.TYPE_AUDIO_START
     }
 
-    /** §6.12. */
+    /** §6.12. [stream] is never [AudioStream.MIC]. */
     data class AudioStop(val stream: AudioStream) : SimHubMessage() {
         override val type get() = SimHubProtocol.TYPE_AUDIO_STOP
+    }
+
+    /**
+     * §6.13, tablet → plugin with feature `mic`: send the PC microphone, mono [sampleRate] Hz s16, as datagrams with
+     * `streamType` 4 to [port] on this tablet. [streamType] is always [AudioStream.MIC]'s code.
+     */
+    data class MicStart(
+        val sampleRate: Int,
+        val port: Int = SimHubProtocol.MIC_PORT,
+        val channels: Int = 1,
+        val format: AudioFormat = AudioFormat.PCM_S16LE,
+        val streamType: Int = AudioStream.MIC.code,
+    ) : SimHubMessage() {
+        override val type get() = SimHubProtocol.TYPE_MIC_START
+    }
+
+    /** §6.13: the phone closed its microphone. */
+    data class MicStop(val streamType: Int = AudioStream.MIC.code) : SimHubMessage() {
+        override val type get() = SimHubProtocol.TYPE_MIC_STOP
     }
 
     /**
@@ -206,6 +227,9 @@ data class DashboardServer(val reachable: Boolean, val port: Int)
 
 /** `state.audio` (§6.6). */
 data class AudioSettings(val enabled: Boolean, val port: Int, val formats: List<String>)
+
+/** `state.mic` (§6.6): [enabled] when the plugin answers `micStart` with the PC microphone. */
+data class MicSettings(val enabled: Boolean)
 
 /** `status.nowPlaying` (§6.7). Text members are required but may be `null`. */
 data class NowPlaying(
@@ -257,11 +281,27 @@ enum class Gear(override val wire: String) : WireEnum {
     D("D"),
 }
 
-/** Audio stream names (§6.11) and their datagram `streamType` codes (§10.2). */
-enum class AudioStream(override val wire: String, val code: Int) : WireEnum {
+/**
+ * Which way an audio datagram flows (§10.2): `streamType` 1–3 tablet → plugin, 4 (`mic`) plugin → tablet only.
+ * Decoding a datagram always names the direction it is received in.
+ */
+enum class AudioDirection {
+    /** CarPlay audio the tablet sends to the plugin. */
+    TABLET_TO_PC,
+
+    /** The PC microphone the plugin sends to the tablet (§10.4). */
+    PC_TO_TABLET,
+}
+
+/**
+ * Audio stream names (§6.11) and their datagram `streamType` codes (§10.2). [MIC] is a datagram stream only: it
+ * flows plugin → tablet and `audioStart`/`audioStop` cannot name it (the microphone has `micStart`/`micStop`).
+ */
+enum class AudioStream(override val wire: String, val code: Int, val direction: AudioDirection = AudioDirection.TABLET_TO_PC) : WireEnum {
     MEDIA("media", 1),
     ALT("alt", 2),
     TELEPHONY("telephony", 3),
+    MIC("mic", 4, AudioDirection.PC_TO_TABLET),
     ;
 
     companion object {

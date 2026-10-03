@@ -92,15 +92,17 @@ object SimHubAudioCodec {
     }
 
     /**
-     * Decodes a datagram, or returns `null` for anything §10.2 says to drop: shorter than one complete
-     * frame after the header, an invalid stream type (including reserved `mic`), format, channel
-     * count or sample rate, or a payload that is not a whole number of frames.
+     * Decodes a datagram received in [direction], or returns `null` for anything §10.2 says to drop:
+     * shorter than one complete frame after the header, an invalid stream type or one that does not flow
+     * in [direction] (`mic` from a tablet, `media`/`alt`/`telephony` to a tablet), an invalid format,
+     * channel count or sample rate, or a payload that is not a whole number of frames.
      */
-    fun decode(data: ByteArray, offset: Int = 0, length: Int = data.size - offset): AudioDatagram? {
+    fun decode(data: ByteArray, direction: AudioDirection, offset: Int = 0, length: Int = data.size - offset): AudioDatagram? {
         if (length < AudioHeader.SIZE) return null
         val buffer = ByteBuffer.wrap(data, offset, length).order(ByteOrder.BIG_ENDIAN)
         val seq = buffer.short.toInt() and 0xFFFF
         val stream = AudioStream.fromCode(buffer.get().toInt() and 0xFF) ?: return null
+        if (stream.direction != direction) return null
         val flags = buffer.get().toInt() and 0xFF
         val timestamp = buffer.int.toLong() and 0xFFFF_FFFFL
         val rateField = buffer.short.toInt() and 0xFFFF

@@ -67,6 +67,10 @@ These come from the checklist rigPlay inherited and still apply.
   first connection and `Wi-Fi P2P remembered first` on the second. Report it if they are absent. Creating
   a Wi-Fi Direct group alone is not a pass.
 - **Wired fallback.** **Connect with USB** with a data cable: picture, touch and audio work.
+- **PC microphone (#34).** With **Settings → Microphone: PC via SimHub** on the tablet and a headset on the
+  PC, ask Siri something and make a short call: Siri understands the PC microphone, the caller hears it, the
+  rigPlay page's Microphone section shows "Sending to <tablet>" with a moving level while the phone listens
+  and "Stopped: micStop" after; unplug the PC's network mid-call: the plugin stops within 2 s.
 - **Pairing.** Type a wrong PIN: the tablet says so and allows another try; the third wrong PIN ends the
   attempt. **Forget** the tablet on the rigPlay page: the tablet returns to the pairing screen. Pair again.
 - **Diagnostics export.** Reproduce any problem, then **Settings → Diagnostics → Save diagnostic report**.

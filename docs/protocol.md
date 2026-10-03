@@ -17,6 +17,11 @@ Protocol version: **1**. Revision: 2026-10-03.
 > optional `status.nav` route guidance ([§6.7.1](#671-statusnav)); the tablet → plugin `artwork` message
 > ([§6.14](#614-artwork)); SimHub properties `RigPlay.Nav.*` and `RigPlay.NowPlaying.ArtworkPath`
 > ([§16.1](#161-properties)).
+>
+> **Additions 2026-10-03, microphone** (no version change, behind feature `mic`): the PC microphone to the
+> phone (#34). `micStart` and `micStop` ([§6.13](#613-micstart-and-micstop)), the optional `state.mic`
+> ([§6.6](#66-state)), microphone datagrams from the plugin to the tablet and the direction rule for
+> `streamType` ([§10.2](#102-datagram-layout), [§10.4](#104-microphone-plugin--tablet)).
 
 This document is the contract between the rigPlay Android app (the *tablet*) and the rigPlay SimHub
 plugin running on the Windows PC (the *plugin*). Both implementations follow it; where an
@@ -52,7 +57,7 @@ Contents
 
 | Term | Meaning |
 |---|---|
-| plugin | The rigPlay SimHub plugin on the PC. It is the server: it broadcasts the beacon, listens for TCP control connections and receives audio. |
+| plugin | The rigPlay SimHub plugin on the PC. It is the server: it broadcasts the beacon, listens for TCP control connections, receives audio and, on request, sends the PC microphone. |
 | tablet | The rigPlay Android app. It is the client: it listens for beacons, connects to the plugin, and sends status and audio. |
 | phone | The iPhone connected to the tablet over CarPlay. It never talks to the plugin. |
 | host | One plugin installation, identified by `hostId`. |
@@ -68,7 +73,7 @@ Contents
 | Discovery beacon | UDP broadcast | plugin → LAN | **23710** | No. Both sides always use 23710. |
 | Control channel | TCP | tablet connects to plugin | **23711** | Yes, on the plugin. Advertised in the beacon. |
 | Audio | UDP unicast | tablet → plugin | **23712** | Yes, on the plugin. Advertised in the beacon and in `state.audio.port`. |
-| Microphone (reserved) | UDP unicast | plugin → tablet | **23713** (on the tablet) | Reserved for [`micStart`/`micStop`](#613-reserved-micstart-and-micstop). Not used in protocol 1. |
+| Microphone | UDP unicast | plugin → tablet | **23713** (on the tablet) | Yes, on the tablet: announced in [`micStart.port`](#613-micstart-and-micstop). Only with feature `mic`. |
 
 The ports were chosen to stay clear of:
 
@@ -227,14 +232,15 @@ Fixture names follow `<type>.json` or `<type>.<variant>.json` ([§17](#17-fixtur
 | [`pairRequest`](#63-pairrequest) | tablet → plugin | after `welcome`; again to submit a PIN | `pairRequest`, `.pin`, `.token` |
 | [`pairResult`](#64-pairresult) | plugin → tablet | answer to each `pairRequest`; `denied` also unprompted | `pairResult`, `.pinRequired`, `.wrongPin`, `.denied`, `.tokenInvalid` |
 | [`heartbeat`](#65-heartbeat) | both | every 1 s after `welcome` | `heartbeat` |
-| [`state`](#66-state) | plugin → tablet | after pairing, then on every change | `state`, `.minimal`, `.serverDown` |
+| [`state`](#66-state) | plugin → tablet | after pairing, then on every change | `state`, `.minimal`, `.serverDown`, `.mic` |
 | [`status`](#67-status) | tablet → plugin | after pairing, then on every change | `status`, `.idle`, `.liveStream`, `.nav` |
 | [`command`](#68-command) | plugin → tablet | on a SimHub action | `command`, `.playPause`, `.previous`, `.siri`, `.showDashboard`, `.showCarPlay` |
 | [`telemetry`](#69-telemetry) | plugin → tablet | ≤ 10 Hz while enabled | `telemetry`, `.partial` |
 | [`error`](#610-error) | both | see [§14](#14-error-handling) | `error`, `.notPaired`, `.shutdown` |
 | [`audioStart`](#611-audiostart) | tablet → plugin | before the first datagram of a stream | `audioStart`, `.telephony` |
 | [`audioStop`](#612-audiostop) | tablet → plugin | after the last datagram of a stream | `audioStop` |
-| [`micStart`, `micStop`](#613-reserved-micstart-and-micstop) | reserved | not used in protocol 1 | none |
+| [`micStart`](#613-micstart-and-micstop) | tablet → plugin | the phone opened its microphone and the tablet takes it from the PC (feature `mic`) | `micStart` |
+| [`micStop`](#613-micstart-and-micstop) | tablet → plugin | the phone closed its microphone (feature `mic`) | `micStop` |
 | [`artwork`](#614-artwork) | tablet → plugin | when the now-playing artwork changes (at most every 2 s), and again on link up | `artwork` |
 
 ## 6. Messages
@@ -377,6 +383,8 @@ Plugin → tablet. A complete snapshot, never a delta. Sent immediately after `p
 | `audio.enabled` | boolean | yes | `true`: the plugin's audio receiver is listening on `audio.port` and takes audio from this session. It is `true` even when the PC has no usable output device: the plugin keeps receiving and the settings page says why nothing plays. `false` (the port could not be bound, or audio is off): the tablet MUST NOT send audio and plays it locally. |
 | `audio.port` | integer 1–65535 | yes | UDP port for audio datagrams, sent to the IP address of this TCP connection: the port the receiver is bound to, which is the configured audio port. A changed port is pushed in a new `state`. |
 | `audio.formats` | array of string | yes | Formats the receiver accepts, most preferred first. Protocol 1 defines `pcm_s16le` only. |
+| `mic` | object | no | The PC microphone ([§6.13](#613-micstart-and-micstop)). Only sent when the session has feature `mic`; a plugin leaves it out for other sessions. Absent: the tablet treats the PC microphone as unavailable. Fixture: [`state.mic.json`](../protocol/fixtures/state.mic.json). |
+| `mic.enabled` | boolean | yes, in the object | `true`: the plugin answers `micStart` with microphone audio: "Microphone to the phone" is on on the plugin page and it found an input device. `false`: the tablet MUST NOT send `micStart` and uses its own microphone. A change is pushed in a new `state` like any other. |
 
 ### 6.7 `status`
 
@@ -664,19 +672,66 @@ stops that stream's output.
 | `type` | string | yes | `"audioStop"` |
 | `stream` | string enum | yes | As in `audioStart`. An `audioStop` for a stream that is not started is ignored. |
 
-### 6.13 Reserved: `micStart` and `micStop`
+### 6.13 `micStart` and `micStop`
 
-Reserved for routing the PC microphone to the phone (#34). In protocol 1 they are not sent, and a
-receiver ignores them as it ignores any unknown type. The intended shape, to be specified with #34:
+Tablet → plugin, Paired only, and only in a session with feature `mic` ([§7.3](#73-features)). They route
+the PC microphone to the phone for Siri and calls (#34): while a microphone stream is started, the plugin
+captures an input device of the PC and sends it to the tablet as UDP datagrams
+([§10.4](#104-microphone-plugin--tablet)), and the tablet feeds that audio to the phone instead of its
+own microphone. Fixtures: [`micStart.json`](../protocol/fixtures/micStart.json),
+[`micStop.json`](../protocol/fixtures/micStop.json).
 
-- `micStart`, tablet → plugin, when the phone opens the microphone (Siri, a call), with `format`,
-  `sampleRate`, `channels` and the tablet's UDP `port` (default 23713); `micStop` when it closes.
-- The plugin sends datagrams with the header of [§10.2](#102-datagram-layout), `streamType` 4
-  (`mic`), to the tablet's address. `mic` flows PC → tablet only: the plugin drops (and counts) a
-  datagram with `streamType` 4 from a tablet, and an `audioStart` cannot name it.
-- Feature `mic` gates both messages.
+```json
+{"type":"micStart","streamType":4,"format":"pcm_s16le","sampleRate":16000,"channels":1,"port":23713}
+{"type":"micStop","streamType":4}
+```
 
-There are no fixtures for them until they are specified.
+`micStart`:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | yes | `"micStart"` |
+| `streamType` | integer | yes | The datagram `streamType` ([§10.2](#102-datagram-layout)). MUST be `4` (`mic`); any other value is a `badMessage`. |
+| `format` | string enum | yes | `pcm_s16le`. |
+| `sampleRate` | integer | yes | Hz, a multiple of 100 from 8000 to 48000: the rate of the phone's microphone stream (CarPlay asks for 16000 or 24000 in practice). The plugin resamples its capture to it, so the tablet does not resample. |
+| `channels` | integer | yes | MUST be `1`: the microphone is mono. A tablet whose phone wants stereo duplicates the channel itself. |
+| `port` | integer 1–65535 | yes | UDP port on the tablet that receives the datagrams, at the tablet's address of this TCP connection. The rigPlay app uses **23713**. |
+
+`micStop`:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | yes | `"micStop"` |
+| `streamType` | integer | yes | MUST be `4`. |
+
+Tablet rules:
+
+- The tablet sends `micStart` when the phone opens its microphone (a Siri request, a call) if all of these
+  hold: its setting "Microphone" is "PC via SimHub", the link is up, the session has feature `mic`, and
+  the latest `state.mic.enabled` is `true`. Otherwise it uses its own microphone and sends nothing.
+- It sends `micStop` when the phone closes the microphone. Link loss stops the stream without a message.
+- After link loss and a new Paired session it sends `micStart` again if the phone still has the microphone
+  open; the plugin starts a new stream (sequence numbers and timestamps from 0, start flag).
+- While a stream runs it listens on `port` and accepts datagrams only from the IP address of the paired host
+  (the remote address of its control connection), as [§10.4](#104-microphone-plugin--tablet) describes.
+
+Plugin rules:
+
+- A `micStart` or `micStop` in a session without feature `mic` is answered with `error`
+  `unexpectedMessage`. In Unpaired it is answered `notPaired` like any other message ([§5.2](#52-session-states)).
+- On `micStart` the plugin opens its input device and sends datagrams to the session's remote IP address and
+  `port`. With "Microphone to the phone" off it ignores the message (logged, no reply). A new `micStart`
+  while a stream runs restarts it with the new parameters. The plugin runs one microphone stream at a
+  time: a `micStart` from another tablet takes it over.
+- The plugin stops capturing and sending within 1 s of any of these: `micStop` from the session that owns
+  the stream (a `micStop` from another session, or with no stream, is ignored); that session closing (link
+  loss, replaced, forgotten, shutdown); **2 s** without any line received from that session (heartbeats
+  arrive every 1 s, so this is two missed heartbeats: shorter than the 5 s link-loss watchdog, so that a
+  tablet that vanished does not keep the PC microphone open); the user switching "Microphone to the phone"
+  off.
+- When the plugin has no usable input device it logs it once, sends nothing and keeps answering normally;
+  the tablet then hears silence. It reports `state.mic.enabled: false` from then on, so the next request
+  uses the tablet's microphone.
 
 ### 6.14 `artwork`
 
@@ -755,7 +810,7 @@ values as `badMessage` (except in `telemetry`, where the field degrades to `null
 |---|---|
 | `telemetry` | The plugin may send `telemetry` ([§6.9](#69-telemetry)). The rigPlay plugin offers it from #40. |
 | `idleDashboard` | The plugin includes `state.idleDashboardUrl`. |
-| `mic` | Reserved ([§6.13](#613-reserved-micstart-and-micstop)). |
+| `mic` | The tablet may send `micStart` and `micStop` ([§6.13](#613-micstart-and-micstop)); the plugin includes `state.mic` and sends microphone datagrams ([§10.4](#104-microphone-plugin--tablet)). The rigPlay plugin offers it from #34. |
 
 Unknown feature strings are ignored. `welcome.features` lists only features both sides named.
 
@@ -824,7 +879,8 @@ Tablet reconnection:
 
 The tablet sends the PCM it decodes from the phone's AirPlay audio streams to the plugin, which plays
 it on the PC. Datagrams go to the IP address the tablet's TCP connection is connected to and to port
-`state.audio.port`.
+`state.audio.port`. In the other direction the plugin sends the PC microphone to the tablet with the same
+datagram layout ([§10.4](#104-microphone-plugin--tablet)).
 
 ### 10.1 Stream lifecycle
 
@@ -864,9 +920,9 @@ vectors; both codecs are tested against them.
 
 | Offset | Size | Field | Description |
 |---|---|---|---|
-| 0 | 2 | `seq` (u16) | Datagram counter per stream: 0 for the first datagram after `audioStart`, +1 per datagram, 65535 wraps to 0. Compared with serial-number arithmetic (RFC 1982). |
-| 2 | 1 | `streamType` (u8) | 1 = `media`, 2 = `alt`, 3 = `telephony`, 4 = reserved for `mic` (PC → tablet only; rejected from a tablet). 0 and 5–255 are invalid. |
-| 3 | 1 | `flags` (u8) | Bit 0 (0x01) `start`: first datagram after `audioStart`; the receiver resets that stream's jitter buffer. Bits 1–7 are reserved: senders set 0, receivers ignore them. |
+| 0 | 2 | `seq` (u16) | Datagram counter per stream: 0 for the first datagram after `audioStart` (`micStart` for `mic`), +1 per datagram, 65535 wraps to 0. Compared with serial-number arithmetic (RFC 1982). |
+| 2 | 1 | `streamType` (u8) | 1 = `media`, 2 = `alt`, 3 = `telephony`, 4 = `mic`. 0 and 5–255 are invalid. The value also fixes the direction: 1–3 flow tablet → plugin only and 4 flows plugin → tablet only, so a plugin drops a datagram with `streamType` 4 and a tablet's microphone receiver drops one with 1–3 (both counted). |
+| 3 | 1 | `flags` (u8) | Bit 0 (0x01) `start`: first datagram after `audioStart` (or, for `mic`, after `micStart`); the receiver resets that stream's jitter buffer. Bits 1–7 are reserved: senders set 0, receivers ignore them. |
 | 4 | 4 | `timestamp` (u32) | Sample clock: number of sample frames (one sample per channel) sent on this stream before the first frame of this datagram. 0 at `audioStart`; 4294967295 wraps to 0. A jump larger than the previous datagram's frame count means the sender skipped audio; the receiver plays silence for the gap. |
 | 8 | 2 | `sampleRate` (u16) | Sample rate in units of 100 Hz: 48000 Hz → 480, 44100 Hz → 441, 24000 Hz → 240, 16000 Hz → 160. Valid values 80–480. Rates that are not a multiple of 100 Hz (11025, 22050) are resampled by the sender. |
 | 10 | 1 | `channels` (u8) | 1 or 2. |
@@ -893,6 +949,31 @@ Limits:
   gaps with silence, and count losses per stream for the settings page.
 - A jitter buffer of 60–120 ms is enough on a home LAN over Wi-Fi.
 - `alt` and `telephony` are mixed with `media`; the plugin ducks `media` while either is active.
+
+### 10.4 Microphone (plugin → tablet)
+
+With feature `mic`, after a `micStart` ([§6.13](#613-micstart-and-micstop)), the plugin sends the PC
+microphone to the tablet: UDP datagrams with the header of [§10.2](#102-datagram-layout), from any source
+port of the PC, to the session's remote IP address and `micStart.port`
+(vectors `mic-16k-first-datagram` and `mic-24k-midstream` in
+[`audio-header.json`](../protocol/fixtures/audio-header.json)).
+
+- Header: `streamType` 4, `format` 1 (`pcm_s16le`), `channels` 1 and the `sampleRate` of the `micStart`.
+  `seq` and `timestamp` start at 0 and the first datagram carries the `start` flag, for every `micStart`.
+- Size: **5 ms** per datagram (`sampleRate` ÷ 200 frames: 80 frames, 160 bytes of payload at 16 kHz), sent
+  as the capture produces them. The plugin sends nothing while its capture delivers nothing; it does not
+  pad with silence.
+- Capture (informative, the rigPlay plugin): WASAPI shared mode on the chosen input device (the Windows
+  default recording device unless the user picked one), mixed down to mono and resampled
+  to `sampleRate`. There is no echo cancellation: with PC speakers, a caller can hear themselves. Headphones
+  or a headset avoid it.
+- The tablet accepts a datagram only when its source IP address is the paired host's (the remote address
+  of its control connection) and a microphone stream is started; it decodes the header in the plugin →
+  tablet direction (`streamType` 4 only) and drops a datagram whose `sampleRate`, `channels` or `format`
+  differ from its `micStart`. It counts what it drops.
+- The tablet plays the stream through a jitter buffer (about 40 ms) at the rate the phone consumes it,
+  reorders by `timestamp`, fills gaps and underruns with silence and skips ahead when more than about
+  200 ms is buffered (the PC's and the tablet's clocks drift). A datagram with the `start` flag resets it.
 
 ## 11. Dashboard URLs
 
@@ -1106,12 +1187,16 @@ Protocol 1 assumes a trusted home LAN.
   PC only and typed on the tablet, so a passive listener cannot see it before it is used.
 - **What someone on the LAN can do.** Without a token: see beacons and request pairing, which needs the
   PIN shown on the PC. With a sniffed token: impersonate that tablet, read its `state`, and send
-  `status` and audio to the plugin. By forging a beacon or answering with a known `hostId`: obtain the
-  tablet's token. The plugin executes nothing on the PC for a tablet beyond updating SimHub properties
-  and playing audio, so the impact is wrong dashboard data and unwanted sound. TLS would close all
+  `status` and audio to the plugin, and, while "Microphone to the phone" is on, have the PC microphone
+  sent to its own address with `micStart` ([§6.13](#613-micstart-and-micstop)). By forging a beacon or
+  answering with a known `hostId`: obtain the tablet's token. The plugin executes nothing on the PC for a
+  tablet beyond updating SimHub properties, playing audio and capturing the microphone on request, so the
+  impact is wrong dashboard data, unwanted sound and an eavesdropped PC microphone; the settings page
+  shows when the microphone is being sent and to which tablet. TLS would close all
   three; it is out of scope for protocol 1.
 - **Audio spoofing** needs the source IP of a Paired session with a started stream; audio is not
-  authenticated beyond that.
+  authenticated beyond that. The same holds for the microphone in the other direction: the tablet takes
+  microphone datagrams only from the paired host's address, while it has a microphone stream started.
 
 ## 16. SimHub surface
 

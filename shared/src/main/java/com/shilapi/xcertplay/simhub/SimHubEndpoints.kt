@@ -20,6 +20,9 @@ package com.shilapi.xcertplay.simhub
 object SimHubEndpoints {
     @Volatile var audioTransport: SimHubAudioTransport? = null
 
+    /** The PC microphone (#34): set by the link owner with the user's "Microphone" choice; `null` without a link. */
+    @Volatile var microphone: SimHubMicTransport? = null
+
     /** Setting it sends the current phone and now-playing state to the new sink. */
     @Volatile var statusSink: SimHubStatusSink? = null
         set(value) {

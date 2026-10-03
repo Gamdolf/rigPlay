@@ -15,7 +15,8 @@ namespace RigPlayPlugin.Protocol
         public const byte StreamMedia = 1;
         public const byte StreamAlt = 2;
         public const byte StreamTelephony = 3;
-        public const byte StreamMicReserved = 4;
+        /// <summary>The PC microphone: plugin to tablet only (spec §10.4).</summary>
+        public const byte StreamMic = 4;
 
         public const byte FlagStart = 0x01;
 
@@ -52,6 +53,7 @@ namespace RigPlayPlugin.Protocol
                 case AudioStreams.Media: return StreamMedia;
                 case AudioStreams.Alt: return StreamAlt;
                 case AudioStreams.Telephony: return StreamTelephony;
+                case "mic": return StreamMic;
                 default: return 0;
             }
         }
@@ -63,6 +65,7 @@ namespace RigPlayPlugin.Protocol
                 case StreamMedia: return AudioStreams.Media;
                 case StreamAlt: return AudioStreams.Alt;
                 case StreamTelephony: return AudioStreams.Telephony;
+                case StreamMic: return "mic";
                 default: return null;
             }
         }
@@ -148,8 +151,24 @@ namespace RigPlayPlugin.Protocol
         /// </summary>
         public static string Validate(byte[] buffer, int offset, int length, out AudioHeader h)
         {
+            return Validate(buffer, offset, length, global::RigPlayPlugin.Audio.AudioDirection.TabletToPc, out h);
+        }
+
+        /// <summary>
+        /// As <see cref="Validate(byte[], int, int, out AudioHeader)"/> for a datagram flowing <paramref name="direction"/>:
+        /// streamType 1-3 tablet to plugin, 4 (mic) plugin to tablet (spec §10.2, §10.4).
+        /// </summary>
+        public static string Validate(byte[] buffer, int offset, int length, global::RigPlayPlugin.Audio.AudioDirection direction, out AudioHeader h)
+        {
             if (!TryReadHeader(buffer, offset, length, out h)) return "shorter than the 12-byte header";
-            if (h.StreamType < AudioHeader.StreamMedia || h.StreamType > AudioHeader.StreamTelephony) return "invalid streamType " + h.StreamType;
+            if (direction == global::RigPlayPlugin.Audio.AudioDirection.PcToTablet)
+            {
+                if (h.StreamType != AudioHeader.StreamMic) return "streamType " + h.StreamType + " does not flow plugin to tablet";
+            }
+            else if (h.StreamType < AudioHeader.StreamMedia || h.StreamType > AudioHeader.StreamTelephony)
+            {
+                return "invalid streamType " + h.StreamType;
+            }
             if (h.Format != AudioHeader.FormatPcmS16Le) return "invalid format " + h.Format;
             if (h.Channels != 1 && h.Channels != 2) return "invalid channels " + h.Channels;
             if (h.SampleRateField < AudioHeader.MinSampleRateField || h.SampleRateField > AudioHeader.MaxSampleRateField)
@@ -164,7 +183,12 @@ namespace RigPlayPlugin.Protocol
         /// <summary>Checks a datagram and returns its samples; throws <see cref="ProtocolException"/> when invalid.</summary>
         public static short[] Decode(byte[] datagram, out AudioHeader h)
         {
-            var problem = Validate(datagram, 0, datagram == null ? 0 : datagram.Length, out h);
+            return Decode(datagram, global::RigPlayPlugin.Audio.AudioDirection.TabletToPc, out h);
+        }
+
+        public static short[] Decode(byte[] datagram, global::RigPlayPlugin.Audio.AudioDirection direction, out AudioHeader h)
+        {
+            var problem = Validate(datagram, 0, datagram == null ? 0 : datagram.Length, direction, out h);
             if (problem != null) throw new ProtocolException(problem);
             var count = (datagram.Length - AudioHeader.Size) / 2;
             var samples = new short[count];

@@ -14,9 +14,9 @@ namespace RigPlayPlugin
         /// <summary>The shape of this file; bump it when a field changes meaning so Normalize can migrate.</summary>
         /// <remarks>
         /// 2: protocol ports (23711/23712), host id, token hashes instead of tokens. 3: Telemetry (#40).
-        /// 4: Telemetry.Tracks, the track calibrations of fake GPS strategy C (#44).
+        /// 4: Telemetry.Tracks, the track calibrations of fake GPS strategy C (#44). 5: MicEnabled and MicDeviceId (#34).
         /// </remarks>
-        public const int CurrentSchemaVersion = 4;
+        public const int CurrentSchemaVersion = 5;
 
         /// <summary>Placeholder defaults of schema 1, migrated by Normalize.</summary>
         internal const int LegacyControlPort = 18877;
@@ -65,6 +65,15 @@ namespace RigPlayPlugin
 
         public bool Muted { get; set; }
 
+        /// <summary>
+        /// "Microphone to the phone" (#34, spec §6.13): a tablet that asks with micStart gets this PC's microphone for Siri
+        /// and calls. Off: micStart is ignored and state.mic.enabled is false, so tablets use their own microphone.
+        /// </summary>
+        public bool MicEnabled { get; set; } = true;
+
+        /// <summary>The input device sent to the phone; empty for the Windows default recording device.</summary>
+        public string MicDeviceId { get; set; } = "";
+
         public List<PairedTablet> PairedTablets { get; set; } = new List<PairedTablet>();
 
         /// <summary>The "Data to CarPlay" section: what goes into the telemetry message (spec §6.9).</summary>
@@ -84,8 +93,9 @@ namespace RigPlayPlugin
                 if (AudioPort == LegacyAudioPort) AudioPort = ProtocolDefaults.AudioPort;
                 SchemaVersion = CurrentSchemaVersion;
             }
-            // 2 -> 3 only added Telemetry and 3 -> 4 only Telemetry.Tracks, which a file without them gets from the defaults.
-            if (SchemaVersion < 1 || SchemaVersion > CurrentSchemaVersion || SchemaVersion == 2 || SchemaVersion == 3) SchemaVersion = CurrentSchemaVersion;
+            // 2 -> 3 only added Telemetry, 3 -> 4 Telemetry.Tracks and 4 -> 5 the microphone fields; a file without them gets
+            // the defaults, so any in-range older version is simply stamped with the current one.
+            if (SchemaVersion != CurrentSchemaVersion) SchemaVersion = CurrentSchemaVersion;
 
             if (!IsValidHostId(HostId)) HostId = NewHostId();
             HostName = Clean(HostName);
@@ -105,6 +115,7 @@ namespace RigPlayPlugin
             SelectedDashboard = Clean(SelectedDashboard);
             IdleDashboard = Clean(IdleDashboard);
             AudioDeviceId = Clean(AudioDeviceId);
+            MicDeviceId = Clean(MicDeviceId);
 
             Volume = Math.Min(MaxVolume, Math.Max(MinVolume, Volume));
 

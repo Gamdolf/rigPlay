@@ -357,10 +357,9 @@ namespace RigPlayPlugin.Tests
         }
 
         [Fact]
-        public void ASchema3FileMovesToSchema4WithNoTracks()
+        public void ASchema3FileMovesToTheCurrentSchemaWithNoTracks()
         {
             var old = JsonConvert.DeserializeObject<RigPlaySettings>("{\"SchemaVersion\":3,\"Telemetry\":{\"GpsStrategy\":\"deadReckoning\"}}").Normalize();
-            Assert.Equal(4, old.SchemaVersion);
             Assert.Equal(RigPlaySettings.CurrentSchemaVersion, old.SchemaVersion);
             Assert.Empty(old.Telemetry.Tracks);
             Assert.Equal(GpsStrategies.DeadReckoning, old.Telemetry.GpsStrategy);

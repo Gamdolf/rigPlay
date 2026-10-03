@@ -138,6 +138,9 @@ namespace RigPlayPlugin.Net
         /// <summary>Why the session closed, once it has.</summary>
         public string CloseReason { get; private set; }
 
+        /// <summary>Monotonic time the last line (any line, an empty one included) arrived from the tablet.</summary>
+        public long LastLineAtMs => Interlocked.Read(ref lastLineAt);
+
         public bool HasFeature(string feature)
         {
             return Features.Contains(feature);
@@ -421,6 +424,12 @@ namespace RigPlayPlugin.Net
             if (message is PairRequestMessage)
             {
                 SendError(ErrorCodes.UnexpectedMessage, "already paired", message.Type);
+                return;
+            }
+            if (MessageTypes.MicFeature.Contains(message.Type) && !HasFeature(global::RigPlayPlugin.Protocol.Features.Mic))
+            {
+                // micStart / micStop need feature mic (spec §6.13).
+                SendError(ErrorCodes.UnexpectedMessage, message.Type + " requires feature mic", message.Type);
                 return;
             }
             server.OnPairedMessage(this, message);
