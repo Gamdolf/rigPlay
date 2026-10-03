@@ -492,6 +492,38 @@ does not publish it or the user disabled it. Each message is a complete sample, 
 Validation is per field: a field with the wrong JSON type, out of range, or with an unknown enum value
 is treated as `null` and the rest of the message is used.
 
+#### 6.9.1 Rate, start and stop
+
+- The plugin samples SimHub's game data on every frame (`IDataPlugin.DataUpdate`, 60 Hz) and sends the
+  latest sample every **100 ms** (10 Hz) while a game runs and the conditions above hold. It does not
+  send while no game runs.
+- `gameRunning` is present in every message the rigPlay plugin sends. When the game stops (SimHub
+  reports no running game, or no game frame has arrived for 3 s) the plugin sends **one** last message
+  `{"type":"telemetry","gameRunning":false}` to the sessions that were receiving telemetry, then
+  nothing until a game runs again. The same happens when a session stops qualifying (its phone
+  disconnects, the user switches the section off): it simply receives no more messages.
+- **Staleness**: the tablet treats telemetry as stale **3 s** after the last `telemetry` it received,
+  and from then on behaves as if it had never received any (fake GPS stops, speed and gear are no
+  longer reported to the phone, night mode returns to the tablet's own source). `gameRunning: false`
+  has the same effect at once.
+- A message with `gameRunning: true` and no data field is valid: the game runs but every field is
+  unknown or switched off.
+
+#### 6.9.2 Where the plugin takes each field (informative)
+
+| Field | Source in SimHub | Precision on the wire |
+|---|---|---|
+| `speedMps` | `SpeedKmh` ÷ 3.6, negative values sent as 0 | 2 decimals |
+| `gear` | `Gear` mapped as in the table above; "in the pits" is `IsInPit` or `IsInPitLane`. `"R"`/`"-1"` → `R`, `"N"`/`"0"` → `P` or `N`, `"1"`… → `D`, a game's own `"P"`/`"D"` pass through | |
+| `heading` | `OrientationYaw` (degrees, normalised to 0 ≤ h < 360), once a frame of the session has shown a non-zero value (games without yaw report 0 forever). Otherwise the direction of the last movement of at least 1 m in `CarCoordinates` (x, z), and with neither, `0` when a position is sent and absent otherwise | 1 decimal |
+| `lat`, `lon`, `alt` | The GPS strategy chosen on the page; absent when it is off | 7 decimals; 1 for `alt` |
+| `rpm` | `Rpms` | integer value |
+| `trackName` | `TrackNameWithConfig`, else `TrackName` | |
+| `sessionType` | `SessionTypeName` | |
+
+The yaw and coordinate axes are whatever the game reports, so `heading` is consistent within a session
+but is not a true compass direction; it only has to agree with the made-up position.
+
 ### 6.10 `error`
 
 Both directions. [§14](#14-error-handling) lists the codes and when each is sent.
@@ -597,7 +629,7 @@ values as `badMessage` (except in `telemetry`, where the field degrades to `null
 
 | Feature | Effect when listed in `welcome.features` |
 |---|---|
-| `telemetry` | The plugin may send `telemetry`. |
+| `telemetry` | The plugin may send `telemetry` ([§6.9](#69-telemetry)). The rigPlay plugin offers it from #40. |
 | `idleDashboard` | The plugin includes `state.idleDashboardUrl`. |
 | `mic` | Reserved ([§6.13](#613-reserved-micstart-and-micstop)). |
 

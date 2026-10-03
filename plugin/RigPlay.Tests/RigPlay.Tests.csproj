@@ -20,6 +20,7 @@
     <Compile Include="../RigPlay/Net/**/*.cs" Link="Plugin/Net/%(RecursiveDir)%(Filename)%(Extension)" />
     <Compile Include="../RigPlay/Pairing/**/*.cs" Link="Plugin/Pairing/%(RecursiveDir)%(Filename)%(Extension)" />
     <Compile Include="../RigPlay/Dashboards/**/*.cs" Link="Plugin/Dashboards/%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="../RigPlay/Telemetry/**/*.cs" Link="Plugin/Telemetry/%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
   <!-- The golden samples of docs/protocol.md, read by ProtocolFixturesTests. -->

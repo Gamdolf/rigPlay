@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // RigPlay.cs: the SimHub plugin class. Reads and saves RigPlaySettings, offers the rigPlay page in SimHub's left
 // menu, starts the tablet server (PluginBridge: discovery, pairing, dashboards, SimHub surface) and the audio
-// pipeline, and connects the two (AudioGlue). No IDataPlugin: nothing here reads telemetry.
+// pipeline, and connects the two (AudioGlue). As an IDataPlugin it copies each SimHub frame into the telemetry sampler
+// (#40); the host's sender turns the latest frame into `telemetry` messages at 10 Hz.
 using System;
 using System.Linq;
 using System.Reflection;
@@ -9,6 +10,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using GameReaderCommon;
+using RigPlayPlugin.Telemetry;
 using SimHub.Plugins;
 
 namespace RigPlayPlugin
@@ -16,7 +19,7 @@ namespace RigPlayPlugin
     [PluginName("rigPlay")]
     [PluginAuthor("xorob0")]
     [PluginDescription("Pairs rigPlay CarPlay tablets with SimHub, picks the dashboard they show and plays their audio on this PC.")]
-    public class RigPlay : IPlugin, IWPFSettingsV2
+    public class RigPlay : IPlugin, IDataPlugin, IWPFSettingsV2
     {
         /// <summary>SimHub stores the settings as PluginsData/Common/RigPlay.RigPlaySettings.json.</summary>
         public const string SettingsKey = "RigPlaySettings";
@@ -114,6 +117,63 @@ namespace RigPlayPlugin
                 Log.Error("Connecting the audio receiver to the tablet server failed", ex);
             }
         }
+
+        /// <summary>
+        /// SimHub's 60 Hz data callback. Copies the frame into a struct and hands it to the telemetry sampler: no
+        /// allocation and no property lookups per frame; names that SimHub may build on each read are read once a second.
+        /// </summary>
+        public void DataUpdate(PluginManager pluginManager, ref GameData data)
+        {
+            var sampler = Host?.TelemetrySampler;
+            if (sampler == null) return;
+            try
+            {
+                var input = TelemetryInput.Empty;
+                var d = data.NewData;
+                input.GameRunning = data.GameRunning && d != null;
+                if (input.GameRunning)
+                {
+                    input.SpeedKmh = d.SpeedKmh;
+                    input.Gear = d.Gear;
+                    input.Rpm = d.Rpms;
+                    input.InPit = d.IsInPit != 0;
+                    input.InPitLane = d.IsInPitLane != 0;
+                    input.YawDeg = d.OrientationYaw;
+                    var c = d.CarCoordinates;
+                    if (c != null && c.Length >= 3)
+                    {
+                        input.X = c[0];
+                        input.Y = c[1];
+                        input.Z = c[2];
+                    }
+                    input.SessionRestart = d.IsSessionRestart;
+                    if (slowCountdown-- <= 0)
+                    {
+                        slowCountdown = 60;
+                        trackName = d.TrackNameWithConfig;
+                        if (string.IsNullOrWhiteSpace(trackName)) trackName = d.TrackName;
+                        sessionType = d.SessionTypeName;
+                    }
+                    input.TrackName = trackName;
+                    input.SessionType = sessionType;
+                }
+                else
+                {
+                    slowCountdown = 0;
+                }
+                sampler.Update(ref input);
+            }
+            catch (Exception ex)
+            {
+                if (!dataUpdateFailed) Log.Error("Reading SimHub's game data for telemetry failed (logged once)", ex);
+                dataUpdateFailed = true;
+            }
+        }
+
+        private int slowCountdown;
+        private string trackName;
+        private string sessionType;
+        private bool dataUpdateFailed;
 
         public void End(PluginManager pluginManager)
         {

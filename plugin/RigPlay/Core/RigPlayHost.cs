@@ -10,6 +10,7 @@ using RigPlayPlugin.Dashboards;
 using RigPlayPlugin.Net;
 using RigPlayPlugin.Pairing;
 using RigPlayPlugin.Protocol;
+using RigPlayPlugin.Telemetry;
 
 namespace RigPlayPlugin
 {
@@ -45,6 +46,8 @@ namespace RigPlayPlugin
             Timings = timings ?? SessionTimings.Default;
             Pairing = new PairingService(settings, () => this.env.SaveSettings(), this.clock);
             Pairing.Changed += RaiseChanged;
+            TelemetrySampler = new TelemetrySampler();
+            TelemetrySender = new TelemetrySender(TelemetrySampler, () => Server, () => Settings);
             Probe = new WebDashProbe(() => EffectiveWebDashPort);
             Probe.Changed += () =>
             {
@@ -52,6 +55,18 @@ namespace RigPlayPlugin
                 RaiseChanged();
             };
         }
+
+        /// <summary>SimHub frames in, the telemetry message out (spec §6.9). RigPlay.DataUpdate feeds it.</summary>
+        public TelemetrySampler TelemetrySampler { get; }
+
+        /// <summary>The 10 Hz telemetry timer.</summary>
+        public TelemetrySender TelemetrySender { get; }
+
+        /// <summary>Tests turn the telemetry timer off and call TelemetrySender.Tick themselves.</summary>
+        public bool TelemetryTimerEnabled { get; set; } = true;
+
+        /// <summary>Features this plugin offers in welcome (spec §7.3).</summary>
+        public static readonly string[] OfferedFeatures = { Features.Telemetry, Features.IdleDashboard };
 
         /// <summary>Tests turn the periodic web dash probe off.</summary>
         public bool ProbeEnabled { get; set; } = true;
@@ -178,6 +193,7 @@ namespace RigPlayPlugin
             RefreshDashboards();
             PluginLog.Info(Dashboards.Count + " dashboard(s) in " + (env.SimHubDir ?? "(SimHub folder not found)") + ", web dash port " + EffectiveWebDashPort);
             if (ProbeEnabled) Probe.Start();
+            if (TelemetryTimerEnabled) TelemetrySender.Start();
             RaiseChanged();
         }
 
@@ -188,6 +204,7 @@ namespace RigPlayPlugin
                 if (!started) return;
                 started = false;
             }
+            try { TelemetrySender.Stop(); } catch (Exception ex) { PluginLog.Error("Stopping the telemetry sender failed", ex); }
             try { Probe.Stop(); } catch (Exception ex) { PluginLog.Error("Stopping the web dash probe failed", ex); }
             try { Beacon?.Stop(); } catch (Exception ex) { PluginLog.Error("Stopping the beacon failed", ex); }
             try { Server?.Stop(); } catch (Exception ex) { PluginLog.Error("Stopping the control server failed", ex); }
@@ -318,6 +335,7 @@ namespace RigPlayPlugin
             {
                 StateFactory = BuildState,
                 Pairing = Pairing,
+                PluginFeatures = OfferedFeatures,
             };
             server.SessionsChanged += () =>
             {

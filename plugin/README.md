@@ -29,7 +29,8 @@ It holds no SimHub assemblies and no `.pdb`: SimHub ships everything the plugin 
 The plugin targets .NET Framework 4.8 through the `Microsoft.NETFramework.ReferenceAssemblies` package and
 references WPF as plain assemblies, without `UseWPF` or XAML: the page is built in C# and picks up SimHub's own
 controls and styles at runtime. That keeps the build cross-platform. The files the tests compile
-(`ProtocolDefaults.cs`, `RigPlaySettings.cs`, `Theme.cs` and everything under `Core/`, `Protocol/` and `Net/`)
+(`ProtocolDefaults.cs`, `RigPlaySettings.cs`, `Theme.cs` and everything under `Core/`, `Protocol/`, `Net/`,
+`Pairing/`, `Dashboards/` and `Telemetry/`)
 must stay free of SimHub and WPF types; SimHub-facing glue lives in `RigPlay.cs`, `PluginBridge.cs` and the page.
 
 ## Tablet server
@@ -76,6 +77,26 @@ paired tablet whose iPhone connected most recently, else the one that paired mos
 
 Bind an action in SimHub under Controls and events → the rigPlay entries; use a property in a dashboard as
 `[RigPlay.NowPlaying.Title]`.
+
+## Data to CarPlay (#40)
+
+The plugin is an `IDataPlugin`: `RigPlay.DataUpdate` (60 Hz) copies each SimHub frame into a `TelemetryInput`
+struct without allocating, and `Telemetry/TelemetrySampler.cs` keeps the latest frame, the heading and the fake-GPS
+strategy. `Telemetry/TelemetrySender.cs` runs a 100 ms timer that sends `telemetry` (docs/protocol.md §6.9) to every
+paired tablet that named feature `telemetry` and reports a connected iPhone, while the page's master switch is on, at
+least one field is on, and a game runs. When the game stops it sends one `{"type":"telemetry","gameRunning":false}`.
+
+The page's "Data to CarPlay" section has the master switch, one switch per field (speed, gear, heading, night mode,
+fuel level, range, RPM, track name, session type; `gameRunning` is always sent), the position strategy
+(`Telemetry/GpsStrategy.cs`) with its settings, and a live line with the last message sent. Settings live in
+`RigPlaySettings.Telemetry` (schema 3).
+
+| Field | From SimHub |
+|---|---|
+| `speedMps` | `SpeedKmh` / 3.6 |
+| `gear` | `Gear`: R → `R`, 1.. → `D`, N → `P` in the pit lane or box, else `N` |
+| `heading` | `OrientationYaw` once it is non-zero in the session, else the direction of movement in `CarCoordinates` |
+| `rpm`, `trackName`, `sessionType` | `Rpms`, `TrackNameWithConfig` (else `TrackName`), `SessionTypeName` |
 
 ## Notes
 

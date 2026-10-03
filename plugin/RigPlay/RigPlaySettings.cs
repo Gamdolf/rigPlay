@@ -12,8 +12,8 @@ namespace RigPlayPlugin
     public class RigPlaySettings
     {
         /// <summary>The shape of this file; bump it when a field changes meaning so Normalize can migrate.</summary>
-        /// <remarks>2: protocol ports (23711/23712), host id, token hashes instead of tokens.</remarks>
-        public const int CurrentSchemaVersion = 2;
+        /// <remarks>2: protocol ports (23711/23712), host id, token hashes instead of tokens. 3: Telemetry (#40).</remarks>
+        public const int CurrentSchemaVersion = 3;
 
         /// <summary>Placeholder defaults of schema 1, migrated by Normalize.</summary>
         internal const int LegacyControlPort = 18877;
@@ -64,6 +64,9 @@ namespace RigPlayPlugin
 
         public List<PairedTablet> PairedTablets { get; set; } = new List<PairedTablet>();
 
+        /// <summary>The "Data to CarPlay" section: what goes into the telemetry message (spec §6.9).</summary>
+        public TelemetrySettings Telemetry { get; set; } = new TelemetrySettings();
+
         /// <summary>
         /// Clamps and repairs every value in place, so the rest of the plugin can trust the object: ports in range
         /// and distinct, no null strings, volume in 0..100, and a tablet list without blanks or duplicates.
@@ -78,7 +81,8 @@ namespace RigPlayPlugin
                 if (AudioPort == LegacyAudioPort) AudioPort = ProtocolDefaults.AudioPort;
                 SchemaVersion = CurrentSchemaVersion;
             }
-            if (SchemaVersion < 1 || SchemaVersion > CurrentSchemaVersion) SchemaVersion = CurrentSchemaVersion;
+            // 2 -> 3 only added Telemetry, which a file without it gets from its default.
+            if (SchemaVersion < 1 || SchemaVersion > CurrentSchemaVersion || SchemaVersion == 2) SchemaVersion = CurrentSchemaVersion;
 
             if (!IsValidHostId(HostId)) HostId = NewHostId();
             HostName = Clean(HostName);
@@ -100,6 +104,8 @@ namespace RigPlayPlugin
             AudioDeviceId = Clean(AudioDeviceId);
 
             Volume = Math.Min(MaxVolume, Math.Max(MinVolume, Volume));
+
+            Telemetry = (Telemetry ?? new TelemetrySettings()).Normalize();
 
             PairedTablets = (PairedTablets ?? new List<PairedTablet>())
                 .Where(t => t != null && !string.IsNullOrWhiteSpace(t.Id))
@@ -142,6 +148,42 @@ namespace RigPlayPlugin
         internal static string Clean(string value)
         {
             return value == null ? "" : value.Trim();
+        }
+    }
+
+    /// <summary>
+    /// The "Data to CarPlay" section (#40): a master switch, one switch per telemetry field, and the fake-GPS strategy
+    /// that produces lat/lon/alt. gameRunning is always sent: it is how the tablet learns that the game stopped.
+    /// </summary>
+    public class TelemetrySettings
+    {
+        /// <summary>Master switch: nothing is sent while it is off.</summary>
+        public bool Enabled { get; set; } = true;
+
+        public bool SendSpeed { get; set; } = true;
+        public bool SendGear { get; set; } = true;
+        public bool SendHeading { get; set; } = true;
+        public bool SendNight { get; set; } = true;
+        public bool SendFuel { get; set; } = true;
+        public bool SendRange { get; set; } = true;
+        public bool SendRpm { get; set; } = true;
+        public bool SendTrackName { get; set; } = true;
+        public bool SendSessionType { get; set; } = true;
+
+        /// <summary>How lat/lon/alt are made up (<see cref="Telemetry.GpsStrategies"/>); "off" sends no position.</summary>
+        public string GpsStrategy { get; set; } = global::RigPlayPlugin.Telemetry.GpsStrategies.Off;
+
+        /// <summary>True when at least one data field would be sent (spec §6.9: nothing is sent otherwise).</summary>
+        public bool AnyFieldEnabled()
+        {
+            return SendSpeed || SendGear || SendHeading || SendNight || SendFuel || SendRange || SendRpm || SendTrackName || SendSessionType
+                || GpsStrategy != global::RigPlayPlugin.Telemetry.GpsStrategies.Off;
+        }
+
+        public TelemetrySettings Normalize()
+        {
+            if (!global::RigPlayPlugin.Telemetry.GpsStrategies.IsKnown(GpsStrategy)) GpsStrategy = global::RigPlayPlugin.Telemetry.GpsStrategies.Off;
+            return this;
         }
     }
 
