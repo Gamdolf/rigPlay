@@ -39,7 +39,6 @@ class DashboardActivity : ComponentActivity(), DashboardWebViewSurface.Fullscree
     private var overlayText: TextView? = null
     private var retryButton: Button? = null
     private var returnButton: Button? = null
-    private var returnIcon: java.io.File? = null
     private var shownSurface: DashboardWebViewSurface? = null
     private var fullscreenView: View? = null
     private var fullscreenCallback: WebChromeClient.CustomViewCallback? = null
@@ -146,7 +145,6 @@ class DashboardActivity : ComponentActivity(), DashboardWebViewSurface.Fullscree
         returnButton?.text = getString(
             if (CarPlayBackgroundSession.hasSession()) R.string.rig_dashboard_carplay else R.string.rig_rigplay_home,
         )
-        updateReturnIcon()
         showSurface(holder.surface)
         val page = holder.page
         when (val content = holder.content ?: DashboardContent.resolve(RigSessionCoordinator.state, RigSessionCoordinator.isPaired)) {
@@ -161,16 +159,6 @@ class DashboardActivity : ComponentActivity(), DashboardWebViewSurface.Fullscree
             DashboardContent.Disconnected -> showMessage(getString(R.string.rig_dashboard_disconnected), retry = false)
             DashboardContent.NotPaired -> showMessage(getString(R.string.rig_dashboard_not_paired), retry = false)
         }
-    }
-
-    /** SimHub's own icon on the return button once it was fetched from the PC (#52). */
-    private fun updateReturnIcon() {
-        val button = returnButton ?: return
-        val file = RigSessionCoordinator.simHubIconFile(this)
-        if (file == returnIcon) return
-        returnIcon = file
-        button.setCompoundDrawablesRelative(RigSessionCoordinator.simHubIcon(this, dp(24)), null, null, null)
-        button.compoundDrawablePadding = dp(8)
     }
 
     /** Keeps the holder's current surface (a new one after a release) in this screen's layout. */

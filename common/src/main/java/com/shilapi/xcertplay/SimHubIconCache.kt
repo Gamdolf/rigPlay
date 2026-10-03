@@ -7,7 +7,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * SimHub's own icon for the SimHub button, the dashboard's return button and the CarPlay car icon
+ * SimHub's own icon for the SimHub button and the CarPlay car icon
  * (#52), fetched from the PC instead of shipped: SimHub's web dash server serves its favicons
  * (`/favicons/android-icon-192x192.png`, a 192×192 RGBA PNG of about 10 KB on 9.12.6). Fetched once
  * per SimHub (`hostId`) while the link is up and the web dash server reachable, and kept in
