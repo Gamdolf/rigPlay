@@ -1,6 +1,44 @@
-# Building DiPlay
+# Building rigPlay
 
-Requirements: JDK 25, Android SDK 37, NDK 28.2.13676358 and the included Gradle wrapper.
+The repository holds two builds: the Android app (Gradle, at the repository root) and the SimHub plugin
+(.NET, in `plugin/`). CI runs both on every pull request (`.github/workflows/ci.yml`).
+
+## Android app
+
+Requirements:
+
+- JDK 25 (what CI uses). JDK 21 also works for local builds.
+- Android SDK with platform 37 (`platforms;android-37.0`) and build-tools 36.0.0. Point Gradle at it with
+  `ANDROID_HOME` or `sdk.dir` in `local.properties`.
+- NDK 28.2.13676358 for the native code in `shared/`. Gradle downloads it on the first build if the SDK
+  licences are accepted.
+- The included Gradle wrapper (`./gradlew`); no separate Gradle install.
+
+The same commands CI runs:
+
+```sh
+./gradlew :shared:testDebugUnitTest :common:testDebugUnitTest :mobile:lintDebug :mobile:assembleDebug
+```
+
+Output: `mobile/build/outputs/apk/debug/mobile-debug.apk`.
+
+This APK contains no accessory identity. It installs and runs, but it **cannot connect to an iPhone**.
+Tests generate synthetic identities at runtime; no key files are tracked. To build an APK that connects,
+see [Accessory identity](#accessory-identity-required-to-connect-to-an-iphone).
+
+## SimHub plugin
+
+Requirements: the .NET 8 SDK. No Windows, Visual Studio or SimHub install is needed; the SimHub
+assemblies the plugin compiles against are in `plugin/lib/`.
+
+```sh
+dotnet test plugin/RigPlay.Tests
+dotnet build plugin/RigPlay -c Release
+```
+
+Output: `plugin/RigPlay/bin/Release/net48/RigPlay.dll`. Install it as described in
+[plugin/INSTALL.md](../plugin/INSTALL.md). Details of the plugin's layout are in
+[plugin/README.md](../plugin/README.md).
 
 ## Version
 
@@ -9,38 +47,8 @@ The root `VERSION` file holds the version (`0.1.0`). `mobile/build.gradle.kts` r
 workflow refuses a tag other than `v<VERSION>`. The Android `versionCode` lives in
 `mobile/build.gradle.kts` and is bumped by hand for every release.
 
-## Source and CI builds
+## Releases from CI
 
-```sh
-./gradlew :shared:testDebugUnitTest :common:testDebugUnitTest :mobile:lintDebug :mobile:assembleDebug
-```
-
-The resulting source-only APK contains no accessory identity. Standalone CarPlay requires runtime authentication provisioning. Tests generate synthetic identities at runtime; no test private-key files are tracked.
-
-## Local release packaging
-
-Provide an external asset directory using `RIGPLAY_AUTH_ASSETS_DIR`. The directory must contain exactly the intended runtime files under `offline-mfi/identity.pk8` and `offline-mfi/certificate.p7b`. Neither file belongs in Git. The build permits those two files only when this explicit input is set and rejects unexpected credential containers elsewhere in APK assets.
-
-Set `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD` locally for your Android signing key. Never commit these values or the keystore. Different signing keys cannot update an existing project-signed installation.
-
-```sh
-./gradlew :shared:testDebugUnitTest :common:testDebugUnitTest :mobile:lintRelease :mobile:assembleRelease
-```
-
-Output: `mobile/build/outputs/apk/release/mobile-release.apk`. The release APK deliberately contains the experimental identity described in the notices; it is extractable by recipients. The separate Android signing key is not included. This Gradle workflow uses explicit environment inputs.
-
-The public release source archive corresponds to the tagged source and excludes runtime identities, signing keys, local configuration and build output.
-
-## Standalone car-test APK
-
-Use `:mobile:assembleStandaloneDebug` for a test APK that must connect to an iPhone:
-
-```sh
-RIGPLAY_AUTH_ASSETS_DIR=/absolute/path/to/runtime-assets ./gradlew :mobile:assembleStandaloneDebug
-```
-
-This task refuses missing or empty runtime inputs. `assembleDebug` remains an identity-free
-source/CI build when the explicit asset input is absent; do not install that output as a
-standalone car-test package. Before delivery, verify both `assets/offline-mfi/identity.pk8`
-and `assets/offline-mfi/certificate.p7b` in the APK against the selected local inputs.
-Update the existing test app without uninstalling it to preserve its settings.
+Pushing a tag `v<VERSION>` runs `.github/workflows/release.yml`, which publishes the APK and
+`rigPlay-plugin.zip` on a GitHub release. The CI APK is identity-less, so it cannot connect to an
+iPhone either. It is signed only when the repository's keystore secrets are set.

@@ -1,40 +1,133 @@
 # Install and connect
 
-1. Park the car. Download `DiPlay-0.2.10.apk` from the official GitHub release linked on the website.
-2. Install on the Android head unit using its supported APK installation method. Do not install on the iPhone. Update over an existing DiPlay beta to retain settings and pairing records; the signing key is unchanged.
-3. Open DiPlay. Grant the permissions requested for the features you use: Bluetooth/Nearby devices, Wi-Fi/Location on older Android, and microphone for Siri/calls. Allow notifications for connection controls.
-4. Close other phone-projection apps before connecting.
+rigPlay has two parts: the app on the tablet and the plugin in SimHub on the PC. Install the plugin first,
+then the app, then pair them. Some steps below describe v1 behaviour that is still being built; the
+[v1 milestone](https://github.com/xorob0/rigPlay/milestone/1) shows what has landed.
 
-## Wireless
+## Requirements
 
-Built-in car hotspot is the default. Open **Settings → Connection setup → Built-in car hotspot**, turn on the car hotspot at 5 GHz if available, and save its exact name and password. Keep Bluetooth and Wi-Fi enabled on the iPhone, pair it with the car, then tap **Connect phone**. The phone joins automatically after the Bluetooth handshake; manual Wi-Fi joining and ADB are not required. **Choose iPhone** changes the selected paired device. See [the setup guide](CONNECTION_SETUP.md).
+- **Tablet:** Android 10 or later, with Wi-Fi Direct and Bluetooth. The APK installs on Android 9, but
+  wireless CarPlay needs Wi-Fi Direct, which needs Android 10. Wireless on tablets is still being validated;
+  see [Compatibility](COMPATIBILITY.md).
+- **PC:** Windows with SimHub 9.12.6 or later.
+- **Network:** the tablet and the PC on the same home network (Wi-Fi or Ethernet for the PC, Wi-Fi for the
+  tablet). The tablet stays on that network; the phone connects to the tablet separately.
+- **Phone:** an iPhone with CarPlay enabled (Settings → General → CarPlay). No jailbreak.
 
-Wi-Fi Direct remains an alternative on Android 10+. The Local hotspot option has been removed; existing selections migrate to built-in hotspot. USB remains available.
+## 1. Install the plugin
 
-## USB
+Follow [plugin/INSTALL.md](../plugin/INSTALL.md). In short: close SimHub, copy `RigPlay.dll` into the folder
+that holds `SimHubWPF.exe` (usually `C:\Program Files (x86)\SimHub\`), unblock the file, start SimHub and
+accept the new plugin. Allow SimHub through Windows Firewall on **Private** networks when Windows asks.
+**rigPlay** then appears in SimHub's left menu.
 
-Connect the iPhone to a USB **data** port with a data-capable cable and choose **Connect with USB**. Approve USB access, Trust/CarPlay and the local VPN permission if requested. The local VPN carries the USB network link; it is not an internet VPN service. Charge-only ports/cables cannot work.
+## 2. Turn on SimHub's web dash server
 
-## Settings
+The tablet shows SimHub dashboards through SimHub's own web dash server.
 
-Swipe down with three fingers in CarPlay to open DiPlay settings, or return to the home screen. Icon/text size, resolution and frame rate use **Apply and reconnect** during an active session. A selection alone does not apply; Cancel preserves the old setting. When disconnected, **Save** applies to the next connection. Other settings also apply on the next connection.
+1. In SimHub, open **Settings → Web dash server**.
+2. Turn it on. Keep the port at **8888** unless you have a reason to change it.
 
-Start with 30 fps, Efficient video (HEVC) off and Default icon/text size. Try 80% or 60% resolution for a slower head unit. Some iPhone/head-unit combinations still ignore icon/text scaling.
+The rigPlay page shows whether the server answers. If it does not, the tablet shows "SimHub's web dash
+server is off" instead of the dashboard.
 
-## Connection recovery and reports
+## 3. Install the app on the tablet
 
-If reinstalling left an old group, close other projection apps, then use **Settings → Wireless connection help → Reset CarPlay Wi-Fi**. DiPlay asks before removing an unrecognized Wi-Fi Direct group. Updating in place is preferable to uninstalling.
+1. Get the APK. APKs built by GitHub Actions contain no accessory identity and cannot connect to an iPhone.
+   Until a release says otherwise, build your own with the identity:
+   [Accessory identity](BUILD.md#accessory-identity-required-to-connect-to-an-iphone).
+2. Install it with the tablet's file manager (allow installs from that app when asked), or from a computer:
 
-Use **Settings → Diagnostics → Save diagnostic report** after reproducing a problem. Android 10+ saves to **Downloads/DiPlay**; Android 9 uses a document picker. Review the file, then attach it to a GitHub issue with car model, DiLink/Android versions, iPhone/iOS, transport and reproduction steps. Nothing is uploaded automatically.
+   ```sh
+   adb install -r rigPlay-0.1.0.apk
+   ```
 
-APK installation restrictions are controlled by your car's firmware. ADB is optional if your car supports it, not an app runtime requirement:
+   Install over an existing rigPlay to keep its settings and pairing. An APK signed with a different key
+   cannot update an existing install.
+3. Open rigPlay and grant what it asks for: Nearby devices (Bluetooth and Wi-Fi Direct), Microphone (Siri
+   and calls), Notifications (connection controls), and Location on older Android versions.
+4. Close any other phone-projection app.
 
-```sh
-adb install -r DiPlay-0.2.10.apk
-```
+## 4. Pair the tablet with the PC
 
-Only use a trusted computer. A different signing certificate cannot update this build; do not uninstall until you have saved any reports you need.
+On first start the tablet shows **Connect rigPlay to SimHub**.
 
-## BYD navigation
+1. Pick your PC from the list. PCs running the plugin appear on their own. If yours does not, choose
+   **Enter address manually** and type the PC's IP address and the control port shown on the rigPlay page
+   (default `23711`).
+2. The rigPlay page in SimHub shows "Tablet *name* wants to connect" with a 6-digit PIN.
+3. Type the PIN on the tablet. It is valid for 120 seconds and allows 3 attempts. **Deny** on the PC
+   refuses the tablet.
 
-See [BYD navigation displays](BYD_NAVIGATION.md) for the firmware scope, map metadata requirements, settings and cleanup behavior. No runtime ADB starter is required.
+After that the tablet reconnects to the PC by itself whenever both are running. To undo a pairing, use
+**Forget** next to the tablet on the rigPlay page, or **Settings → SimHub → Forget** on the tablet.
+
+## 5. Choose the dashboard
+
+On the rigPlay page, under **Dashboards**, choose the dashboard the tablet shows **While driving**, and
+optionally another one **While idle**. The list holds the dashboards installed in SimHub.
+
+On the tablet, the **SimHub** button on the home screen, or the car icon inside CarPlay (labelled
+SimHub), opens that dashboard full screen. The **CarPlay** button or an edge swipe returns to CarPlay
+without reconnecting the phone.
+
+## 6. Pair the phone
+
+1. On the iPhone, open **Settings → Bluetooth** and pair with the tablet.
+2. On the tablet, tap **Connect phone**. Use **Choose iPhone** if several phones are paired.
+3. The phone joins the tablet's Wi-Fi Direct group by itself after the Bluetooth handshake. Do not join
+   any Wi-Fi network by hand. Keep Wi-Fi and Bluetooth on, on both devices. The tablet's home Wi-Fi stays
+   connected.
+
+Allow CarPlay on the iPhone when it asks. Once paired, the phone connects whenever the PC is running SimHub
+and the phone is near the tablet.
+
+**Wired fallback:** plug the iPhone into the tablet's USB port with a data cable and tap **Connect with
+USB**. Allow Trust and CarPlay on the iPhone, and the local VPN on the tablet if asked. The VPN carries
+the USB link only; it is not an internet VPN.
+
+## 7. Choose where audio plays
+
+CarPlay audio (music, navigation, Siri and calls) is sent from the tablet to the PC and played there.
+
+- On the rigPlay page, under **Audio**, choose the **Output device** (Windows default unless you pick
+  another), the volume, and mute.
+- Siri and calls lower the music while they play.
+- On the tablet, **Settings → Audio output** chooses between the PC (default) and the tablet's own speaker.
+- The microphone for Siri and calls is the tablet's in v1.
+
+## 8. Wheel buttons and dashboard data
+
+The plugin adds SimHub actions you can map to wheel or button-box buttons in SimHub's **Controls and
+events**: `RigPlay.PlayPause`, `RigPlay.NextTrack`, `RigPlay.PreviousTrack`, `RigPlay.Siri`,
+`RigPlay.ShowDashboard`, `RigPlay.ShowCarPlay` and `RigPlay.ToggleScreen`.
+
+Dashboards can bind properties such as `RigPlay.NowPlaying.Title`, `RigPlay.NowPlaying.Artist` and
+`RigPlay.PhoneConnected`. The full list is in [docs/protocol.md §16](protocol.md#16-simhub-surface).
+
+## When the PC is off
+
+The phone is connected only while the PC runs SimHub with the plugin.
+
+- When the PC shuts down or SimHub closes, the tablet notices within about 5 seconds, releases the phone
+  (CarPlay ends on the iPhone) and shows "waiting for SimHub".
+- When SimHub is back, the tablet reconnects to it and the phone rejoins by itself. You do not need to
+  touch the tablet or the phone.
+- **Connect phone** still works while SimHub is down, with a warning. Audio then plays on the tablet.
+
+## Display and start-up settings
+
+- In CarPlay, swipe down with three fingers to open rigPlay settings.
+- **CarPlay size**, **Resolution** and **Frame rate** change with **Apply and reconnect**. Start with
+  Default size and 30 fps; lower the resolution on a slow tablet.
+- **Auto-start on boot** opens rigPlay when the tablet starts. Some tablets block this; check the
+  tablet's startup and battery settings.
+
+## Problems and reports
+
+- If a previous projection app left a Wi-Fi Direct group running, use **Settings → Wireless connection
+  help → Reset CarPlay Wi-Fi**.
+- After reproducing a problem, use **Settings → Diagnostics → Save diagnostic report**. Reports are saved
+  to **Downloads/rigPlay**. Review the file before attaching it to a GitHub issue with the tablet model,
+  Android version, iPhone model, iOS version, SimHub version and the steps. Nothing is uploaded
+  automatically. See [Privacy](PRIVACY.md) and [Wireless diagnostics](WIRELESS_DIAGNOSTICS.md).

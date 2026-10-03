@@ -1,60 +1,106 @@
-# DiPlay
+# rigPlay
 
-**CarPlay for compatible BYD Android head units.** Wired and wireless, with the familiar DiAuto interface. Independent app: `com.shihab.diplay`.
+rigPlay turns an Android tablet mounted on a sim-racing rig into a CarPlay screen for your iPhone, and
+ties it to SimHub on the PC. The phone connects to the tablet wirelessly, CarPlay audio plays through
+the PC's speakers or headset, a SimHub button on the tablet shows a SimHub dashboard, and wheel buttons
+control music. When the PC is off, the phone is released.
 
-> **BYD support scope:** These projects focus on BYD cars. They may work on other brands, but other brands are unsupported and there are no plans to add support or fix brand-specific incompatibilities.
+How it works:
 
-[Download & website](https://shihabal3amri.github.io/DiPlay/) · [Release](https://github.com/shihabal3amri/DiPlay/releases/tag/v0.2.10) · [Report a problem](https://github.com/shihabal3amri/DiPlay/issues/new/choose)
+- **Tablet app.** An Android app (`io.xorob.rigplay`) that runs CarPlay. It joins your home network to
+  talk to the PC and hosts its own Wi-Fi Direct group for the phone.
+- **SimHub plugin.** A plugin with a rigPlay page in SimHub. It pairs the tablet with a PIN, chooses the
+  dashboard the tablet shows, plays the tablet's CarPlay audio on a PC output device, and exposes
+  now-playing properties and media actions to SimHub.
+- **Phone.** An ordinary iPhone with CarPlay. It pairs with the tablet over Bluetooth and then connects
+  over Wi-Fi Direct. It never talks to the PC.
 
-![DiPlay home](site/assets/home.png)
+## Status
 
-## 0.2.10 — public preview
+Pre-release. Version 0.1.0 is in progress; see the [v1 milestone](https://github.com/xorob0/rigPlay/milestone/1)
+for what is done and what is left. Some features described in these documents are not in the code yet.
 
-Install on the **car**, not the iPhone. No jailbreak, dongle, Mac, account or authentication server is required for use. Core CarPlay does not require ADB; optional dashboard, battery, wheel-speed and parked-video features do. Your head unit must permit APK installation. Wireless supports Wi-Fi Direct or the car’s existing hotspot; Wi-Fi Direct requires Android 10+; the APK supports Android 9+ for wired use.
+Wireless CarPlay on a tablet that is also connected to home Wi-Fi has not been verified yet
+([#33](https://github.com/xorob0/rigPlay/issues/33)). Wired USB is the fallback. See
+[Compatibility](docs/COMPATIBILITY.md).
 
-- Wired USB and wireless CarPlay with local authentication.
-- BYD HUD navigation with arrows, distance and street names on verified firmware.
-- Car hotspot support, improved audio buffering and saved receive diagnostics.
-- Automatic address discovery, fixed-channel Wi-Fi fallbacks and successful-configuration memory.
-- Icon/text size, resolution and frame rate; applying a display change reconnects CarPlay.
-- Local diagnostic export. Reports are sent only if you choose to share them.
-- Separate installation alongside DiAuto. Run one projection app at a time.
+APKs built by CI contain no accessory identity and cannot connect to an iPhone. See
+[Accessory identity](docs/BUILD.md#accessory-identity-required-to-connect-to-an-iphone).
 
-This is **not an Apple-certified product**. The APK bundles an experimental accessory identity recovered from public Carlinkit firmware, not a newly provisioned MFi identity for DiPlay. A bundled private key is extractable. Acceptance after future iOS updates, reliability across head units and suitability of that identity for general distribution are unresolved. This release invites community testing; it is not a guarantee of universal compatibility.
+## Install
 
-Earlier releases were tested on the development DiLink5.1 car: live windshield guidance and street names work, Car hotspot now starts CarPlay, and Wi-Fi Direct performance is substantially improved. Occasional audio cutouts remain and are deferred to a later update. The floating-map test build was installed on the development DiLink 5.1 car; feedback led to the pinch corrections in 0.2.9. Earlier wheel-speed and video contributions were tested on a BYD Tang with DiLink 5.0 and an iPhone 15 Pro on iOS 27; wheel-speed dead reckoning in tunnels remains unverified. Broader head-unit and iOS compatibility is not guaranteed. The HUD firmware scope and cleanup limits are documented in [BYD navigation](docs/BYD_NAVIGATION.md).
+1. Install the SimHub plugin on the PC: [plugin/INSTALL.md](plugin/INSTALL.md).
+2. Turn on SimHub's web dash server (**Settings → Web dash server**, port 8888).
+3. Install the rigPlay APK on the tablet and pair it with the PC using the PIN shown on the rigPlay page.
+4. Pair the iPhone with the tablet over Bluetooth and tap **Connect phone**.
 
-## What’s new in 0.2.10
+The full steps are in [docs/INSTALL.md](docs/INSTALL.md).
 
-- CarPlay song metadata, playback position and album artwork for compatible Android launchers and media displays.
-- Available-port selection when another service occupies AirPlay port 7000, with the selected port advertised to the iPhone.
-- Targeted USBMUX padding handling that preserves complete following frames, and USB startup without completed wireless-hotspot settings.
-- Wi-Fi Direct compatibility for unknown reported security types, bounded busy-channel retries and 5 GHz to 2.4 GHz fallback.
-- Available Android echo cancellation and noise suppression during CarPlay calls, with previous audio mode restored afterward.
-- BYD CAN/CANFD battery-protocol detection and a saved show/hide setting for the home-screen dashboard-map mirror.
-- Optional video while in P uses a new player with seeking and ten-second skip controls. URL validation and redirects protect local Android resources; protected video remains unsupported.
-- More Ukrainian translations and bounded Bluetooth, USB restart, boot and microphone diagnostics in exported reports.
+## Build
 
-Optional video requires network ADB and a valid parked-gear reading. Battery, dashboard and call effects depend on firmware and Android support. See [0.2.10 release notes](docs/RELEASE-NOTES-0.2.10.md) for all ten contributions, regression fixes and validation limits. Existing device-specific wireless loss, microphone and reconnect reports still need hardware testing.
+The Android app builds with the Gradle wrapper; the plugin builds with the .NET 8 SDK on any OS. See
+[docs/BUILD.md](docs/BUILD.md).
+
+```sh
+./gradlew :shared:testDebugUnitTest :common:testDebugUnitTest :mobile:assembleDebug
+dotnet build plugin/RigPlay -c Release
+```
+
+## Screenshots
+
+The rigPlay page in SimHub:
+
+![rigPlay page in SimHub](docs/images/plugin-page-skeleton.png)
+
+The Audio section receiving audio:
+
+![Audio section of the rigPlay page](docs/images/plugin-audio-section.png)
+
+Tablet screenshots (home screen, pairing, SimHub dashboard) will be added once those screens exist.
+
+The project website is offline for v1. It will return with real screenshots.
 
 ## Documentation
 
 - [Install and connect](docs/INSTALL.md)
-- [Compatibility and troubleshooting](docs/COMPATIBILITY.md)
-- [Privacy and diagnostic reports](docs/PRIVACY.md)
+- [SimHub plugin install](plugin/INSTALL.md)
 - [Build from source](docs/BUILD.md)
-- [Validation](docs/VALIDATION.md)
-- [Release notes](CHANGELOG.md)
-- [Credits and licenses](docs/THIRD_PARTY_NOTICES.md)
-
-The website is available in English, Arabic, Russian, Ukrainian, Spanish and Simplified Chinese. The app interface supports those same six languages. Choose the app language in Settings; on Android 13+, it stays synchronized with Android’s per-app language setting.
+- [Rig test checklist](docs/TESTING.md)
+- [Compatibility](docs/COMPATIBILITY.md)
+- [Wireless diagnostics](docs/WIRELESS_DIAGNOSTICS.md)
+- [Privacy and diagnostic reports](docs/PRIVACY.md)
+- [Security](SECURITY.md)
+- [PC ↔ tablet protocol](docs/protocol.md)
+- [Design decisions](docs/decisions/README.md)
+- [SimHub plugin internals](plugin/README.md)
+- [Contributing](CONTRIBUTING.md)
+- [Changelog](CHANGELOG.md)
+- [Credits and licences](docs/THIRD_PARTY_NOTICES.md)
 
 ## Source and credits
 
-Based on [xcertplay](https://github.com/shilapi/xcertplay), GPL-3.0. The home/settings UI and website adapt [DiAuto](https://github.com/shihabal3amri/DiAuto), AGPL-3.0; that license is included in `docs/licenses`. Preserve those notices when distributing modifications. CarPlay and its icon belong to Apple Inc.; no Apple or BYD affiliation or endorsement is implied.
+rigPlay is a fork of [DiPlay](https://github.com/shihabal3amri/DiPlay) by shihabal3amri. DiPlay is based on
+[xcertplay](https://github.com/shilapi/xcertplay) by shilapi, licensed under GPL-3.0; the original README is
+kept in [docs/UPSTREAM-README.md](docs/UPSTREAM-README.md). xcertplay credits [LIVI](https://github.com/f-io/LIVI)
+and [Showcase](https://github.com/amineross/showcase) for protocol research.
 
-This repository starts with a clean public source snapshot. Local research, tester reports and release-signing secrets are excluded. The complete source corresponding to the APK is provided with every release; experimental runtime identity assets are described separately in the build instructions and notices.
+The home and settings UI adapts [DiAuto](https://github.com/shihabal3amri/DiAuto) by shihabal3amri, licensed
+under AGPL-3.0; that licence is in [docs/licenses](docs/licenses/DiAuto-AGPL-3.0.txt). Keep these notices when
+you distribute modified versions.
 
-## Local release packaging
+CarPlay and the CarPlay icon belong to Apple Inc. rigPlay is an independent project; no affiliation with
+or endorsement by Apple or SimHub is implied.
 
-The release APK intentionally contains the experimental accessory identity. The Git repository and source archive exclude all accessory and Android signing keys; tests generate synthetic identities at runtime. Source/CI builds omit runtime identity assets by default. Local release builds explicitly select an external asset directory. Publishing the APK makes its bundled identity extractable; building locally does not preserve that identity's confidentiality.
+### Accessory identity
+
+rigPlay is **not an Apple-certified product**. To connect to an iPhone, the app needs an accessory identity.
+rigPlay uses the same experimental identity as DiPlay: a certificate and key recovered from public Carlinkit
+firmware, not an MFi identity issued for rigPlay. It is not in this repository. An APK that bundles it
+makes the private key extractable by anyone who has the APK. Whether iPhones keep accepting it after
+future iOS updates, and whether it is suitable for general distribution, are unresolved. See
+[docs/THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md) and [SECURITY.md](SECURITY.md).
+
+## Licence
+
+GPL-3.0; see [LICENSE](LICENSE). The DiAuto-derived UI file is AGPL-3.0-only. Details are in
+[docs/THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md).
