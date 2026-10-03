@@ -18,26 +18,27 @@ import android.view.KeyEvent
 import com.shilapi.xcertplay.airplay.CarPlayMediaButton
 import com.shilapi.xcertplay.media.CarPlayNowPlaying
 import com.shilapi.xcertplay.orchestration.CarPlayController
+import com.shilapi.xcertplay.simhub.SimHubEndpoints
 import java.util.concurrent.Executors
 import java.util.concurrent.Executor
 
 /**
  * Steering-wheel and other hardware media buttons for CarPlay.
  *
- * Android delivers media keys to a media session; BYD picks the session of the audio-focus
- * owner. Once CarPlay plays music, DiPlay holds audio focus and an active session until the
+ * Android delivers media keys to a media session; some head units pick the session of the
+ * audio-focus owner. Once CarPlay plays music, rigPlay holds audio focus and an active session until the
  * CarPlay session ends, so play also works after a pause. Keys go to the iPhone as CarPlay media
  * HID presses ([CarPlayMediaButton]).
  */
 internal object CarPlayMediaKeys {
-    private const val TAG = "DiPlay-MediaKeys"
+    private const val TAG = "rigPlay-MediaKeys"
     private const val ACTIONS = PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or
         PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SKIP_TO_PREVIOUS
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val artworkQueue = NowPlayingArtworkQueue(
         worker = Executors.newSingleThreadExecutor { task ->
-            Thread(task, "diplay-now-playing-artwork").apply { isDaemon = true }
+            Thread(task, "rigplay-now-playing-artwork").apply { isDaemon = true }
         },
         main = Executor { mainHandler.post(it) },
         decode = ::decodeArtwork,
@@ -51,6 +52,12 @@ internal object CarPlayMediaKeys {
     private var focusHeld = false
     private var appContext: Context? = null
     private var mediaAudioActive = false
+
+    /**
+     * False while CarPlay audio plays on the PC (#31): the session still takes the keys and shows the
+     * metadata, but nothing plays on this device, so it does not take audio focus from other apps.
+     */
+    @Volatile var audioFocusAllowed: () -> Boolean = { true }
     private var nowPlaying = CarPlayNowPlaying()
     private var elapsedUpdatedAt = 0L
     private var artwork: Bitmap? = null
@@ -67,6 +74,8 @@ internal object CarPlayMediaKeys {
         next.playbackListener = { playing -> onIphonePlaying(next, playing) }
         next.nowPlayingListener = { update -> onNowPlayingChanged(next, update) }
         next.artworkListener = { id, bytes -> onArtworkChanged(next, id, bytes) }
+        // SimHub media commands and now-playing status (#32) follow the same controller.
+        SimHubEndpoints.mediaBridge.attach(next)
     }
 
     /** Ends key handling for [expected]; a newer controller's state is left alone. */
@@ -76,6 +85,7 @@ internal object CarPlayMediaKeys {
         expected.playbackListener = null
         expected.nowPlayingListener = null
         expected.artworkListener = null
+        SimHubEndpoints.mediaBridge.detach(expected)
         controller = null
         releaseLocked()
     }
@@ -138,7 +148,7 @@ internal object CarPlayMediaKeys {
     // would; only the start counts, so a car source picked while the iPhone plays on is not undone.
     private fun regainFocusLocked() {
         val request = focusRequest ?: return
-        if (focusHeld) return
+        if (focusHeld || !audioFocusAllowed()) return
         val audio = appContext?.getSystemService(AudioManager::class.java) ?: return
         focusHeld = audio.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         Log.i(TAG, "audio focus regained=$focusHeld")
@@ -167,10 +177,10 @@ internal object CarPlayMediaKeys {
                 if (change == AudioManager.AUDIOFOCUS_LOSS) synchronized(this) { focusHeld = false }
             }, mainHandler)
             .build()
-        val granted = audio?.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        val granted = audioFocusAllowed() && audio?.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         focusRequest = request
         focusHeld = granted
-        session = MediaSession(context, "DiPlay CarPlay").apply {
+        session = MediaSession(context, "rigPlay CarPlay").apply {
             setCallback(callback, mainHandler)
             setMetadata(androidMetadata(nowPlaying, artwork))
             isActive = true
@@ -217,12 +227,6 @@ internal object CarPlayMediaKeys {
     }
 
     private fun send(index: Int, source: String) {
-        // While the car's video player is on screen the wheel drives it: a CarPlay play/pause would
-        // make the iPhone end the video session.
-        if (CarPlayVideo.onMediaKey(index)) {
-            Log.i(TAG, "media key $source -> car video player $index")
-            return
-        }
         val sent = synchronized(this) { controller }?.sendMediaButton(index) ?: false
         Log.i(TAG, "media key $source -> CarPlay $index sent=$sent")
     }

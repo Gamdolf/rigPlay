@@ -1,13 +1,13 @@
 package com.shilapi.xcertplay.glance
 
-import com.shilapi.xcertplay.hud.BydHudRouteState
-import com.shilapi.xcertplay.hud.ClusterSongState
+import com.shilapi.xcertplay.guidance.NowPlayingSongState
+import com.shilapi.xcertplay.guidance.RouteGuidanceState
 import com.shilapi.xcertplay.iap2.wire.Iap2Frame
 
 /**
  * What CarPlay is doing, at a glance, for widgets and other screens outside CarPlay: the next
  * maneuver from iAP2 route guidance (0x5201/0x5202) and the song from NowPlayingUpdate (0x5001).
- * Fed by every CarPlay session, whatever the BYD output settings.
+ * Fed by every CarPlay session.
  */
 object CarPlayGlance {
     /** One state of the glance; [maneuverType] is Apple's RouteGuidanceManeuverType, null without a route. */
@@ -24,8 +24,8 @@ object CarPlayGlance {
         val playing: Boolean = false,
     )
 
-    private val route = BydHudRouteState()
-    private val song = ClusterSongState()
+    private val route = RouteGuidanceState()
+    private val song = NowPlayingSongState()
     private var connected = false
     private var last = Snapshot()
 
@@ -42,9 +42,9 @@ object CarPlayGlance {
     fun onFrame(frame: Iap2Frame) {
         val changed = synchronized(this) {
             when (frame.messageId) {
-                BydHudRouteState.ROUTE_GUIDANCE_UPDATE, BydHudRouteState.ROUTE_GUIDANCE_MANEUVER_UPDATE ->
+                RouteGuidanceState.ROUTE_GUIDANCE_UPDATE, RouteGuidanceState.ROUTE_GUIDANCE_MANEUVER_UPDATE ->
                     runCatching { route.accept(frame.messageId, frame.payload) }
-                ClusterSongState.NOW_PLAYING_UPDATE -> runCatching { song.accept(frame) }
+                NowPlayingSongState.NOW_PLAYING_UPDATE -> runCatching { song.accept(frame) }
                 else -> return
             }
             publishLocked()
@@ -66,7 +66,7 @@ object CarPlayGlance {
     }
 
     private fun publishLocked(): Snapshot? {
-        val maneuver = route.currentApple()
+        val maneuver = route.current()
         val current = song.current()
         val next = Snapshot(
             connected = connected,

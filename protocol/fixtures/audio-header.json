@@ -1,0 +1,208 @@
+{
+  "type": "audio-header",
+  "description": "Audio datagram vectors for docs/protocol.md section 10.2. Not a control-channel message; the type value exists only so that every fixture's type matches its file name.",
+  "byteOrder": {
+    "header": "big-endian",
+    "payload": "little-endian"
+  },
+  "headerSize": 12,
+  "layout": [
+    {
+      "offset": 0,
+      "size": 2,
+      "field": "seq",
+      "encoding": "u16 big-endian"
+    },
+    {
+      "offset": 2,
+      "size": 1,
+      "field": "streamType",
+      "encoding": "u8: 1 media, 2 alt, 3 telephony, 4 reserved (mic)"
+    },
+    {
+      "offset": 3,
+      "size": 1,
+      "field": "flags",
+      "encoding": "u8: bit 0 start, bits 1-7 reserved (0)"
+    },
+    {
+      "offset": 4,
+      "size": 4,
+      "field": "timestamp",
+      "encoding": "u32 big-endian, sample frames"
+    },
+    {
+      "offset": 8,
+      "size": 2,
+      "field": "sampleRate",
+      "encoding": "u16 big-endian, units of 100 Hz"
+    },
+    {
+      "offset": 10,
+      "size": 1,
+      "field": "channels",
+      "encoding": "u8: 1 or 2"
+    },
+    {
+      "offset": 11,
+      "size": 1,
+      "field": "format",
+      "encoding": "u8: 1 pcm_s16le, 2 reserved (opus)"
+    },
+    {
+      "offset": 12,
+      "size": null,
+      "field": "payload",
+      "encoding": "interleaved s16 little-endian"
+    }
+  ],
+  "valid": [
+    {
+      "name": "media-first-datagram",
+      "description": "First datagram after audioStart: start flag set, seq and timestamp 0. Two stereo frames.",
+      "header": {
+        "seq": 0,
+        "streamType": 1,
+        "stream": "media",
+        "flags": 1,
+        "timestamp": 0,
+        "sampleRateHz": 48000,
+        "sampleRateField": 480,
+        "channels": 2,
+        "format": 1
+      },
+      "samples": [
+        1,
+        -1,
+        256,
+        -32768
+      ],
+      "frames": 2,
+      "headerHex": "000001010000000001e00201",
+      "payloadHex": "0100ffff00010080",
+      "datagramHex": "000001010000000001e002010100ffff00010080"
+    },
+    {
+      "name": "media-44k1-midstream",
+      "description": "Mid-stream at 44.1 kHz: seq 0x0201 and timestamp 0x0001E240 show the byte order. One stereo frame.",
+      "header": {
+        "seq": 513,
+        "streamType": 1,
+        "stream": "media",
+        "flags": 0,
+        "timestamp": 123456,
+        "sampleRateHz": 44100,
+        "sampleRateField": 441,
+        "channels": 2,
+        "format": 1
+      },
+      "samples": [
+        32767,
+        -2
+      ],
+      "frames": 1,
+      "headerHex": "020101000001e24001b90201",
+      "payloadHex": "ff7ffeff",
+      "datagramHex": "020101000001e24001b90201ff7ffeff"
+    },
+    {
+      "name": "alt-24k-mono",
+      "description": "Siri stream, 24 kHz mono. Two samples.",
+      "header": {
+        "seq": 7,
+        "streamType": 2,
+        "stream": "alt",
+        "flags": 0,
+        "timestamp": 1680,
+        "sampleRateHz": 24000,
+        "sampleRateField": 240,
+        "channels": 1,
+        "format": 1
+      },
+      "samples": [
+        4660,
+        -4660
+      ],
+      "frames": 2,
+      "headerHex": "000702000000069000f00101",
+      "payloadHex": "3412cced",
+      "datagramHex": "000702000000069000f001013412cced"
+    },
+    {
+      "name": "telephony-wraparound",
+      "description": "Call audio at 16 kHz mono with seq and timestamp just before they wrap. Three samples.",
+      "header": {
+        "seq": 65535,
+        "streamType": 3,
+        "stream": "telephony",
+        "flags": 0,
+        "timestamp": 4294967040,
+        "sampleRateHz": 16000,
+        "sampleRateField": 160,
+        "channels": 1,
+        "format": 1
+      },
+      "samples": [
+        0,
+        1000,
+        -1000
+      ],
+      "frames": 3,
+      "headerHex": "ffff0300ffffff0000a00101",
+      "payloadHex": "0000e80318fc",
+      "datagramHex": "ffff0300ffffff0000a001010000e80318fc"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "too-short",
+      "datagramHex": "000001010000000001e002",
+      "reason": "11 bytes: shorter than the 12-byte header."
+    },
+    {
+      "name": "header-only",
+      "datagramHex": "000001010000000001e00201",
+      "reason": "Header without payload: no complete frame."
+    },
+    {
+      "name": "streamType-zero",
+      "datagramHex": "000000010000000001e002010100ffff",
+      "reason": "streamType 0 is invalid."
+    },
+    {
+      "name": "streamType-mic-reserved",
+      "datagramHex": "000004010000000001e002010100ffff",
+      "reason": "streamType 4 (mic) is reserved and never sent tablet to plugin in protocol 1."
+    },
+    {
+      "name": "format-zero",
+      "datagramHex": "000001010000000001e002000100ffff",
+      "reason": "format 0 is invalid."
+    },
+    {
+      "name": "format-opus-reserved",
+      "datagramHex": "000001010000000001e002020100ffff",
+      "reason": "format 2 (Opus) is reserved in protocol 1."
+    },
+    {
+      "name": "channels-three",
+      "datagramHex": "000001010000000001e00301010002000300",
+      "reason": "channels 3 is invalid."
+    },
+    {
+      "name": "sampleRate-zero",
+      "datagramHex": "0000010100000000000002010100ffff",
+      "reason": "sampleRate field 0 is outside 80-480."
+    },
+    {
+      "name": "sampleRate-above-48k",
+      "datagramHex": "0000010100000000025802010100ffff",
+      "reason": "sampleRate field 600 (60 kHz) is outside 80-480."
+    },
+    {
+      "name": "payload-partial-frame",
+      "datagramHex": "000001010000000001e002010100ff",
+      "reason": "Stereo payload of 3 bytes is not a multiple of 4."
+    }
+  ]
+}
