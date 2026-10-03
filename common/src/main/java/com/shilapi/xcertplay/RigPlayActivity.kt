@@ -255,6 +255,7 @@ class RigPlayActivity : ComponentActivity() {
             }
         }
         section(content, getString(R.string.audio_routing)) { card ->
+            audioOutputControl(card)
             toggle(card, getString(R.string.contrib_audio_home_toggle_audio_focus), getString(R.string.contrib_audio_home_toggle_audio_focus_desc), AirPlayPersistence.loadAudioFocusEnabled(this)) { AirPlayPersistence.saveAudioFocusEnabled(this, it) }
             if (resources.getBoolean(R.bool.config_advanced_audio_channel_mapping)) {
                 toggle(card, getString(R.string.advanced_audio_channel_mapping),
@@ -393,6 +394,17 @@ class RigPlayActivity : ComponentActivity() {
             parent.addView(label(getString(R.string.wifi_direct_setup_hint), 16, MUTED))
             parent.addView(button(getString(R.string.open_tablet_wi_fi_settings), false) { openCarClientWifiSettings() }, matchButton(12, 60))
         }
+    }
+
+    /** "Audio output: PC via SimHub / this tablet" (#31); applies when CarPlay next connects. */
+    private fun audioOutputControl(parent: LinearLayout) {
+        val targets = listOf(com.shilapi.xcertplay.media.AudioOutputTarget.PC, com.shilapi.xcertplay.media.AudioOutputTarget.TABLET)
+        choice(parent, getString(R.string.audio_simhub_output),
+            listOf(getString(R.string.audio_simhub_output_pc), getString(R.string.audio_simhub_output_tablet)),
+            targets.indexOf(AirPlayPersistence.loadAudioOutputTarget(this)).coerceAtLeast(0)) {
+            AirPlayPersistence.saveAudioOutputTarget(this, targets[it])
+        }
+        parent.addView(label(getString(R.string.audio_simhub_output_note), 14, MUTED).apply { setPadding(0, 0, 0, dp(12)) })
     }
 
     private fun mediaChannelControl(parent: LinearLayout) {

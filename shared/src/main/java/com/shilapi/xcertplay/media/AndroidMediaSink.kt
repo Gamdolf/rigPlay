@@ -871,25 +871,12 @@ private class AudioRenderer(
     }
 
     private fun configureCodec(mime: String) {
-        val mediaFormat = MediaFormat().apply {
-            setString(MediaFormat.KEY_MIME, mime)
-            setInteger(MediaFormat.KEY_SAMPLE_RATE, format.sampleRate)
-            setInteger(MediaFormat.KEY_CHANNEL_COUNT, format.channels)
-            setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 64 * 1024)
-            if (mime == MediaFormat.MIMETYPE_AUDIO_AAC) {
-                setInteger(MediaFormat.KEY_IS_ADTS, 1)
-                setByteBuffer("csd-0", ByteBuffer.wrap(aacAudioSpecificConfig()))
-            } else {
-                setByteBuffer("csd-0", ByteBuffer.wrap(opusHead()))
-                setByteBuffer("csd-1", ByteBuffer.wrap(opusCodecDelay()))
-                setByteBuffer("csd-2", ByteBuffer.wrap(opusSeekPreRoll()))
-            }
-        }
+        val mediaFormat = CarPlayAudioCodecConfig.mediaFormat(format) ?: return
         if (mime == MediaFormat.MIMETYPE_AUDIO_AAC) {
             Log.i(
                 TAG,
                 "audio AAC config rate=${format.sampleRate} channels=${format.channels} " +
-                    "csd0=${aacAudioSpecificConfig().toHexString()}",
+                    "csd0=${CarPlayAudioCodecConfig.aacAudioSpecificConfig(format.sampleRate, format.channels).toHexString()}",
             )
         }
         codec = try {
@@ -1065,14 +1052,6 @@ private class AudioRenderer(
         ).streamType
     }
 
-    private fun aacAudioSpecificConfig(): ByteArray {
-        val frequencyIndex = MediaCodecSupport.aacFrequencyIndex(format.sampleRate)
-        val value = (AAC_OBJECT_TYPE_LC shl 11) or
-            (frequencyIndex shl 7) or
-            (format.channels.coerceIn(1, 7) shl 3)
-        return byteArrayOf((value ushr 8).toByte(), value.toByte())
-    }
-
     private fun usageFor(channel: AudioChannel): Int = when (channel) {
         AudioChannel.MEDIA -> AudioAttributes.USAGE_MEDIA
         AudioChannel.PHONE -> AudioAttributes.USAGE_VOICE_COMMUNICATION
@@ -1084,33 +1063,6 @@ private class AudioRenderer(
         AudioContentType.MUSIC -> AudioAttributes.CONTENT_TYPE_MUSIC
         AudioContentType.SPEECH -> AudioAttributes.CONTENT_TYPE_SPEECH
     }
-
-    /** Minimal OpusHead CSD for the mono 48 kHz stream CarPlay negotiates. */
-    private fun opusHead(): ByteArray {
-        val head = ByteArray(19)
-        "OpusHead".toByteArray(Charsets.US_ASCII).copyInto(head, 0)
-        head[8] = 1
-        head[9] = format.channels.toByte()
-        head[10] = 0x38
-        head[11] = 0x01
-        head[12] = format.sampleRate.toByte()
-        head[13] = (format.sampleRate ushr 8).toByte()
-        head[14] = (format.sampleRate ushr 16).toByte()
-        head[15] = (format.sampleRate ushr 24).toByte()
-        return head
-    }
-
-    private fun opusCodecDelay(): ByteArray =
-        java.nio.ByteBuffer.allocate(8)
-            .order(java.nio.ByteOrder.LITTLE_ENDIAN)
-            .putLong(OPUS_CODEC_DELAY_NANOS)
-            .array()
-
-    private fun opusSeekPreRoll(): ByteArray =
-        java.nio.ByteBuffer.allocate(8)
-            .order(java.nio.ByteOrder.LITTLE_ENDIAN)
-            .putLong(OPUS_SEEK_PRE_ROLL_NANOS)
-            .array()
 
     private fun handle(packet: AudioPacket) {
         val rtp = packet.rtp
@@ -1407,10 +1359,7 @@ private class AudioRenderer(
 
     private companion object {
         const val TAG = "xcertplay-usb"
-        const val AAC_OBJECT_TYPE_LC = 2
         const val MIN_OPUS_PACKET_BYTES = 4
-        const val OPUS_CODEC_DELAY_NANOS = 6_500_000L
-        const val OPUS_SEEK_PRE_ROLL_NANOS = 80_000_000L
         const val INPUT_TIMEOUT_US = 10_000L
         const val AUDIO_POLL_MILLIS = 10L
         const val BUFFER_TAIL_WAIT_NS = 500_000_000L

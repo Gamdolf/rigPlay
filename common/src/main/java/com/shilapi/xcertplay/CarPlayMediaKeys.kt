@@ -18,6 +18,7 @@ import android.view.KeyEvent
 import com.shilapi.xcertplay.airplay.CarPlayMediaButton
 import com.shilapi.xcertplay.media.CarPlayNowPlaying
 import com.shilapi.xcertplay.orchestration.CarPlayController
+import com.shilapi.xcertplay.simhub.SimHubEndpoints
 import java.util.concurrent.Executors
 import java.util.concurrent.Executor
 
@@ -51,6 +52,12 @@ internal object CarPlayMediaKeys {
     private var focusHeld = false
     private var appContext: Context? = null
     private var mediaAudioActive = false
+
+    /**
+     * False while CarPlay audio plays on the PC (#31): the session still takes the keys and shows the
+     * metadata, but nothing plays on this device, so it does not take audio focus from other apps.
+     */
+    @Volatile var audioFocusAllowed: () -> Boolean = { true }
     private var nowPlaying = CarPlayNowPlaying()
     private var elapsedUpdatedAt = 0L
     private var artwork: Bitmap? = null
@@ -67,6 +74,8 @@ internal object CarPlayMediaKeys {
         next.playbackListener = { playing -> onIphonePlaying(next, playing) }
         next.nowPlayingListener = { update -> onNowPlayingChanged(next, update) }
         next.artworkListener = { id, bytes -> onArtworkChanged(next, id, bytes) }
+        // SimHub media commands and now-playing status (#32) follow the same controller.
+        SimHubEndpoints.mediaBridge.attach(next)
     }
 
     /** Ends key handling for [expected]; a newer controller's state is left alone. */
@@ -76,6 +85,7 @@ internal object CarPlayMediaKeys {
         expected.playbackListener = null
         expected.nowPlayingListener = null
         expected.artworkListener = null
+        SimHubEndpoints.mediaBridge.detach(expected)
         controller = null
         releaseLocked()
     }
@@ -138,7 +148,7 @@ internal object CarPlayMediaKeys {
     // would; only the start counts, so a car source picked while the iPhone plays on is not undone.
     private fun regainFocusLocked() {
         val request = focusRequest ?: return
-        if (focusHeld) return
+        if (focusHeld || !audioFocusAllowed()) return
         val audio = appContext?.getSystemService(AudioManager::class.java) ?: return
         focusHeld = audio.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         Log.i(TAG, "audio focus regained=$focusHeld")
@@ -167,7 +177,7 @@ internal object CarPlayMediaKeys {
                 if (change == AudioManager.AUDIOFOCUS_LOSS) synchronized(this) { focusHeld = false }
             }, mainHandler)
             .build()
-        val granted = audio?.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        val granted = audioFocusAllowed() && audio?.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
         focusRequest = request
         focusHeld = granted
         session = MediaSession(context, "rigPlay CarPlay").apply {

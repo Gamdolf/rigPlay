@@ -168,6 +168,14 @@ class SimHubLink(
     val currentTarget: Target? get() = target
 
     /**
+     * Number of sessions that reached Paired since this link was created. A change means the plugin
+     * forgot every audio stream (§10.1), so they must be announced again.
+     */
+    @Volatile
+    var pairedSessions: Long = 0L
+        private set
+
+    /**
      * Starts connecting to [target]. Starting again with the same target is a no-op; a different
      * target restarts the link.
      */
@@ -627,6 +635,7 @@ class SimHubLink(
                 val token = result.token ?: return
                 phase = SimHubState.Phase.PAIRED
                 pairingRequested = false
+                pairedSessions++
                 updateTarget { it.copy(hostId = accepted.hostId, token = token) }
                 writer.statusChanged(immediate = true)
                 publish(gen, sessionState(SimHubState.Phase.PAIRED))
