@@ -1,8 +1,9 @@
 <Project>
-  <!-- Shared by plugin/RigPlay and plugin/RigPlay.Tests. The plugin is versioned on its own,
-       independently of the Android app; this is the assembly, file and informational version of RigPlay.dll. -->
+  <!-- Shared by plugin/RigPlay and plugin/RigPlay.Tests. The version comes from the root VERSION file,
+       the one version of the project (also read by mobile/build.gradle.kts and checked against the release
+       tag); it is the assembly, file and informational version of RigPlay.dll. -->
   <PropertyGroup>
-    <Version>0.1.0</Version>
+    <Version>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)../VERSION').Trim())</Version>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>

@@ -880,7 +880,7 @@ class RigPlayActivity : ComponentActivity() {
         }
         return grid
     }
-    private fun version() = packageManager.getPackageInfo(packageName, 0).versionName ?: "0.1.0-beta.1"
+    private fun version() = packageManager.getPackageInfo(packageName, 0).versionName.orEmpty()
 
     private fun section(parent: LinearLayout, title: String, icon: Int? = null, build: (LinearLayout) -> Unit) {
         val card = card()
