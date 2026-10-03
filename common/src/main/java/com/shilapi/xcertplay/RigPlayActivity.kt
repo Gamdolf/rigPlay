@@ -128,7 +128,9 @@ class RigPlayActivity : ComponentActivity() {
         if (initialLaunch) {
             initialLaunch = false
             if (setupError == null && !CarPlayBackgroundSession.hasSession() &&
-                RigPlayPreferences.autoConnect(this) && intent.getStringExtra("page") == null && page == "home") {
+                RigPlayPreferences.autoConnect(this) && intent.getStringExtra("page") == null && page == "home" &&
+                // With a paired PC the coordinator connects the phone when SimHub comes up (#29).
+                !RigSessionCoordinator.isPaired) {
                 handler.post { connect(AirPlayPersistence.loadWirelessEnabled(this)) }
             }
         }
@@ -907,6 +909,8 @@ class RigPlayActivity : ComponentActivity() {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
             return
         }
+        // #29: allowed while SimHub is down, but the user should know why audio stays on the tablet.
+        if (RigSessionCoordinator.onManualConnect()) toast(getString(R.string.rig_manual_connect_simhub_down))
         val open = {
             AirPlayPersistence.saveWirelessEnabled(this, wireless)
             openProjection()

@@ -67,4 +67,14 @@
     <string name="rig_open_after_boot">Open rigPlay when the tablet starts</string>
     <string name="rig_open_after_boot_desc">Brings rigPlay back to the screen after a reboot.</string>
     <string name="rig_connect_automatically_desc">Uses your last connection type and selected iPhone. With a paired SimHub PC, the iPhone connects whenever SimHub is running.</string>
+
+    <!-- Lifecycle coupling (#29) -->
+    <string name="rig_manual_connect_simhub_down">SimHub is not running: CarPlay audio stays on the tablet.</string>
+    <string name="rig_waiting_for_simhub">Waiting for SimHub. CarPlay starts when the PC is back.</string>
+    <string name="rig_notification_text">%1$s · %2$s</string>
+    <string name="rig_notification_phone_connected">iPhone connected</string>
+    <string name="rig_notification_phone_connecting">Connecting iPhone</string>
+    <string name="rig_notification_simhub_connected">SimHub: %1$s</string>
+    <string name="rig_notification_simhub_waiting">Waiting for SimHub</string>
+    <string name="rig_notification_simhub_unpaired">SimHub not paired</string>
 </resources>

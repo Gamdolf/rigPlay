@@ -6,18 +6,29 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.util.Log
+import android.content.Intent
 import com.shilapi.xcertplay.simhub.DiscoveredHost
+import com.shilapi.xcertplay.simhub.NowPlaying
+import com.shilapi.xcertplay.simhub.SimHubCommand
 import com.shilapi.xcertplay.simhub.SimHubDiscovery
 import com.shilapi.xcertplay.simhub.SimHubLink
 import com.shilapi.xcertplay.simhub.SimHubMessage
 import com.shilapi.xcertplay.simhub.SimHubState
+import com.shilapi.xcertplay.host.R
 
 /**
- * Process-wide owner of the SimHub link (#26) and discovery, created by [RigPlayApplication].
+ * Process-wide owner of the SimHub link (#26) and discovery, created by [RigPlayApplication]; runs
+ * onboarding (#27) and couples the phone session to the PC through [RigSessionLifecycle] (#29).
  *
  * Everything here runs on the main thread: link and discovery callbacks are posted to it, and the
- * public methods must be called from it. Observers ([addObserver]) are told about any change of
- * [state], [hosts], [pairing] or [pairingStep].
+ * UI methods must be called from it. Observers ([addObserver]) are told about any change of
+ * [state], [hosts], [pairing], [pairingStep] or the phone session.
+ *
+ * API for other features (callable from any thread):
+ * - [updateNowPlaying]: the iPhone's now-playing changed (#32); sent in the next `status`.
+ * - [sendStatus]: re-send the current `status` snapshot (phone, screen, now playing).
+ * - [mediaCommandHandler]: receives `command media` from SimHub wheel buttons (#32), on the main thread.
+ * - [simHubLink]: the link itself, e.g. for `sendAudioStart`/`sendAudioStop` and `state.audioEnabled` (#31).
  */
 object RigSessionCoordinator {
     private const val TAG = "rigplay-coordinator"
@@ -29,6 +40,7 @@ object RigSessionCoordinator {
     private lateinit var link: SimHubLink
     private lateinit var linkPort: SimHubLinkPort
     private lateinit var flow: SimHubPairingFlow
+    private lateinit var lifecycle: RigSessionLifecycle
     private var discovery: SimHubDiscovery? = null
     private var onboardingVisible = false
 
@@ -55,6 +67,27 @@ object RigSessionCoordinator {
     val isPaired: Boolean get() = pairing != null
     val pairingStep: SimHubPairingFlow.Step get() = if (initialized) flow.step else SimHubPairingFlow.Step.ChooseHost
 
+    /** The link, once [init] ran. Its methods are thread-safe. */
+    val simHubLink: SimHubLink? get() = if (initialized) link else null
+
+    /**
+     * False after SimHub went away and dropped the phone: [CarPlayHostActivity] must neither
+     * reconnect nor start a new session until the link is back or the user connects by hand.
+     */
+    val phoneConnectionAllowed: Boolean get() = !initialized || lifecycle.phoneConnectionAllowed
+
+    /** True while the paired PC is connected. */
+    val simHubUp: Boolean get() = initialized && lifecycle.linkUp
+
+    /** Receives `command media` (#32), on the main thread. Unset: the plugin gets `commandUnavailable`. */
+    var mediaCommandHandler: ((SimHubCommand.Media) -> Unit)?
+        get() = pendingMediaHandler
+        set(value) {
+            pendingMediaHandler = value
+            if (initialized) lifecycle.mediaCommandHandler = value
+        }
+    private var pendingMediaHandler: ((SimHubCommand.Media) -> Unit)? = null
+
     /** Creates the link and connects to the paired PC, if any. Idempotent. */
     fun init(context: Context) {
         if (appContext != null) return
@@ -63,6 +96,9 @@ object RigSessionCoordinator {
         link = SimHubLink(identity(app), LinkListener)
         linkPort = EpochLinkPort(SimHubLinkPort.of(link))
         flow = SimHubPairingFlow(linkPort) { notifyObservers() }
+        lifecycle = RigSessionLifecycle(linkPort, RigPhoneSession(app), AppScreens(app)) { Log.i(TAG, it) }
+        lifecycle.mediaCommandHandler = pendingMediaHandler
+        CarPlayBackgroundSession.onChanged = { main.post(::onPhoneSessionChanged) }
         pairing = AirPlayPersistence.loadSimHubPairing(app)
         pairing?.let(::startPaired)
         updateDiscovery()
@@ -70,6 +106,64 @@ object RigSessionCoordinator {
 
     fun addObserver(observer: () -> Unit) { observers.add(observer) }
     fun removeObserver(observer: () -> Unit) { observers.remove(observer) }
+
+    // --- session coupling (#29) -----------------------------------------------------------------
+
+    /** The iPhone's now-playing (#32); `null` when unknown. Any thread. */
+    fun updateNowPlaying(nowPlaying: NowPlaying?) = onMain { if (initialized) lifecycle.updateNowPlaying(nowPlaying) }
+
+    /** Re-sends the current `status` snapshot to the plugin. Any thread. */
+    fun sendStatus() = onMain { if (initialized) lifecycle.publishStatus(force = true) }
+
+    /** Current `status` snapshot, for diagnostics and tests. */
+    fun currentStatus(): SimHubMessage.Status? = if (initialized) lifecycle.currentStatus() else null
+
+    /**
+     * The user pressed Connect phone or Connect with USB. Returns true when the UI should warn that
+     * SimHub is not running (audio would stay on the tablet); the connection goes ahead either way.
+     */
+    fun onManualConnect(): Boolean = initialized && lifecycle.onManualConnect(paired = isPaired)
+
+    /** Which rigPlay screen is in the foreground; from [RigPlayApplication]'s activity callbacks. */
+    fun onForegroundChanged(foreground: RigSessionLifecycle.Foreground) {
+        if (!initialized) return
+        lifecycle.onForegroundChanged(foreground)
+    }
+
+    private fun onPhoneSessionChanged() {
+        if (!initialized) return
+        lifecycle.onPhoneChanged()
+        appContext?.let(RigPlaySessionService::refresh)
+        notifyObservers()
+    }
+
+    /** "CarPlay: … · SimHub: …" for the foreground service notification. */
+    fun notificationText(context: Context): String {
+        val phone = when {
+            CarPlayBackgroundSession.active -> context.getString(R.string.rig_notification_phone_connected)
+            else -> context.getString(R.string.rig_notification_phone_connecting)
+        }
+        val simhub = when {
+            pairing == null -> context.getString(R.string.rig_notification_simhub_unpaired)
+            state.paired -> context.getString(R.string.rig_notification_simhub_connected, state.hostName ?: pairing?.name ?: "")
+            else -> context.getString(R.string.rig_notification_simhub_waiting)
+        }
+        return context.getString(R.string.rig_notification_text, phone, simhub)
+    }
+
+    private class AppScreens(private val context: Context) : RigSessionLifecycle.Screens {
+        // Replaced by the dashboard screen in #30.
+        override fun showDashboard() {
+            linkPort.sendCommandUnavailable("dashboard screen not available")
+        }
+
+        override fun showCarPlay() {
+            context.startActivity(
+                Intent(context, CarPlayHostActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+            )
+        }
+    }
 
     // --- onboarding (#27) -----------------------------------------------------------------------
 
@@ -114,6 +208,8 @@ object RigSessionCoordinator {
         linkPort.stop()
         state = SimHubState.STOPPED
         flow.reset()
+        lifecycle.onUnpaired()
+        RigPlaySessionService.refresh(context)
         updateDiscovery()
         notifyObservers()
     }
@@ -181,6 +277,7 @@ object RigSessionCoordinator {
             appContext?.let { AirPlayPersistence.saveSimHubAddress(it, moved.host, moved.port) }
         }
         updateDiscovery()
+        appContext?.let(RigPlaySessionService::refresh)
         notifyObservers()
     }
 
@@ -262,6 +359,17 @@ object RigSessionCoordinator {
         override fun onTokenRevoked(hostId: String, code: String) = fromLink {
             this@RigSessionCoordinator.onTokenRevoked(hostId, code)
         }
+        override fun onLinkUp(state: SimHubState) = fromLink {
+            // Only the stored PC drives the phone; onPaired ran just before and stored it.
+            if (pairing != null) lifecycle.onLinkUp()
+            notifyObservers()
+        }
+        override fun onLinkLost(loss: SimHubLink.LinkLoss) = fromLink {
+            Log.i(TAG, "SimHub link lost: ${loss.reason} ${loss.detail ?: ""}")
+            lifecycle.onLinkLost()
+            notifyObservers()
+        }
+        override fun onCommand(command: SimHubCommand) = fromLink { lifecycle.onCommand(command) }
     }
 
     private object DiscoveryListener : SimHubDiscovery.Listener {
