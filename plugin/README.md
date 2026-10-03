@@ -1,15 +1,16 @@
 # rigPlay SimHub plugin
 
-The PC side of rigPlay: a SimHub plugin with its own page in SimHub's left menu. It will discover and pair
-rigPlay tablets, push the SimHub dashboard they show, and play their CarPlay audio on this PC (epic #3).
-This is the skeleton: the page, settings persistence and logging.
+The PC side of rigPlay: a SimHub plugin with its own page in SimHub's left menu. It discovers and pairs
+rigPlay tablets, pushes the SimHub dashboard they show, and plays their CarPlay audio on this PC (epic #3).
 
 ```
 plugin/
   RigPlay/          the plugin (net48), builds RigPlay.dll
   RigPlay.Tests/    xunit tests (net8.0) for the plugin's pure logic
   lib/              SimHub 9.12.6 assemblies the plugin compiles against (see lib/README.md)
-  scripts/          make-icon.py, which draws RigPlay/Resources/icon.png
+  scripts/          package-plugin.sh (the release zip), make-icon.py (RigPlay/Resources/icon.png)
+  tools/            AudioSender, a tablet-less audio source for testing
+  INSTALL.md        install and troubleshooting for users; shipped in the zip
 ```
 
 ## Build and test
@@ -19,7 +20,11 @@ Needs the .NET 8 SDK; no Windows, Visual Studio or SimHub install.
 ```bash
 dotnet test plugin/RigPlay.Tests
 dotnet build plugin/RigPlay -c Release   # -> plugin/RigPlay/bin/Release/net48/RigPlay.dll
+bash plugin/scripts/package-plugin.sh    # builds, then -> build/rigPlay-plugin.zip (RigPlay.dll + INSTALL.md)
 ```
+
+The release workflow publishes the same zip (`package-plugin.sh --no-build --out dist/rigPlay-plugin.zip`).
+It holds no SimHub assemblies and no `.pdb`: SimHub ships everything the plugin references.
 
 The plugin targets .NET Framework 4.8 through the `Microsoft.NETFramework.ReferenceAssemblies` package and
 references WPF as plain assemblies, without `UseWPF` or XAML: the page is built in C# and picks up SimHub's own
@@ -80,8 +85,9 @@ server by hand: `nc <pc> 23711`, then type
 
 ## Install
 
-Copy `RigPlay.dll` into SimHub's install folder (`C:\Program Files (x86)\SimHub\`), restart SimHub and accept
-the "new plugin found" prompt. **rigPlay** then appears in the left menu. Settings are stored in
+[INSTALL.md](INSTALL.md) has the user steps. In short: copy `RigPlay.dll` next to `SimHubWPF.exe`
+(`C:\Program Files (x86)\SimHub\`), `Unblock-File` it, start SimHub and accept the "new plugin found"
+prompt. **rigPlay** then appears in the left menu. Settings are stored in
 `PluginsData\Common\RigPlay.RigPlaySettings.json`; log lines are prefixed `[rigPlay]` in SimHub's log.
 
 ## Audio receiver (#24)

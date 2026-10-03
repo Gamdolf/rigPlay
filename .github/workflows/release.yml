@@ -121,14 +121,9 @@ jobs:
         run: dotnet test plugin/RigPlay.Tests
       - name: Build plugin
         run: dotnet build plugin/RigPlay -c Release
+      # RigPlay.dll and plugin/INSTALL.md, flat; the script lists the zip.
       - name: Package plugin
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          files=(plugin/RigPlay/bin/Release/net48/RigPlay.dll)
-          if [ -f plugin/INSTALL.md ]; then files+=(plugin/INSTALL.md); fi
-          zip -j dist/rigPlay-plugin.zip "${files[@]}"
-          unzip -l dist/rigPlay-plugin.zip
+        run: bash plugin/scripts/package-plugin.sh --no-build --out dist/rigPlay-plugin.zip
       - uses: actions/upload-artifact@v4
         with:
           name: rigplay-plugin
