@@ -1,5 +1,6 @@
 # rigPlay 0.1.0 — unreleased
 
+- Microphone to the phone: an automatic boost (on by default, up to +20 dB, cap adjustable 0–30 dB on the rigPlay page; or a fixed boost with Automatic off) brings your voice to a level Siri hears well; the level meter shows the boost in effect (#34).
 - Dashboard screen: SimHub's web dash toolbar and swipe help are hidden, so the dashboard fills
   the tablet without tapping Fullscreen (#50).
 - Dashboard screen: the page loads as soon as SimHub names a dashboard and stays loaded between

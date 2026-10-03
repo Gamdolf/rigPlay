@@ -267,6 +267,17 @@ namespace RigPlayPlugin.Tests.Audio
         }
 
         [Fact]
+        public void ADeviceThatFailsToOpenIsReportedAndNothingIsSent()
+        {
+            capture.StartError = "the device is in use by another application";
+            Assert.False(Start());
+            Assert.Empty(sent);
+            Assert.False(sender.Stats.Capturing);
+            Assert.Contains("the device is in use", sender.Stats.LastEvent);
+            Assert.Contains(log, l => l.Contains("not started") && l.Contains("the device is in use"));
+        }
+
+        [Fact]
         public void MicStopOnlyFromTheOwnerStopsTheStream()
         {
             Assert.True(Start(session: 7));
@@ -346,6 +357,9 @@ namespace RigPlayPlugin.Tests.Audio
         [Fact]
         public void StatsShowTheStreamAndTheLevel()
         {
+            // No boost: the meter shows the raw capture level (the boost has its own test below).
+            settings.MicAutoBoost = false;
+            settings.MicBoostDb = 0;
             Assert.True(Start());
             for (var i = 0; i < 8; i++)
             {
@@ -364,12 +378,52 @@ namespace RigPlayPlugin.Tests.Audio
             Assert.InRange(stats.LevelDb, -6.1, -5.9);
             Assert.StartsWith("Sending to Lenovo Tab P11 (192.168.1.42:23713) · 16 kHz · ", stats.StateText);
             Assert.StartsWith("-6 dBFS ▮▮▮▮▮▮▮▮▮", stats.LevelText);
+            Assert.Contains("· boost 0 dB", stats.LevelText);
+            Assert.DoesNotContain("automatic", stats.LevelText);
 
             // Silence: the meter falls 20 dB/s rather than dropping at once.
             capture.Deliver(80, 0);
             clock.Advance(250);
             sender.Tick();
             Assert.InRange(sender.Stats.LevelDb, -11.1, -10.9);
+        }
+
+        [Fact]
+        public void TheBoostIsAppliedToTheSamplesSentAndShownInTheStats()
+        {
+            settings.MicAutoBoost = false;
+            settings.MicBoostDb = 6; // ×1.995
+            Assert.True(Start());
+            capture.Deliver(80, 1000);
+            Assert.Single(sent);
+            var samples = AudioHeader.DecodeSamples(sent[0].Value, AudioHeader.Size, 160);
+            Assert.Equal(80, samples.Length);
+            Assert.All(samples, v => Assert.InRange(v, 1994, 1996));
+
+            sender.Tick();
+            var stats = sender.Stats;
+            Assert.InRange(stats.GainDb, 5.9, 6.1);
+            Assert.False(stats.AutoGain);
+            Assert.Contains("boost +6 dB", stats.LevelText);
+            Assert.DoesNotContain("automatic", stats.LevelText);
+            // The meter shows what the phone gets: 1995/32768 is about -24.3 dBFS, not the raw -30.3.
+            Assert.InRange(stats.LevelDb, -24.5, -24.1);
+
+            // Automatic mode by default: the gain climbs while someone talks and the text says so.
+            settings.MicAutoBoost = true;
+            settings.MicBoostDb = 20;
+            for (var i = 0; i < 8; i++)
+            {
+                capture.Deliver(80 * 50, 1000); // 250 ms of speech at -30 dBFS
+                clock.Advance(250);
+                lastLine = clock.NowMs;
+                sender.Tick();
+            }
+            stats = sender.Stats;
+            Assert.True(stats.AutoGain);
+            Assert.InRange(stats.GainDb, 17.5, 18.5); // from the +6 dB in effect, 2 s at 6 dB/s
+            Assert.EndsWith("(automatic)", stats.LevelText);
+            Assert.Contains("boost +18 dB", stats.LevelText);
         }
 
         [Fact]

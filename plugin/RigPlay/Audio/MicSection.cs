@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // MicSection.cs: the "Microphone" section of the rigPlay page (#34): the "Microphone to the phone" switch, the input
-// device picker (friendly names, refresh) and what the microphone is doing (which tablet, packets/s, level meter, last
-// event), refreshed every 250 ms while the page is visible. Built in code with the Ui helpers like the other sections.
+// device picker (friendly names, refresh), the boost (automatic switch and the dB slider it is capped at) and what
+// the microphone is doing (which tablet, packets/s, level meter with the boost in effect, last event), refreshed
+// every 250 ms while the page is visible. Built in code with the Ui helpers like the other sections.
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
@@ -17,6 +18,7 @@ namespace RigPlayPlugin.Audio
         private readonly TextBlock stateText = Ui.Text("");
         private readonly TextBlock levelText = Ui.Text("");
         private readonly TextBlock eventText = Ui.Text("");
+        private readonly TextBlock boostText = Ui.Text("");
         private bool populating;
 
         public MicSection(RigPlay plugin)
@@ -45,16 +47,54 @@ namespace RigPlayPlugin.Audio
             PopulateDevices();
             levelText.FontFamily = new System.Windows.Media.FontFamily("Consolas");
 
+            var boost = new Slider
+            {
+                Minimum = MicGainControl.MinBoostDb,
+                Maximum = MicGainControl.MaxBoostDb,
+                Value = Settings.MicBoostDb,
+                Width = 200,
+                SmallChange = 1,
+                LargeChange = 6,
+                TickFrequency = 1,
+                IsSnapToTickEnabled = true,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            boostText.MinWidth = 150;
+            UpdateBoostText();
+            boost.ValueChanged += (s, e) =>
+            {
+                var v = (int)Math.Round(e.NewValue);
+                if (v == Settings.MicBoostDb) return;
+                Settings.MicBoostDb = v; // the sender reads it on every buffer: applies at once
+                UpdateBoostText();
+                plugin.SaveSettings();
+            };
+            var auto = Ui.Toggle(Settings.MicAutoBoost, on =>
+            {
+                Settings.MicAutoBoost = on;
+                UpdateBoostText();
+                plugin.SaveSettings();
+                Log.Info("Microphone boost set to " + (on ? "automatic, up to " : "") + Settings.MicBoostDb + " dB from the settings page");
+            });
+
             var section = Ui.Section("Microphone",
                 "Sends this PC's microphone to the phone for Siri and calls, when the tablet's setting \"Microphone\" is \"PC via SimHub\". "
-                + "There is no echo cancellation: use headphones or a headset, or callers may hear themselves through the PC speakers.",
+                + "There is no echo cancellation: use headphones or a headset, or callers may hear themselves through the PC speakers. "
+                + "Automatic boost brings your voice to a level Siri hears well; the slider is the most it may add, or the fixed boost with Automatic off.",
                 Ui.Row("Microphone to the phone", toggle),
                 Ui.Row("Input device", Ui.HStack(8, devices, refresh)),
+                Ui.Row("Automatic boost", auto),
+                Ui.Row("Boost", Ui.HStack(12, boost, boostText)),
                 Ui.Row("State", stateText),
                 Ui.Row("Level", levelText),
                 Ui.Row("Last event", eventText));
             PageKit.Live(section, MicSender.TickMs, Refresh);
             return section;
+        }
+
+        private void UpdateBoostText()
+        {
+            boostText.Text = Settings.MicAutoBoost ? "up to +" + Settings.MicBoostDb + " dB" : "+" + Settings.MicBoostDb + " dB fixed";
         }
 
         private void Refresh()

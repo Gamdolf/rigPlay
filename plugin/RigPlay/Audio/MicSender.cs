@@ -3,8 +3,10 @@
 // micStart when the phone opens its microphone (Siri, a call); the plugin captures an input device (IMicCapture, the
 // NAudio side in MicCapture.cs), cuts the mono s16 samples into 5 ms datagrams with the §10.2 header (streamType 4,
 // seq and timestamp from 0 per micStart, start flag on the first) and sends them to the tablet's address and port.
-// It stops on micStop from the owning session, on that session closing, after 2 s without a line from it, and when
-// the user switches "Microphone to the phone" off. One stream at a time: a micStart from another tablet takes it over.
+// Every buffer goes through MicGainControl first (the boost from the settings, automatic by default), so the level
+// meter shows what the phone gets. It stops on micStop from the owning session, on that session closing, after 2 s
+// without a line from it, and when the user switches "Microphone to the phone" off. One stream at a time: a
+// micStart from another tablet takes it over.
 // MicGlue connects it to the host's events and to state.mic.enabled.
 // Pure: no SimHub, WPF or NAudio types (compiled into RigPlay.Tests).
 using System;
@@ -144,8 +146,14 @@ namespace RigPlayPlugin.Audio
         public double PacketsPerSecond;
         public long SendErrors;
 
-        /// <summary>Peak level of the last 100 ms or so, in dBFS (negative infinity for silence).</summary>
+        /// <summary>Peak level of the last 100 ms or so, after the boost, in dBFS (negative infinity for silence).</summary>
         public double LevelDb = double.NegativeInfinity;
+
+        /// <summary>The boost in effect (dB): the fixed one, or what automatic mode has climbed to.</summary>
+        public double GainDb;
+
+        /// <summary>Automatic gain is on.</summary>
+        public bool AutoGain;
 
         /// <summary>The input device being captured, or null.</summary>
         public string Device;
@@ -168,13 +176,13 @@ namespace RigPlayPlugin.Audio
             }
         }
 
-        /// <summary>E.g. "-18 dBFS ▮▮▮▮▮▯▯▯▯▯", or "—" while not capturing.</summary>
+        /// <summary>E.g. "-18 dBFS ▮▮▮▮▮▯▯▯▯▯ · boost +14 dB (automatic)", or "—" while not capturing.</summary>
         public string LevelText
         {
             get
             {
                 if (!Capturing) return "—";
-                return MicSender.FormatLevel(LevelDb);
+                return MicSender.FormatLevel(LevelDb) + " · boost " + MicSender.FormatGain(GainDb) + (AutoGain ? " (automatic)" : "");
             }
         }
     }
@@ -210,6 +218,7 @@ namespace RigPlayPlugin.Audio
         private string ownerName = "";
         private IPEndPoint target;
         private MicPacketizer packetizer;
+        private MicGainControl gainControl;
         private bool capturing;
         private long packets;
         private long sendErrors;
@@ -332,6 +341,7 @@ namespace RigPlayPlugin.Audio
                 ownerName = tabletName ?? "";
                 this.target = target;
                 packetizer = new MicPacketizer(sampleRate);
+                gainControl = new MicGainControl(sampleRate) { Automatic = s.MicAutoBoost, BoostDb = s.MicBoostDb };
                 packets = 0;
                 sendErrors = 0;
                 peak = 0;
@@ -473,13 +483,27 @@ namespace RigPlayPlugin.Audio
             try { Tick(); } catch (Exception ex) { Log("The microphone watchdog failed: " + ex.Message); }
         }
 
-        /// <summary>Samples from the capture thread: level, packets, send.</summary>
+        /// <summary>Samples from the capture thread: boost, level, packets, send.</summary>
         internal void OnSamples(int gen, short[] samples, int count)
         {
+            var s = settings();
             lock (sync)
             {
                 if (gen != generation || packetizer == null || target == null) return;
-                var p = MicPacketizer.Peak(samples, 0, count);
+                double p;
+                if (gainControl != null)
+                {
+                    if (s != null)
+                    {
+                        gainControl.Automatic = s.MicAutoBoost;
+                        gainControl.BoostDb = s.MicBoostDb;
+                    }
+                    p = gainControl.Process(samples, 0, count);
+                }
+                else
+                {
+                    p = MicPacketizer.Peak(samples, 0, count);
+                }
                 if (p > peak) peak = p;
                 var to = target;
                 packetizer.Write(samples, 0, count, (datagram, length) =>
@@ -535,11 +559,21 @@ namespace RigPlayPlugin.Audio
                     PacketsPerSecond = ownerSessionId != 0 ? rate.PacketsPerSecond : 0,
                     SendErrors = sendErrors,
                     LevelDb = levelDb,
+                    GainDb = gainControl != null ? gainControl.GainDb : (s != null ? (double)s.MicBoostDb : 0),
+                    AutoGain = s != null && s.MicAutoBoost,
                     Device = device,
                     LastEvent = lastEvent,
                 };
             }
             stats = next;
+        }
+
+        /// <summary>E.g. "+14 dB", "0 dB".</summary>
+        public static string FormatGain(double db)
+        {
+            if (double.IsNaN(db) || double.IsInfinity(db)) return "0 dB";
+            var rounded = (int)Math.Round(db);
+            return (rounded > 0 ? "+" : "") + rounded.ToString(CultureInfo.InvariantCulture) + " dB";
         }
 
         /// <summary>E.g. "-18 dBFS ▮▮▮▮▮▮▯▯▯▯": ten steps from -60 to 0 dBFS.</summary>

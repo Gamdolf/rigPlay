@@ -74,6 +74,15 @@ namespace RigPlayPlugin
         /// <summary>The input device sent to the phone; empty for the Windows default recording device.</summary>
         public string MicDeviceId { get; set; } = "";
 
+        /// <summary>
+        /// Microphone boost (dB, 0..30): with <see cref="MicAutoBoost"/> the most the automatic gain applies, otherwise
+        /// applied as is. A PC microphone with the Windows level left where it was makes Siri hear someone far away.
+        /// </summary>
+        public int MicBoostDb { get; set; } = Audio.MicGainControl.DefaultBoostDb;
+
+        /// <summary>Automatic gain: speech peaks are brought to about -6 dBFS, within <see cref="MicBoostDb"/>.</summary>
+        public bool MicAutoBoost { get; set; } = true;
+
         public List<PairedTablet> PairedTablets { get; set; } = new List<PairedTablet>();
 
         /// <summary>The "Data to CarPlay" section: what goes into the telemetry message (spec §6.9).</summary>
@@ -116,6 +125,7 @@ namespace RigPlayPlugin
             IdleDashboard = Clean(IdleDashboard);
             AudioDeviceId = Clean(AudioDeviceId);
             MicDeviceId = Clean(MicDeviceId);
+            MicBoostDb = Math.Min(Audio.MicGainControl.MaxBoostDb, Math.Max(Audio.MicGainControl.MinBoostDb, MicBoostDb));
 
             Volume = Math.Min(MaxVolume, Math.Max(MinVolume, Volume));
 
