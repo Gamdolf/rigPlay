@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Unit tests for the plugin's pure logic. The plugin targets net48 and references SimHub's WPF assemblies,
+       which cannot run here, so the files with no SimHub or WPF dependency are compiled into this net8.0
+       project directly. Keep those files free of SimHub and WPF types. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>RigPlayPlugin.Tests</RootNamespace>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../RigPlay/ProtocolDefaults.cs" Link="Plugin/ProtocolDefaults.cs" />
+    <Compile Include="../RigPlay/RigPlaySettings.cs" Link="Plugin/RigPlaySettings.cs" />
+    <Compile Include="../RigPlay/Theme.cs" Link="Plugin/Theme.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- SimHub persists the settings with Newtonsoft.Json; the round-trip test uses the same serialiser, at the version SimHub 9.12.6 ships. -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+  </ItemGroup>
+</Project>

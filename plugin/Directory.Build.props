@@ -1,0 +1,16 @@
+<Project>
+  <!-- Shared by plugin/RigPlay and plugin/RigPlay.Tests. The plugin is versioned on its own,
+       independently of the Android app; this is the assembly, file and informational version of RigPlay.dll. -->
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <Deterministic>true</Deterministic>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Authors>xorob0</Authors>
+    <Company>rigPlay contributors</Company>
+    <Product>rigPlay</Product>
+    <Copyright>GPL-3.0. rigPlay contributors.</Copyright>
+  </PropertyGroup>
+</Project>
