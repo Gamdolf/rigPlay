@@ -9,6 +9,11 @@ namespace RigPlayPlugin
     {
         public const string Prefix = "[rigPlay] ";
 
+        public static void Debug(string message)
+        {
+            try { SimHub.Logging.Current.Debug(Prefix + message); } catch { }
+        }
+
         public static void Info(string message)
         {
             try { SimHub.Logging.Current.Info(Prefix + message); } catch { }

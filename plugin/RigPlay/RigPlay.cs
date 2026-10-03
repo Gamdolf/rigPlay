@@ -25,6 +25,10 @@ namespace RigPlayPlugin
 
         private ImageSource icon;
         private bool iconLoaded;
+        private PluginBridge bridge;
+
+        /// <summary>Discovery, control server and tablet state; null before Init and after End.</summary>
+        public RigPlayHost Host => bridge?.Host;
 
         public PluginManager PluginManager { get; set; }
 
@@ -74,10 +78,13 @@ namespace RigPlayPlugin
                 + ", audio port " + Settings.AudioPort + ", " + Settings.PairedTablets.Count + " paired tablet(s)");
             // Writes the normalised file back, so a repaired or first-run file is on disk from the start.
             SaveSettings();
+            bridge = new PluginBridge(this);
+            bridge.Start(pluginManager);
         }
 
         public void End(PluginManager pluginManager)
         {
+            bridge?.Stop();
             SaveSettings();
             Log.Info("rigPlay plugin stopped");
         }

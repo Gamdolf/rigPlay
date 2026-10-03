@@ -21,8 +21,20 @@ namespace RigPlayPlugin
 
         public int SchemaVersion { get; set; } = CurrentSchemaVersion;
 
+        /// <summary>
+        /// This installation's identity (spec §1): a lower-case RFC 4122 version 4 UUID, generated on first start and
+        /// kept across restarts and IP changes. Tablets key their pairing token by it.
+        /// </summary>
+        public string HostId { get; set; } = NewHostId();
+
+        /// <summary>The PC name shown on tablets; empty for the Windows computer name.</summary>
+        public string HostName { get; set; } = "";
+
         public int ControlPort { get; set; } = ProtocolDefaults.ControlPort;
+
+        /// <summary>The beacon port. Fixed by the protocol (spec §2): Normalize always resets it to the default.</summary>
         public int DiscoveryPort { get; set; } = ProtocolDefaults.DiscoveryPort;
+
         public int AudioPort { get; set; } = ProtocolDefaults.AudioPort;
 
         /// <summary>The SimHub dashboard pushed to tablets while a game is running; empty for none.</summary>
@@ -49,13 +61,16 @@ namespace RigPlayPlugin
         {
             if (SchemaVersion < 1 || SchemaVersion > CurrentSchemaVersion) SchemaVersion = CurrentSchemaVersion;
 
+            if (!IsValidHostId(HostId)) HostId = NewHostId();
+            HostName = Clean(HostName);
+
+            // The discovery port is not configurable: both sides always use 23710 (spec §2).
+            DiscoveryPort = ProtocolDefaults.DiscoveryPort;
             ControlPort = ValidPort(ControlPort, ProtocolDefaults.ControlPort);
-            DiscoveryPort = ValidPort(DiscoveryPort, ProtocolDefaults.DiscoveryPort);
             AudioPort = ValidPort(AudioPort, ProtocolDefaults.AudioPort);
             if (ControlPort == DiscoveryPort || ControlPort == AudioPort || DiscoveryPort == AudioPort)
             {
                 ControlPort = ProtocolDefaults.ControlPort;
-                DiscoveryPort = ProtocolDefaults.DiscoveryPort;
                 AudioPort = ProtocolDefaults.AudioPort;
             }
 
@@ -80,6 +95,20 @@ namespace RigPlayPlugin
         public PairedTablet FindTablet(string id)
         {
             return PairedTablets?.FirstOrDefault(t => t != null && string.Equals(t.Id, id, StringComparison.Ordinal));
+        }
+
+        /// <summary>A new host id: a lower-case, hyphenated random (version 4) UUID.</summary>
+        public static string NewHostId()
+        {
+            return Guid.NewGuid().ToString("D").ToLowerInvariant();
+        }
+
+        /// <summary>True for a lower-case, hyphenated version 4 UUID.</summary>
+        public static bool IsValidHostId(string value)
+        {
+            Guid parsed;
+            if (string.IsNullOrEmpty(value) || value.Length != 36 || !Guid.TryParseExact(value, "D", out parsed)) return false;
+            return string.Equals(value, value.ToLowerInvariant(), StringComparison.Ordinal) && value[14] == '4';
         }
 
         private static int ValidPort(int port, int fallback)

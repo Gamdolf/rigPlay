@@ -55,13 +55,7 @@ namespace RigPlayPlugin
 
         private FrameworkElement BuildStatus()
         {
-            var state = Ui.HStack(8, Ui.Dot(Theme.StatusIdle), Ui.Text("Not running: the tablet server is not part of this version yet"));
-            return Ui.Section("Status",
-                "Whether rigPlay is listening for tablets, and on which ports.",
-                Ui.Row("Tablet server", state),
-                Ui.Row("Control port (TCP)", Settings.ControlPort.ToString()),
-                Ui.Row("Discovery port (UDP)", Settings.DiscoveryPort.ToString()),
-                Ui.Row("Audio port", Settings.AudioPort.ToString()));
+            return new StatusSection(plugin).Build();
         }
 
         private FrameworkElement BuildPairing()
