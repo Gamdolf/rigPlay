@@ -18,6 +18,7 @@ import android.view.KeyEvent
 import com.shilapi.xcertplay.airplay.CarPlayMediaButton
 import com.shilapi.xcertplay.media.CarPlayNowPlaying
 import com.shilapi.xcertplay.orchestration.CarPlayController
+import com.shilapi.xcertplay.simhub.SimHubEndpoints
 import java.util.concurrent.Executors
 import java.util.concurrent.Executor
 
@@ -73,6 +74,8 @@ internal object CarPlayMediaKeys {
         next.playbackListener = { playing -> onIphonePlaying(next, playing) }
         next.nowPlayingListener = { update -> onNowPlayingChanged(next, update) }
         next.artworkListener = { id, bytes -> onArtworkChanged(next, id, bytes) }
+        // SimHub media commands and now-playing status (#32) follow the same controller.
+        SimHubEndpoints.mediaBridge.attach(next)
     }
 
     /** Ends key handling for [expected]; a newer controller's state is left alone. */
@@ -82,6 +85,7 @@ internal object CarPlayMediaKeys {
         expected.playbackListener = null
         expected.nowPlayingListener = null
         expected.artworkListener = null
+        SimHubEndpoints.mediaBridge.detach(expected)
         controller = null
         releaseLocked()
     }

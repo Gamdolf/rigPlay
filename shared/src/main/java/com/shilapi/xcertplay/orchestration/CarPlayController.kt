@@ -193,6 +193,45 @@ class CarPlayController(
     /** Told when an iAP2 Now Playing artwork transfer completes; may run on the link worker. */
     @Volatile var artworkListener: ((Int, ByteArray) -> Unit)? = null
 
+    private val nowPlayingObservers = java.util.concurrent.CopyOnWriteArrayList<(com.shilapi.xcertplay.media.CarPlayNowPlaying) -> Unit>()
+    private val phoneObservers = java.util.concurrent.CopyOnWriteArrayList<(Boolean, String?) -> Unit>()
+    @Volatile private var phoneName: String? = null
+
+    /** The retained iPhone now-playing state. */
+    val nowPlaying: com.shilapi.xcertplay.media.CarPlayNowPlaying
+        get() = synchronized(playbackStatus) { playbackStatus.nowPlaying }
+
+    /**
+     * Adds a now-playing observer next to [nowPlayingListener] (which the media keys own). It is called
+     * at once with the current state, then on every change, on any thread. Close the result to remove it.
+     */
+    fun addNowPlayingObserver(observer: (com.shilapi.xcertplay.media.CarPlayNowPlaying) -> Unit): AutoCloseable {
+        nowPlayingObservers += observer
+        observer(nowPlaying)
+        return AutoCloseable { nowPlayingObservers -= observer }
+    }
+
+    /**
+     * Adds an observer of the phone connection: `(true, name)` when a CarPlay session is up (again when
+     * the phone's name arrives), `(false, null)` when it ends. Called at once with the current state.
+     */
+    fun addPhoneObserver(observer: (connected: Boolean, name: String?) -> Unit): AutoCloseable {
+        phoneObservers += observer
+        val connected = activeSession != null
+        observer(connected, if (connected) phoneName else null)
+        return AutoCloseable { phoneObservers -= observer }
+    }
+
+    private fun notifyNowPlaying(update: com.shilapi.xcertplay.media.CarPlayNowPlaying) {
+        nowPlayingListener?.invoke(update)
+        nowPlayingObservers.forEach { it(update) }
+    }
+
+    private fun notifyPhone(connected: Boolean) {
+        val name = if (connected) phoneName else null
+        phoneObservers.forEach { it(connected, name) }
+    }
+
     @Volatile private var hotspot: WirelessHotspotManager? = null
     @Volatile private var bonjour: CarPlayBonjour? = null
     @Volatile private var wirelessDiagnostics: WirelessStartupDiagnostics? = null
@@ -229,10 +268,12 @@ class CarPlayController(
 
     private val sessionListener = object : AirPlaySessionListener {
         override fun onSessionActive(session: AirPlaySession) {
-            if (activeSession !== session) {
+            val newSession = activeSession !== session
+            if (newSession) {
                 com.shilapi.xcertplay.glance.CarPlayGlance.setConnected(true)
             }
             activeSession = session
+            if (newSession) notifyPhone(true)
             debugLog(
                 "AirPlay session active controller=${session.controllerId ?: "unknown"} " +
                     "peer=${session.host}",
@@ -248,9 +289,11 @@ class CarPlayController(
                     val wasPlaying = playbackStatus.playing
                     playbackStatus.clearAll()?.let { it to wasPlaying }
                 }?.let { (cleared, wasPlaying) ->
-                    nowPlayingListener?.invoke(cleared)
+                    notifyNowPlaying(cleared)
                     if (wasPlaying) playbackListener?.invoke(false)
                 }
+                phoneName = null
+                notifyPhone(false)
             }
             debugLog("AirPlay session ended peer=${session.host}")
             uiListener?.onSessionEnded(session)
@@ -266,6 +309,11 @@ class CarPlayController(
                 "AirPlay device info name=${info.name} deviceId=${info.deviceId} " +
                     "wifiMac=${info.wifiMac} model=${info.model}",
             )
+            val name = info.name.takeIf { it.isNotBlank() }
+            if (name != phoneName) {
+                phoneName = name
+                if (activeSession != null) notifyPhone(true)
+            }
             uiListener?.onDeviceInfo(session, info)
         }
 
@@ -465,7 +513,7 @@ class CarPlayController(
             val previousPlaying = playbackStatus.playing
             playbackStatus.acceptUpdate(frame)?.let { it to (it.playing != previousPlaying) }
         }?.let { (update, playingChanged) ->
-            nowPlayingListener?.invoke(update)
+            notifyNowPlaying(update)
             if (playingChanged) playbackListener?.invoke(update.playing)
         }
     }
