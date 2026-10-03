@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay
 
+import com.shilapi.xcertplay.simhub.NavStatus
 import com.shilapi.xcertplay.simhub.NowPlaying
 import com.shilapi.xcertplay.simhub.Screen
 import com.shilapi.xcertplay.simhub.SimHubCommand
@@ -13,7 +14,8 @@ import com.shilapi.xcertplay.simhub.SimHubMessage
  *   foreground, since Android blocks activity starts from the background);
  * - link lost ⇒ stop the session (AirPlay, Bonjour, Wi-Fi Direct group, Bluetooth link go down, so the
  *   iPhone drops CarPlay) and refuse reconnects until the link is back or the user connects by hand;
- * - every change of phone, screen or now-playing ⇒ a new `status` (SimHubLink coalesces to 250 ms).
+ * - every change of phone, screen, now-playing or route guidance ⇒ a new `status` (SimHubLink
+ *   coalesces to 250 ms).
  *
  * Not thread-safe: call everything on the main thread.
  */
@@ -63,6 +65,10 @@ class RigSessionLifecycle(
         private set
 
     var nowPlaying: NowPlaying? = null
+        private set
+
+    /** CarPlay's next maneuver for `status.nav` (#47); `null` without route guidance. */
+    var nav: NavStatus? = null
         private set
 
     /** `command media` goes here (#32). Without a handler the plugin gets `commandUnavailable`. */
@@ -134,6 +140,11 @@ class RigSessionLifecycle(
         publishStatus()
     }
 
+    fun updateNav(value: NavStatus?) {
+        nav = value
+        publishStatus()
+    }
+
     fun onCommand(command: SimHubCommand) {
         when (command) {
             SimHubCommand.ShowDashboard -> screens.showDashboard()
@@ -160,6 +171,7 @@ class RigSessionLifecycle(
             phoneName = if (connected) phone.phoneName() else null,
             screen = screen,
             nowPlaying = if (connected) nowPlaying else null,
+            nav = if (connected) nav else null,
         )
     }
 

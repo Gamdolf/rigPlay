@@ -7,6 +7,7 @@ import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import android.content.Intent
+import com.shilapi.xcertplay.glance.CarPlayGlance
 import com.shilapi.xcertplay.simhub.DiscoveredHost
 import com.shilapi.xcertplay.simhub.NowPlaying
 import com.shilapi.xcertplay.simhub.SimHubCommand
@@ -16,6 +17,7 @@ import com.shilapi.xcertplay.simhub.SimHubLink
 import com.shilapi.xcertplay.simhub.SimHubLinkAudioTransport
 import com.shilapi.xcertplay.simhub.SimHubMediaBridge
 import com.shilapi.xcertplay.simhub.SimHubMessage
+import com.shilapi.xcertplay.simhub.SimHubNav
 import com.shilapi.xcertplay.simhub.SimHubProtocol
 import com.shilapi.xcertplay.simhub.SimHubState
 import com.shilapi.xcertplay.simhub.SimHubStatusSink
@@ -31,6 +33,7 @@ import com.shilapi.xcertplay.host.R
  *
  * API for other features (callable from any thread):
  * - [updateNowPlaying]: the iPhone's now-playing changed (#32); sent in the next `status`.
+ * - `status.nav` (#47) follows [CarPlayGlance] on its own (see followRouteGuidance).
  * - [sendStatus]: re-send the current `status` snapshot (phone, screen, now playing).
  * - [mediaCommandHandler]: receives `command media` from SimHub wheel buttons (#32), on the main thread;
  *   by default [SimHubEndpoints.mediaBridge].
@@ -42,6 +45,7 @@ import com.shilapi.xcertplay.host.R
  */
 object RigSessionCoordinator {
     private const val TAG = "rigplay-coordinator"
+    private const val NAV_EXPIRY_CHECK_MS = 2_000L
 
     /** `hello.features` (§7.3): `telemetry` feeds [SimHubEndpoints.telemetry] (#41). */
     private val LINK_FEATURES = setOf(SimHubProtocol.FEATURE_IDLE_DASHBOARD, SimHubProtocol.FEATURE_TELEMETRY)
@@ -120,6 +124,7 @@ object RigSessionCoordinator {
         // One owner of `status` (§6.7): RigSessionLifecycle.publishStatus. The bridge only feeds it now
         // playing; see NowPlayingToLifecycle.
         SimHubEndpoints.statusSink = NowPlayingToLifecycle
+        followRouteGuidance()
         CarPlayBackgroundSession.onChanged = { main.post(::onPhoneSessionChanged) }
         pairing = AirPlayPersistence.loadSimHubPairing(app)
         pairing?.let(::startPaired)
@@ -284,6 +289,27 @@ object RigSessionCoordinator {
         override fun updatePhone(connected: Boolean, phoneName: String?) = Unit
     }
 
+    // --- route guidance (#47) -------------------------------------------------------------------
+
+    /** Route state expires without a new frame: while a maneuver is shown, re-read it so `nav` clears. */
+    private val navExpiryCheck = object : Runnable {
+        override fun run() {
+            main.removeCallbacks(this)
+            if (SimHubNav.of(CarPlayGlance.snapshot()) != null) main.postDelayed(this, NAV_EXPIRY_CHECK_MS)
+        }
+    }
+
+    private fun followRouteGuidance() {
+        CarPlayGlance.addListener { glance ->
+            val nav = SimHubNav.of(glance)
+            onMain {
+                main.removeCallbacks(navExpiryCheck)
+                if (nav != null) main.postDelayed(navExpiryCheck, NAV_EXPIRY_CHECK_MS)
+                lifecycle.updateNav(nav)
+            }
+        }
+    }
+
     // --- internals ------------------------------------------------------------------------------
 
     private fun startPaired(current: SimHubPairing) {
@@ -428,6 +454,8 @@ object RigSessionCoordinator {
         override fun onLinkUp(state: SimHubState) = fromLink {
             // A stop() may have cleared the PC audio path; the link is up again.
             attachAudioTransport()
+            // The plugin keeps no artwork across sessions (#47).
+            SimHubArtworkPublisher.resend()
             // Only the stored PC drives the phone; onPaired ran just before and stored it.
             if (pairing != null) lifecycle.onLinkUp()
             notifyObservers()

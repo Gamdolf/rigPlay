@@ -72,6 +72,9 @@ object SimHubProtocol {
     const val TYPE_ERROR = "error"
     const val TYPE_AUDIO_START = "audioStart"
     const val TYPE_AUDIO_STOP = "audioStop"
+    const val TYPE_ARTWORK = "artwork"
+
+    const val MIME_JPEG = "image/jpeg"
 
     // §14.1 error codes.
     const val ERROR_UNSUPPORTED_PROTOCOL = "unsupportedProtocol"
@@ -143,6 +146,7 @@ object SimHubProtocol {
                 TYPE_ERROR -> decodeError(fields)
                 TYPE_AUDIO_START -> decodeAudioStart(fields)
                 TYPE_AUDIO_STOP -> SimHubMessage.AudioStop(fields.reqEnum("stream"))
+                TYPE_ARTWORK -> SimHubMessage.Artwork(mime = fields.reqString("mime", 1..255), base64 = fields.reqString("base64", 1..MAX_LINE_BYTES))
                 else -> return SimHubParseResult.Unknown(type)
             }
             SimHubParseResult.Ok(message)
@@ -208,6 +212,7 @@ object SimHubProtocol {
                 .putOpt("phoneName", message.phoneName)
                 .put("screen", message.screen.wire)
                 .put("nowPlaying", message.nowPlaying?.let(::nowPlayingJson) ?: JSONObject.NULL)
+                .putOpt("nav", message.nav?.let(::navJson))
             is SimHubMessage.Command -> when (val command = message.command) {
                 is SimHubCommand.Media -> json.put("command", COMMAND_MEDIA).put("action", command.action.wire)
                 SimHubCommand.ShowDashboard -> json.put("command", COMMAND_SHOW_DASHBOARD)
@@ -240,9 +245,16 @@ object SimHubProtocol {
                 .put("sampleRate", message.sampleRate)
                 .put("channels", message.channels)
             is SimHubMessage.AudioStop -> json.put("stream", message.stream.wire)
+            is SimHubMessage.Artwork -> json.put("mime", message.mime).put("base64", message.base64)
         }
         return json
     }
+
+    private fun navJson(nav: NavStatus): JSONObject = JSONObject()
+        .put("maneuver", nav.maneuver)
+        .putOpt("distanceM", nav.distanceM)
+        .putOpt("road", nav.road)
+        .putOpt("etaEpochS", nav.etaEpochS)
 
     private fun nowPlayingJson(nowPlaying: NowPlaying): JSONObject {
         // §3: a decimal that is not finite and has no null option means the message is not sent.
@@ -368,11 +380,20 @@ object SimHubProtocol {
                 updatedAt = it.reqInt("updatedAt", Long.MIN_VALUE..Long.MAX_VALUE),
             )
         }
+        val nav = f.optObject("nav")?.let {
+            NavStatus(
+                maneuver = it.reqString("maneuver", 1..64),
+                distanceM = it.optInt("distanceM", 0L..Int.MAX_VALUE)?.toInt(),
+                road = it.optString("road"),
+                etaEpochS = it.optInt("etaEpochS", 0L..Long.MAX_VALUE),
+            )
+        }
         return SimHubMessage.Status(
             phoneConnected = f.reqBoolean("phoneConnected"),
             phoneName = f.optString("phoneName"),
             screen = f.reqEnum("screen"),
             nowPlaying = nowPlaying,
+            nav = nav,
         )
     }
 

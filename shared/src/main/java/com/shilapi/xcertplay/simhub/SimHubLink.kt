@@ -301,6 +301,16 @@ class SimHubLink(
     /** `audioStop` (§6.12). Returns false unless the link is up. */
     fun sendAudioStop(stream: AudioStream): Boolean = sendPaired(SimHubMessage.AudioStop(stream))
 
+    /**
+     * `artwork` (#47): the now-playing artwork as base64 [SimHubProtocol.MIME_JPEG] by default. Returns
+     * false unless the link is up, or when the line would exceed [SimHubProtocol.MAX_LINE_BYTES].
+     */
+    fun sendArtwork(base64: String, mime: String = SimHubProtocol.MIME_JPEG): Boolean {
+        val message = SimHubMessage.Artwork(mime, base64)
+        if (SimHubProtocol.encodeLine(message).size > SimHubProtocol.MAX_LINE_BYTES) return false
+        return sendPaired(message)
+    }
+
     /** Answers a [SimHubCommand] that cannot be carried out now with `commandUnavailable` (§6.8). */
     fun sendCommandUnavailable(message: String? = null): Boolean {
         val open = currentSession() ?: return false
@@ -591,7 +601,8 @@ class SimHubLink(
                 is SimHubMessage.PairRequest,
                 is SimHubMessage.Status,
                 is SimHubMessage.AudioStart,
-                is SimHubMessage.AudioStop -> {
+                is SimHubMessage.AudioStop,
+                is SimHubMessage.Artwork -> {
                     sendErrorReply(SimHubProtocol.ERROR_UNEXPECTED_MESSAGE, "${message.type} is tablet to plugin", message.type)
                     null
                 }
