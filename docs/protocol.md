@@ -362,7 +362,7 @@ Plugin → tablet. A complete snapshot, never a delta. Sent immediately after `p
 |---|---|---|---|
 | `type` | string | yes | `"state"` |
 | `dashboardUrl` | string (absolute `http` or `https` URL) or `null` | yes | Dashboard shown in `dashboard` mode (the SimHub button in CarPlay). `null`: none selected on the PC. |
-| `idleDashboardUrl` | string (absolute `http` or `https` URL) or `null` | no | Dashboard shown while no phone is connected. Absent or `null`: none, the tablet shows its home screen. Only sent when the session has feature `idleDashboard`. |
+| `idleDashboardUrl` | string (absolute `http` or `https` URL) or `null` | no | Dashboard shown while no phone is connected. Absent or `null`: none, the tablet shows `dashboardUrl` instead, else its built-in idle screen. Only sent when the session has feature `idleDashboard`. |
 | `dashboardServer` | object | no | State of SimHub's web dash server. Absent: unknown, the tablet assumes it is reachable. |
 | `dashboardServer.reachable` | boolean | yes, in the object | `false`: the plugin could not reach the web dash server; the URLs will not load. The tablet shows "Enable the web dash server in SimHub" instead of a browser error. |
 | `dashboardServer.port` | integer 1–65535 | yes, in the object | Port the plugin probed. |
@@ -419,7 +419,7 @@ advance of `nowPlaying.position` during playback is not a change; a seek is.
 |---|---|
 | `carplay` | The CarPlay projection is in the foreground. |
 | `dashboard` | `state.dashboardUrl` is shown. |
-| `idle` | No phone is connected; the idle dashboard or the rigPlay home screen is shown. |
+| `idle` | No phone is connected; the idle dashboard, the built-in rigPlay idle screen or the rigPlay home screen is shown. |
 | `off` | The tablet display is off, or rigPlay is not in the foreground. |
 
 Position extrapolation on the plugin: while `playing`, `position_now = position + (now − receivedAt)`,

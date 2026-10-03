@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.webkit.WebResourceError
@@ -35,6 +36,11 @@ import java.net.Socket
  * covers the projection, CarPlayHostActivity is merely stopped: its TextureView keeps the
  * SurfaceTexture the decoder renders into (only the hardware layer is dropped), so video shows the
  * next decoded frame on return, the same path "rigPlay home" has always used.
+ *
+ * In idle mode ([openIdle], #39) it shows the idle dashboard while no phone is connected
+ * (`state.idleDashboardUrl`, else the main dashboard; [DashboardContent.resolveIdle]) and reports
+ * `status.screen = idle`. There a tap shows the Home / Settings toolbar ([IdleToolbar]) instead of
+ * the CarPlay button, and a dashboard that fails to load hands over to [OfflineIdleActivity].
  */
 class DashboardActivity : ComponentActivity() {
     private val main = Handler(Looper.getMainLooper())
@@ -43,9 +49,14 @@ class DashboardActivity : ComponentActivity() {
     private var overlayText: TextView? = null
     private var retryButton: Button? = null
     private var returnButton: Button? = null
+    private var toolbar: IdleToolbar? = null
     private var shown: DashboardContent? = null
     private var attempt: Attempt? = null
     private val observer: () -> Unit = { render() }
+
+    /** Showing the idle dashboard (#39) rather than the one the SimHub button opens. */
+    var idleMode = false
+        private set
 
     /** One load of a dashboard URL, with the connected-host fallback for NAT (#30). */
     private data class Attempt(val content: DashboardContent.Load, val usingFallback: Boolean, val serial: Int) {
@@ -59,10 +70,36 @@ class DashboardActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED)
         RigTabletWindow.immersive(window, edgeToEdge = true)
         RigSessionCoordinator.init(this)
+        idleMode = intent.getBooleanExtra(EXTRA_IDLE, false)
         setContentView(buildContent())
+        applyMode()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() = returnToCarPlay()
+            override fun handleOnBackPressed() {
+                if (idleMode) IdleToolbar.open(this@DashboardActivity, "home") else returnToCarPlay()
+            }
         })
+    }
+
+    /** The other mode was asked for (SimHub button over the idle dashboard, or the policy after it). */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val next = intent.getBooleanExtra(EXTRA_IDLE, false)
+        if (next == idleMode) return
+        idleMode = next
+        applyMode()
+        shown = null
+        // onResume follows, which renders and lets RigPlayApplication report the new screen.
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (idleMode && event.actionMasked == MotionEvent.ACTION_DOWN) toolbar?.show()
+        return super.dispatchTouchEvent(event)
+    }
+
+    private fun applyMode() {
+        returnButton?.visibility = if (idleMode) View.GONE else View.VISIBLE
+        if (!idleMode) toolbar?.hide()
     }
 
     override fun onResume() {
@@ -83,6 +120,7 @@ class DashboardActivity : ComponentActivity() {
 
     override fun onDestroy() {
         main.removeCallbacksAndMessages(null)
+        toolbar?.dispose()
         webView?.apply { stopLoading(); destroy() }
         webView = null
         super.onDestroy()
@@ -134,15 +172,25 @@ class DashboardActivity : ComponentActivity() {
             topMargin = dp(12); marginEnd = dp(12)
         })
         webView = web; overlay = message; overlayText = messageText; retryButton = retry; returnButton = back
+        toolbar = IdleToolbar(this, root)
         return root
     }
 
     /** Applies the current SimHub state; reloads only when the dashboard content changed. */
     private fun render() {
         returnButton?.text = getString(
-            if (CarPlayBackgroundSession.hasSession()) R.string.rig_dashboard_carplay else R.string.rig_rigplay_home,
+            when {
+                CarPlayBackgroundSession.active -> R.string.rig_dashboard_carplay
+                RigSessionCoordinator.policyScreen() != null -> R.string.rig_idle_close
+                CarPlayBackgroundSession.hasSession() -> R.string.rig_dashboard_carplay
+                else -> R.string.rig_rigplay_home
+            },
         )
-        val content = DashboardContent.resolve(RigSessionCoordinator.state, RigSessionCoordinator.isPaired)
+        val state = RigSessionCoordinator.state
+        val paired = RigSessionCoordinator.isPaired
+        // In idle mode anything but a URL makes the policy switch to the rigPlay idle screen; the
+        // message shows until then.
+        val content = if (idleMode) DashboardContent.resolveIdle(state, paired) else DashboardContent.resolve(state, paired)
         if (content == shown) return
         shown = content
         when (content) {
@@ -198,6 +246,12 @@ class DashboardActivity : ComponentActivity() {
             return
         }
         Log.w(TAG, "dashboard ${failed.url} failed: $description")
+        if (idleMode) {
+            // The fallback chain ends at the rigPlay idle screen (#39), which says the dashboard did not load.
+            OfflineIdleActivity.open(this)
+            finish()
+            return
+        }
         showMessage(getString(R.string.rig_dashboard_unreachable, failed.url), retry = true)
     }
 
@@ -233,8 +287,19 @@ class DashboardActivity : ComponentActivity() {
         }
     }
 
-    /** Back to CarPlay without touching the session, or to the rigPlay home when no phone is connected. */
+    /**
+     * Back to CarPlay without touching the session; with no phone connected, to the screen the idle
+     * policy wants (#39), else as before to CarPlayHostActivity or the rigPlay home.
+     */
     private fun returnToCarPlay() {
+        if (!CarPlayBackgroundSession.active) {
+            when (RigSessionCoordinator.policyScreen()) {
+                // Same activity: the new intent switches it to idle mode in place.
+                RigSessionLifecycle.PolicyScreen.IDLE_DASHBOARD -> { RigSessionCoordinator.showPolicyScreen(); return }
+                null -> Unit
+                else -> if (RigSessionCoordinator.showPolicyScreen()) { finish(); return }
+            }
+        }
         val target = if (CarPlayBackgroundSession.hasSession()) CarPlayHostActivity::class.java else RigPlayActivity::class.java
         startActivity(Intent(this, target).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
         finish()
@@ -245,11 +310,18 @@ class DashboardActivity : ComponentActivity() {
     companion object {
         private const val TAG = "rigplay-dashboard"
         private const val PROBE_TIMEOUT_MS = 2_000
+        private const val EXTRA_IDLE = "com.shilapi.xcertplay.extra.IDLE_DASHBOARD"
 
         /** Opens the dashboard from anywhere: home button, CarPlay's OEM icon, `command showDashboard`. */
-        fun open(context: Context) {
+        fun open(context: Context) = start(context, idle = false)
+
+        /** Opens the idle dashboard (#39); the screen policy's choice while no phone is connected. */
+        fun openIdle(context: Context) = start(context, idle = true)
+
+        private fun start(context: Context, idle: Boolean) {
             context.startActivity(
                 Intent(context, DashboardActivity::class.java)
+                    .putExtra(EXTRA_IDLE, idle)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
             )
         }

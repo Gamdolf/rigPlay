@@ -120,6 +120,10 @@ class RigPlayActivity : ComponentActivity() {
                 // With a paired PC the coordinator connects the phone when SimHub comes up (#29).
                 !RigSessionCoordinator.isPaired) {
                 handler.post { connect(AirPlayPersistence.loadWirelessEnabled(this)) }
+            } else if (intent.getBooleanExtra(EXTRA_FROM_BOOT, false) && RigSessionCoordinator.isPaired &&
+                intent.getStringExtra("page") == null && page == "home") {
+                // Opened after boot on the rig (#39): straight to the idle screen (or CarPlay), not the menu.
+                handler.post { RigSessionCoordinator.showPolicyScreen() }
             }
         }
     }
@@ -273,6 +277,12 @@ class RigPlayActivity : ComponentActivity() {
         actions.addView(button(getString(R.string.rig_dashboard_simhub), false) {
             RigSessionCoordinator.showDashboard(this)
         }, matchButton(12, 60))
+        // The idle dashboard or the rigPlay idle screen (#39), whichever the policy would show now.
+        if (RigSessionCoordinator.isPaired && !CarPlayBackgroundSession.active) {
+            actions.addView(button(getString(R.string.rig_idle_show), false) {
+                RigSessionCoordinator.showPolicyScreen()
+            }, matchButton(12, 60))
+        }
     }
 
     private fun phoneStatusText(): String {
@@ -292,6 +302,7 @@ class RigPlayActivity : ComponentActivity() {
         content.addView(label(getString(R.string.your_rig_your_way), 34, TEXT, true))
         content.addView(label(getString(R.string.apply_reconnects_carplay_for_size_resolution_music_buffer), 17, MUTED).apply { setPadding(0, dp(8), 0, dp(24)) })
         simHubSettings(content)
+        idleSettings(content)
         section(content, getString(R.string.connection_setup), R.drawable.ic_dp_connection) { card ->
             card.addView(label(getString(R.string.choose_how_to_connect_follow_the_setup_steps_and_save_your), 16, MUTED))
             card.addView(button(getString(R.string.open_connection_setup), false) { page = "connection"; render() }, matchButton(12, 60))
@@ -578,6 +589,26 @@ class RigPlayActivity : ComponentActivity() {
                     render()
                 }
             }, matchButton(10, 60))
+        }
+    }
+
+    /** "When no iPhone is connected" (#39): idle dashboard or rigPlay screen, and when it turns off. */
+    private fun idleSettings(content: LinearLayout) {
+        section(content, getString(R.string.rig_settings_idle), R.drawable.ic_dp_display) { card ->
+            val modes = listOf(IdleMode.DASHBOARD, IdleMode.RIGPLAY_SCREEN)
+            choice(card, getString(R.string.rig_settings_idle_mode),
+                listOf(getString(R.string.rig_settings_idle_mode_dashboard), getString(R.string.rig_settings_idle_mode_screen)),
+                modes.indexOf(AirPlayPersistence.loadIdleMode(this)).coerceAtLeast(0), reconnects = false) {
+                AirPlayPersistence.saveIdleMode(this, modes[it])
+                RigSessionCoordinator.onIdleSettingsChanged()
+            }
+            val minutes = IdleScreenOff.CHOICES
+            choice(card, getString(R.string.rig_settings_idle_off),
+                minutes.map { if (it == 0) getString(R.string.rig_settings_idle_off_never) else getString(R.string.rig_settings_idle_off_after, it) },
+                minutes.indexOf(AirPlayPersistence.loadIdleScreenOffMinutes(this)).coerceAtLeast(0), reconnects = false) {
+                AirPlayPersistence.saveIdleScreenOffMinutes(this, minutes[it])
+            }
+            card.addView(label(getString(R.string.rig_settings_idle_note), 14, MUTED))
         }
     }
 
@@ -1256,6 +1287,9 @@ class RigPlayActivity : ComponentActivity() {
     private fun space(height: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(height)) }
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
     companion object {
+        /** Set by [BootReceiver]: rigPlay was opened after boot rather than by the user. */
+        const val EXTRA_FROM_BOOT = "com.shilapi.xcertplay.extra.FROM_BOOT"
+
         private val BG = Color.rgb(12, 17, 27)
         private val SURFACE = Color.rgb(21, 30, 44)
         private val BORDER = Color.rgb(42, 56, 75)

@@ -22,7 +22,8 @@ import com.shilapi.xcertplay.host.R
 
 /**
  * Process-wide owner of the SimHub link (#26) and discovery, created by [RigPlayApplication]; runs
- * onboarding (#27) and couples the phone session to the PC through [RigSessionLifecycle] (#29).
+ * onboarding (#27) and couples the phone session to the PC through [RigSessionLifecycle] (#29), which
+ * also picks CarPlay, the idle dashboard or the rigPlay idle screen while nothing else was asked for (#39).
  *
  * Everything here runs on the main thread: link and discovery callbacks are posted to it, and the
  * UI methods must be called from it. Observers ([addObserver]) are told about any change of
@@ -109,7 +110,7 @@ object RigSessionCoordinator {
         link = SimHubLink(identity(app), LinkListener)
         linkPort = EpochLinkPort(SimHubLinkPort.of(link))
         flow = SimHubPairingFlow(linkPort) { notifyObservers() }
-        lifecycle = RigSessionLifecycle(linkPort, RigPhoneSession(app), AppScreens(app)) { Log.i(TAG, it) }
+        lifecycle = RigSessionLifecycle(linkPort, RigPhoneSession(app), AppScreens(app), AppIdleInputs(app)) { Log.i(TAG, it) }
         lifecycle.mediaCommandHandler = pendingMediaHandler
         // CarPlay audio to the PC (#31): the link exists from here on.
         attachAudioTransport()
@@ -142,8 +143,25 @@ object RigSessionCoordinator {
      */
     fun onManualConnect(): Boolean = initialized && lifecycle.onManualConnect(paired = isPaired)
 
-    /** The SimHub button, CarPlay's OEM icon and `command showDashboard` (#30). Any thread. */
+    /** The SimHub button, CarPlay's OEM icon and `command showDashboard` (#30): the main dashboard. Any thread. */
     fun showDashboard(context: Context) = DashboardActivity.open(context.applicationContext ?: context)
+
+    // --- idle mode (#39) ------------------------------------------------------------------------
+
+    /** What the tablet would show by itself now (see [RigSessionLifecycle.policyScreen]); `null`: no policy. */
+    fun policyScreen(): RigSessionLifecycle.PolicyScreen? = if (initialized) lifecycle.policyScreen() else null
+
+    /**
+     * Shows CarPlay or the idle screen the policy wants; call it from a foreground activity. False
+     * when there is none (no PC paired, no phone).
+     */
+    fun showPolicyScreen(): Boolean = initialized && lifecycle.showPolicyScreen()
+
+    /** Settings → "When no iPhone is connected" changed. */
+    fun onIdleSettingsChanged() {
+        if (initialized) lifecycle.onIdleInputsChanged()
+        notifyObservers()
+    }
 
     /** Which rigPlay screen is in the foreground; from [RigPlayApplication]'s activity callbacks. */
     fun onForegroundChanged(foreground: RigSessionLifecycle.Foreground) {
@@ -182,6 +200,24 @@ object RigSessionCoordinator {
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
             )
         }
+
+        override fun showIdleDashboard() = DashboardActivity.openIdle(context)
+
+        override fun showOfflineIdle() = OfflineIdleActivity.open(context)
+
+        override fun showHome() {
+            context.startActivity(
+                Intent(context, RigPlayActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+            )
+        }
+    }
+
+    /** The idle policy's view of the pairing, the settings and the latest `state` (#39). Main thread. */
+    private class AppIdleInputs(private val context: Context) : RigSessionLifecycle.IdleInputs {
+        override fun paired(): Boolean = pairing != null
+        override fun mode(): IdleMode = AirPlayPersistence.loadIdleMode(context)
+        override fun idleDashboardAvailable(): Boolean = DashboardContent.idleDashboardAvailable(state, pairing != null)
     }
 
     // --- onboarding (#27) -----------------------------------------------------------------------
@@ -337,6 +373,8 @@ object RigSessionCoordinator {
         }
         updateDiscovery()
         appContext?.let(RigPlaySessionService::refresh)
+        // A new `state` may bring or take away the idle dashboard (#39).
+        lifecycle.onIdleInputsChanged()
         notifyObservers()
     }
 
