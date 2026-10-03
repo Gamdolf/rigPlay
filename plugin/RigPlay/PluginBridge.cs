@@ -49,6 +49,7 @@ namespace RigPlayPlugin
             };
             Host = new RigPlayHost(plugin.Settings, env);
             Host.Start();
+            AttachSurface();
             Log.Info("Tablet server: control TCP " + (Host.Server.Status.Listening ? Host.Server.Port + " listening" : "not listening (" + Host.Server.Status.Error + ")")
                 + ", beacon UDP " + plugin.Settings.DiscoveryPort + (Host.Beacon.Status.Running ? " running" : " not running")
                 + ", host " + Host.DisplayName + " (" + plugin.Settings.HostId + "), SimHub " + (env.SimHubVersion ?? "?"));
@@ -69,6 +70,36 @@ namespace RigPlayPlugin
         public void Dispose()
         {
             Stop();
+        }
+
+        /// <summary>
+        /// The properties and actions of docs/protocol.md §16. SimHub prefixes each name with the plugin class name, so
+        /// "TabletConnected" appears as RigPlay.TabletConnected and "PlayPause" as RigPlay.PlayPause.
+        /// </summary>
+        private void AttachSurface()
+        {
+            Func<SurfaceSnapshot> s = () => plugin.Host?.Surface ?? SurfaceSnapshot.Empty;
+            plugin.AttachDelegate("TabletConnected", () => s().TabletConnected);
+            plugin.AttachDelegate("PhoneConnected", () => s().PhoneConnected);
+            plugin.AttachDelegate("Screen", () => s().Screen);
+            plugin.AttachDelegate("NowPlaying.Title", () => s().Title);
+            plugin.AttachDelegate("NowPlaying.Artist", () => s().Artist);
+            plugin.AttachDelegate("NowPlaying.Album", () => s().Album);
+            plugin.AttachDelegate("NowPlaying.App", () => s().App);
+            plugin.AttachDelegate("NowPlaying.Playing", () => s().Playing);
+            plugin.AttachDelegate("NowPlaying.Position", () => plugin.Host?.NowPlayingPosition ?? 0.0);
+            plugin.AttachDelegate("NowPlaying.Duration", () => s().Duration);
+
+            foreach (SurfaceAction action in Enum.GetValues(typeof(SurfaceAction)))
+            {
+                var a = action;
+                plugin.AddAction(SurfaceActions.Name(a), (manager, name) =>
+                {
+                    try { plugin.Host?.RunAction(a); } catch (Exception ex) { Log.Error("Action " + a + " failed", ex); }
+                }, (manager, name) => { });
+            }
+            Log.Info("SimHub properties RigPlay.TabletConnected, PhoneConnected, Screen, NowPlaying.* and actions RigPlay."
+                + string.Join(", RigPlay.", Enum.GetNames(typeof(SurfaceAction))) + " registered");
         }
 
         private static void Forward(LogLevel level, string message)

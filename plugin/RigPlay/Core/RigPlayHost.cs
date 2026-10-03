@@ -85,8 +85,74 @@ namespace RigPlayPlugin
         /// <summary>The name tablets show for this PC.</summary>
         public string DisplayName => string.IsNullOrEmpty(Settings.HostName) ? env.MachineName : Settings.HostName;
 
+        // SimHub surface (spec §12, §16)
+
+        private volatile SurfaceSnapshot surface = SurfaceSnapshot.Empty;
+
+        /// <summary>The primary tablet as the SimHub properties see it. Cheap to read from SimHub's data thread.</summary>
+        public SurfaceSnapshot Surface => surface;
+
         /// <summary>Id of the primary tablet's session (spec §12); 0 when there is none.</summary>
-        public int PrimarySessionId => 0;
+        public int PrimarySessionId => surface.PrimarySessionId;
+
+        /// <summary>The primary tablet's playback position now, extrapolated while playing (spec §6.7).</summary>
+        public double NowPlayingPosition => surface.PositionAt(clock.NowMs);
+
+        public ClientSession PrimarySession
+        {
+            get
+            {
+                var id = PrimarySessionId;
+                return id == 0 ? null : Server?.PairedSessions.FirstOrDefault(s => s.Id == id);
+            }
+        }
+
+        /// <summary>Runs a SimHub action: sends its command to the primary tablet. False (logged at debug level) when there is none.</summary>
+        public bool RunAction(SurfaceAction action)
+        {
+            var primary = PrimarySession;
+            if (primary == null)
+            {
+                PluginLog.Debug("Action " + action + " ignored: no primary tablet");
+                return false;
+            }
+            var command = SurfaceActions.CommandFor(action, primary.LastStatus?.Screen);
+            var sent = primary.Send(command);
+            PluginLog.Debug("Action " + action + " -> " + MessageCodec.Encode(command) + " to " + primary + (sent ? "" : " (failed)"));
+            return sent;
+        }
+
+        private readonly object surfaceLock = new object();
+
+        private void UpdateSurface()
+        {
+            // Serialised so that the last snapshot written is computed from the latest sessions.
+            lock (surfaceLock) UpdateSurfaceLocked();
+        }
+
+        private void UpdateSurfaceLocked()
+        {
+            var paired = Server?.PairedSessions ?? new List<ClientSession>();
+            var primaryId = PrimaryTabletSelector.Select(paired.Select(s => new TabletCandidate
+            {
+                SessionId = s.Id,
+                Paired = true,
+                PhoneConnected = s.LastStatus != null && s.LastStatus.PhoneConnected,
+                PhoneConnectedOrder = s.PhoneConnectedOrder,
+                PairedOrder = s.PairedOrder,
+            }));
+            var primary = paired.FirstOrDefault(s => s.Id == primaryId);
+            var status = primary?.LastStatus;
+            surface = new SurfaceSnapshot
+            {
+                TabletConnected = paired.Count > 0,
+                PrimarySessionId = primaryId,
+                PhoneConnected = status != null && status.PhoneConnected,
+                Screen = status?.Screen ?? Screens.Off,
+                NowPlaying = status?.NowPlaying,
+                StatusReceivedAtMs = primary?.LastStatusAtMs ?? 0,
+            };
+        }
 
         public string PluginVersion => env.PluginVersion;
 
@@ -240,7 +306,11 @@ namespace RigPlayPlugin
                 StateFactory = BuildState,
                 Pairing = Pairing,
             };
-            server.SessionsChanged += RaiseChanged;
+            server.SessionsChanged += () =>
+            {
+                UpdateSurface();
+                RaiseChanged();
+            };
             server.AudioStartReceived += (s, m) => RaiseAudio(AudioStart, h => h(m.Stream, m.Format, m.SampleRate, m.Channels, s.Remote.Address));
             server.AudioStopReceived += (s, m) => RaiseAudio(AudioStop, h => h(m.Stream, s.Remote.Address));
             server.SessionClosed += s =>

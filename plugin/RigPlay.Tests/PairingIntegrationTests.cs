@@ -19,7 +19,7 @@ namespace RigPlayPlugin.Tests
         public PairingIntegrationTests()
         {
             host = new RigPlayHost(settings, new HostEnvironment { PluginVersion = "0.1.0", MachineName = "RIG-PC", SaveSettings = () => saves++ },
-                null, ControlServerTests.Fast)
+                null, ControlServerTests.FastNoWatchdog)
             {
                 ControlPortOverride = 0,
                 BeaconEnabled = false,

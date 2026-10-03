@@ -28,6 +28,19 @@ namespace RigPlayPlugin.Tests
             ErrorIntervalMs = 0,
         };
 
+        /// <summary>Fast timeouts except the watchdog, for tests whose fake tablet does not send heartbeats.</summary>
+        public static SessionTimings FastNoWatchdog
+        {
+            get
+            {
+                var t = Fast;
+                t.WatchdogMs = 30000;
+                t.HeartbeatMs = 1000;
+                t.PairRequestTimeoutMs = 30000;
+                return t;
+            }
+        }
+
         private readonly ControlServer server;
         private readonly List<FakeTablet> tablets = new List<FakeTablet>();
 

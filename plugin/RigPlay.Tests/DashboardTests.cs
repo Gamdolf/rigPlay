@@ -194,7 +194,7 @@ namespace RigPlayPlugin.Tests
             using (var http = new TinyHttpServer())
             {
                 var settings = new RigPlaySettings { SelectedDashboard = "Pit Board", WebDashPort = http.Port }.Normalize();
-                var host = new RigPlayHost(settings, new HostEnvironment { PluginVersion = "0.1.0", SimHubDir = temp }, null, ControlServerTests.Fast)
+                var host = new RigPlayHost(settings, new HostEnvironment { PluginVersion = "0.1.0", SimHubDir = temp }, null, ControlServerTests.FastNoWatchdog)
                 {
                     ControlPortOverride = 0,
                     BeaconEnabled = false,
