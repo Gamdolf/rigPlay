@@ -46,8 +46,8 @@ class FakeSimHubServer(
     @Volatile var helloResponder: ((SimHubMessage.Hello) -> List<SimHubMessage>?)? = null
 
     @Volatile var stateAfterPairing: SimHubMessage.State = SimHubMessage.State(
-        dashboardUrl = "http://127.0.0.1:8888/dashboard/Pit%20Board",
-        idleDashboardUrl = "http://127.0.0.1:8888/dashboard/Rig%20Clock",
+        dashboardUrl = "http://127.0.0.1:8888/Dash#Pit%20Board",
+        idleDashboardUrl = "http://127.0.0.1:8888/Dash#Rig%20Clock",
         dashboardServer = DashboardServer(reachable = true, port = 8888),
         audio = AudioSettings(enabled = true, port = SimHubProtocol.AUDIO_PORT, formats = listOf(SimHubProtocol.FORMAT_PCM_S16LE)),
     )

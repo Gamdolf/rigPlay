@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // DashboardCatalog.cs: the dashboards installed in SimHub and the URLs tablets load them from (docs/protocol.md §11).
 // A dashboard is a folder under <SimHub>\DashTemplates\ holding a .djson file; its name is the folder name, and
-// <folder>.djson.metadata may carry a display title. The URL is http://<localIp>:<webDashPort>/Dash#<name> (the spec's
-// /dashboard/<name> is a 404 on SimHub 9.12.6; see DashboardUrls.DashPagePrefix).
+// <folder>.djson.metadata may carry a display title. The URL is http://<localIp>:<webDashPort>/Dash#<name>
+// (/dashboard/<name> is a 404 on SimHub 9.12.6; see DashboardUrls.DashPagePrefix).
 // Pure: no SimHub or WPF types (compiled into RigPlay.Tests).
 using System;
 using System.Collections.Generic;
@@ -120,10 +120,9 @@ namespace RigPlayPlugin.Dashboards
         /// The page of SimHub's web dash server that renders one dashboard, before the encoded name.
         /// </summary>
         /// <remarks>
-        /// docs/protocol.md §11 says <c>/dashboard/&lt;name&gt;</c>, but SimHub 9.12.6 answers 404 there (checked on the
-        /// test VM for several dashboards). Its own dashboard list links to <c>/Dash#&lt;encodeURIComponent(name)&gt;</c>,
-        /// which renders the dashboard in a browser. The tablet treats the URL as opaque, so the working form is sent;
-        /// the spec needs the same correction.
+        /// SimHub 9.12.6 answers 404 for <c>/dashboard/&lt;name&gt;</c> (checked on the test VM for several dashboards).
+        /// Its own dashboard list links to <c>/Dash#&lt;encodeURIComponent(name)&gt;</c>, which renders the dashboard in a
+        /// browser; docs/protocol.md §11 specifies this form. The tablet treats the URL as opaque.
         /// </remarks>
         public const string DashPagePrefix = "/Dash#";
 

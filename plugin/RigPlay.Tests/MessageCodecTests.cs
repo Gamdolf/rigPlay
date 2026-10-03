@@ -29,6 +29,23 @@ namespace RigPlayPlugin.Tests
             Assert.Equal(valid, MessageCodec.TryDecode(line).Ok);
         }
 
+        [Theory]
+        [InlineData("{\"type\":\"error\",\"code\":\"shutdown\"}", true)]
+        [InlineData("{\"type\":\"error\",\"code\":\"replaced\",\"fatal\":false}", true)]
+        [InlineData("{\"type\":\"error\",\"code\":\"notPaired\"}", false)]
+        [InlineData("{\"type\":\"error\",\"code\":\"somethingNew\",\"fatal\":true}", true)]
+        public void CodesListedAsFatalAreFatalWithoutTheFlag(string line, bool fatal)
+        {
+            Assert.Equal(fatal, ((ErrorMessage)MessageCodec.Decode(line)).IsFatal);
+        }
+
+        [Fact]
+        public void EscapedSlashesAreAccepted()
+        {
+            var state = (StateMessage)MessageCodec.Decode("{\"type\":\"state\",\"dashboardUrl\":\"http:\\/\\/192.168.1.20:8888\\/Dash#Pit%20Board\",\"audio\":{\"enabled\":true,\"port\":23712,\"formats\":[\"pcm_s16le\"]}}");
+            Assert.Equal("http://192.168.1.20:8888/Dash#Pit%20Board", state.DashboardUrl);
+        }
+
         [Fact]
         public void ATabletIdOf65CharactersIsInvalid()
         {

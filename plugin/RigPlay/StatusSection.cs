@@ -56,7 +56,7 @@ namespace RigPlayPlugin
             });
 
             var section = Ui.Section("Status",
-                "Whether rigPlay is listening for tablets, and on which ports. When Windows Firewall asks about SimHub, allow it on Private networks.",
+                "Whether rigPlay is listening for tablets, and on which ports. SimHub's installer already allows SimHub through Windows Firewall; if another firewall asks, allow it on private networks only.",
                 Ui.Row("Tablet server", serverValue),
                 Ui.Row("Discovery", beaconValue),
                 Ui.Row("PC name on tablets", name),

@@ -39,7 +39,7 @@ codec against every file in [`protocol/fixtures/`](../protocol/fixtures/).
 | Beacon | `Net/DiscoveryBeacon.cs` | UDP 23710 every second, to each interface's directed broadcast and 255.255.255.255. |
 | Control server | `Net/ControlServer.cs`, `Net/ClientSession.cs` | TCP 23711 (configurable), newline JSON, hello/welcome, heartbeats, 5 s watchdog, one session per tablet, `shutdown` on exit, LAN peers only. |
 | Pairing | `Pairing/PairingService.cs` | PIN shown on the page (6 digits, 120 s, single use, 3 attempts, 5 starts/min), token issue and resume. Only the token's SHA-256 is stored (`PairedTablets[].TokenHash`). |
-| Dashboards | `Dashboards/DashboardCatalog.cs`, `Dashboards/WebDashProbe.cs` | Lists `<SimHub>\DashTemplates\*` (title from `<name>.djson.metadata`), builds `http://<ip>:<port>/Dash#<name>` with the address the tablet reached the PC on (the spec's `/dashboard/<name>` is a 404 on SimHub 9.12.6; `/Dash#<name>` is what SimHub's own dashboard list links to), probes `http://127.0.0.1:<port>/` every 10 s. The port is the page's override, else SimHub's `SimHubWebPort` setting, else 8888. |
+| Dashboards | `Dashboards/DashboardCatalog.cs`, `Dashboards/WebDashProbe.cs` | Lists `<SimHub>\DashTemplates\*` (title from `<name>.djson.metadata`), builds `http://<ip>:<port>/Dash#<name>` (spec §11; `/Dash#<name>` is what SimHub's own dashboard list links to, `/dashboard/<name>` is a 404 on SimHub 9.12.6) with the address the tablet reached the PC on, probes `http://127.0.0.1:<port>/` every 10 s. The port is the page's override, else SimHub's `SimHubWebPort` setting, else 8888. |
 | Host | `Core/RigPlayHost.cs` | Runs the above inside SimHub without depending on it; the page and the SimHub glue read it. |
 
 ## SimHub surface

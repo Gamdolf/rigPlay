@@ -1,6 +1,6 @@
 {
   "type": "state",
-  "dashboardUrl": "http://10.0.0.5:8888/dashboard/Pit%20Board",
+  "dashboardUrl": "http://10.0.0.5:8888/Dash#Pit%20Board",
   "dashboardServer": {
     "reachable": false,
     "port": 8888

@@ -105,7 +105,8 @@ The `winvm` MCP server gives every Claude Code session on the host the same acce
 ## The web dash server
 
 SimHub serves installed dashboards on guest port 8888, published on the host. From the host:
-`http://127.0.0.1:8888/dashboard/<Name>`, for example with a headless browser. This is what the tablet's
+`http://127.0.0.1:8888/Dash#<Name>` (the name percent-encoded; `/dashboard/<Name>` is a 404 on SimHub
+9.12.6), for example with a headless browser. This is what the tablet's
 WebView loads ([ADR 0004](decisions/0004-dashboard-via-web-dash-server.md)). The guest firewall already
 allows 8888 (rule "SimHub web dash server").
 
@@ -152,7 +153,7 @@ Audio then goes to the address of the control connection (`state.audio.port`, pr
 which works the same way. One thing does not: the plugin builds `state.dashboardUrl` from the local
 address of the TCP connection (protocol section 11), and behind the NAT that is the guest's
 `172.30.0.2`, which no client outside the container can reach. Test dashboards through the VM
-by opening `http://<address you connected to>:8888/dashboard/<Name>` directly, or on the rig.
+by opening `http://<address you connected to>:8888/Dash#<Name>` directly, or on the rig.
 
 ## Telemetry
 

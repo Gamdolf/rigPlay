@@ -46,8 +46,7 @@ namespace RigPlayPlugin.Tests
         [Fact]
         public void BuiltUrlsAreValidStateUrls()
         {
-            // The fixtures still show the spec's /dashboard/<name> form, a 404 on SimHub 9.12.6; the plugin sends
-            // /Dash#<name> (DashboardUrls.DashPagePrefix). Either way the URL must pass the state validation.
+            // The /Dash#<name> form (spec §11, DashboardUrls.DashPagePrefix) must pass the state validation.
             var url = DashboardUrls.Build(IPAddress.Parse("192.168.1.20"), 8888, "Pit Board");
             var state = new StateMessage { DashboardUrl = url, IdleDashboardUrl = url, Audio = new AudioInfo { Port = 23712 } };
             var decoded = (StateMessage)MessageCodec.Decode(MessageCodec.Encode(state));

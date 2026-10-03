@@ -13,8 +13,9 @@ dashboard while no phone is connected. Options considered:
 - **Reimplement a dashboard renderer in the app.** SimHub dashboards are a large, evolving format; a
   second renderer would always lag behind SimHub's.
 - **Use SimHub's web dash server.** SimHub already serves any installed dashboard over HTTP at
-  `http://<pc>:8888/dashboard/<Name>` with live data, to any browser on the LAN. This was verified
-  on the VM with SimHub 9.12.6.
+  `http://<pc>:8888/Dash#<Name>` with live data, to any browser on the LAN. This was verified
+  on the VM with SimHub 9.12.6. (First written as `/dashboard/<Name>`, which SimHub 9.12.6 answers
+  with 404; corrected 2026-10-03, see protocol §11.)
 
 ## Decision
 

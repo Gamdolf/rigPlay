@@ -18,7 +18,8 @@ then the app, then pair them. Some steps below describe v1 behaviour that is sti
 
 Follow [plugin/INSTALL.md](../plugin/INSTALL.md). In short: close SimHub, copy `RigPlay.dll` into the folder
 that holds `SimHubWPF.exe` (usually `C:\Program Files (x86)\SimHub\`), unblock the file, start SimHub and
-accept the new plugin. Allow SimHub through Windows Firewall on **Private** networks when Windows asks.
+accept the new plugin. SimHub's installer already allows SimHub through Windows Firewall, so Windows does not
+ask; if a third-party firewall asks, allow SimHub on private networks.
 **rigPlay** then appears in SimHub's left menu.
 
 ## 2. Turn on SimHub's web dash server

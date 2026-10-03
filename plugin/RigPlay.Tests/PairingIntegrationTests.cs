@@ -115,7 +115,7 @@ namespace RigPlayPlugin.Tests
             {
                 var token = PairWithPin(t);
                 host.ForgetTablet(FakeTablet.DefaultId);
-                Assert.True(t.ExpectError(ErrorCodes.Forgotten).IsFatal);
+                Assert.True(t.ExpectError(ErrorCodes.Forgotten).Fatal == true);
                 t.ExpectClosed();
                 Assert.Empty(settings.PairedTablets);
 

@@ -59,6 +59,12 @@ namespace RigPlayPlugin.Protocol
         public const string Shutdown = "shutdown";
         public const string CommandUnavailable = "commandUnavailable";
         public const string Internal = "internal";
+
+        /// <summary>Codes spec §14.1 lists as fatal: fatal even when a peer leaves out <c>fatal: true</c> (senders always set it).</summary>
+        public static readonly HashSet<string> Fatal = new HashSet<string>(StringComparer.Ordinal)
+        {
+            UnsupportedProtocol, HelloRequired, LineTooLong, Replaced, Forgotten, Shutdown,
+        };
     }
 
     /// <summary><c>pairResult.reason</c> values (spec §6.4).</summary>
@@ -302,7 +308,8 @@ namespace RigPlayPlugin.Protocol
         public int? MinProtocol { get; set; }
         public int? MaxProtocol { get; set; }
 
-        public bool IsFatal => Fatal == true;
+        /// <summary>The connection closes after this error: <c>fatal: true</c>, or a code that spec §14.1 lists as fatal.</summary>
+        public bool IsFatal => Fatal == true || (Code != null && ErrorCodes.Fatal.Contains(Code));
 
         public static ErrorMessage Of(string code, string message, bool fatal = false, string refType = null)
         {

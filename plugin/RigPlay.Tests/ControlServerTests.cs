@@ -110,7 +110,7 @@ namespace RigPlayPlugin.Tests
         {
             var t = Connect();
             t.SendLine("{\"type\":\"heartbeat\",\"seq\":0}");
-            Assert.True(t.ExpectError(ErrorCodes.HelloRequired).IsFatal);
+            Assert.True(t.ExpectError(ErrorCodes.HelloRequired).Fatal == true);
             t.ExpectClosed();
         }
 
@@ -129,7 +129,7 @@ namespace RigPlayPlugin.Tests
             var t = Connect();
             t.Send(FakeTablet.NewHello(protocol: 3, minProtocol: 2));
             var error = t.ExpectError(ErrorCodes.UnsupportedProtocol);
-            Assert.True(error.IsFatal);
+            Assert.True(error.Fatal == true);
             Assert.Equal(1, error.MinProtocol);
             Assert.Equal(1, error.MaxProtocol);
             t.ExpectClosed();
@@ -215,7 +215,7 @@ namespace RigPlayPlugin.Tests
             first.Hello();
             var second = Connect();
             second.Send(FakeTablet.NewHello());
-            Assert.True(first.ExpectError(ErrorCodes.Replaced).IsFatal);
+            Assert.True(first.ExpectError(ErrorCodes.Replaced).Fatal == true);
             first.ExpectClosed();
             second.Expect<WelcomeMessage>();
             Assert.True(FakeTablet.WaitFor(() => server.Sessions.Count == 1));
@@ -275,7 +275,7 @@ namespace RigPlayPlugin.Tests
         [Fact]
         public void PairingSendsStateAndChangesAreBroadcastOnce()
         {
-            var url = "http://127.0.0.1:8888/dashboard/A";
+            var url = "http://127.0.0.1:8888/Dash#A";
             string current = null;
             server.StateFactory = s => new StateMessage { DashboardUrl = current, Audio = new AudioInfo { Enabled = false, Port = 23712 } };
             var t = Connect();
@@ -393,7 +393,7 @@ namespace RigPlayPlugin.Tests
             var t = Connect();
             t.SendLine("not a hello");
             for (var i = 0; i < 50; i++) t.SendLine("{\"type\":\"heartbeat\",\"seq\":" + i + "}");
-            Assert.True(t.ExpectError(ErrorCodes.HelloRequired).IsFatal);
+            Assert.True(t.ExpectError(ErrorCodes.HelloRequired).Fatal == true);
             t.ExpectClosed();
         }
 
@@ -403,7 +403,7 @@ namespace RigPlayPlugin.Tests
             var t = Connect();
             t.Hello();
             t.SendLine("{\"type\":\"heartbeat\",\"pad\":\"" + new string('x', ProtocolDefaults.MaxLineBytes) + "\"}");
-            Assert.True(t.ExpectError(ErrorCodes.LineTooLong).IsFatal);
+            Assert.True(t.ExpectError(ErrorCodes.LineTooLong).Fatal == true);
             t.ExpectClosed();
         }
 
@@ -426,9 +426,9 @@ namespace RigPlayPlugin.Tests
             b.Hello("tablet-b");
             Assert.True(FakeTablet.WaitFor(() => server.Sessions.Count(s => s.State == SessionState.Unpaired) == 2));
             server.Stop();
-            Assert.True(a.ExpectError(ErrorCodes.Shutdown).IsFatal);
+            Assert.True(a.ExpectError(ErrorCodes.Shutdown).Fatal == true);
             a.ExpectClosed();
-            Assert.True(b.ExpectError(ErrorCodes.Shutdown).IsFatal);
+            Assert.True(b.ExpectError(ErrorCodes.Shutdown).Fatal == true);
             b.ExpectClosed();
             Assert.False(server.Status.Listening);
         }

@@ -70,8 +70,8 @@ class SimHubLinkTest {
         assertEquals(Event.Paired(FakeSimHubServer.HOST_ID, FakeSimHubServer.TOKEN), events.await<Event.Paired>())
 
         val withState = events.awaitState { it.dashboardUrl != null }
-        assertEquals("http://127.0.0.1:8888/dashboard/Pit%20Board", withState.dashboardUrl)
-        assertEquals("http://127.0.0.1:8888/dashboard/Rig%20Clock", withState.idleDashboardUrl)
+        assertEquals("http://127.0.0.1:8888/Dash#Pit%20Board", withState.dashboardUrl)
+        assertEquals("http://127.0.0.1:8888/Dash#Rig%20Clock", withState.idleDashboardUrl)
         assertTrue(withState.dashboardServerReachable)
         assertTrue(withState.audioEnabled)
         // Status is sent right after pairing (§6.7), with the value set before connecting.
