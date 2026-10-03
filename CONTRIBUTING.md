@@ -31,6 +31,8 @@ dotnet build plugin/RigPlay -c Release
 CI (`.github/workflows/ci.yml`) runs both on every pull request. Unit tests are not enough for
 plugin changes: **verify them on the Windows VM or the rig** by loading the built `RigPlay.dll` in
 SimHub, and say what you checked in the pull request.
+On the development host, `scripts/vm.sh plugin` builds, installs and restarts SimHub on the VM; see
+[docs/testing-vm.md](docs/testing-vm.md).
 
 Never commit credentials, keystores, accessory identity files or APKs;
 `scripts/check_public_tree.py` fails CI if you do.
