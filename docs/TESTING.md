@@ -89,8 +89,8 @@ dotnet test plugin/RigPlay.Tests
 dotnet build plugin/RigPlay -c Release
 ```
 
-On the Windows VM with SimHub (see `docs/testing-vm.md` once it lands), `scripts/vm.sh` will install the
-built `RigPlay.dll` and drive SimHub. It does not exist yet.
+On the Windows VM with SimHub (see [testing-vm.md](testing-vm.md)), `scripts/vm.sh plugin` installs the
+built `RigPlay.dll` and restarts SimHub; `scripts/vm.sh logs` and `scripts/vm.sh shot <file>` show the result.
 
 Without a tablet:
 
