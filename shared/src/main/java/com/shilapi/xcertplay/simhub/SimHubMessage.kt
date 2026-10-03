@@ -99,12 +99,13 @@ sealed class SimHubMessage {
         override val type get() = SimHubProtocol.TYPE_STATE
     }
 
-    /** §6.7: complete snapshot from the tablet. */
+    /** §6.7: complete snapshot from the tablet. [nav] is optional: `null` (omitted) without route guidance (#47). */
     data class Status(
         val phoneConnected: Boolean,
         val phoneName: String? = null,
         val screen: Screen,
         val nowPlaying: NowPlaying?,
+        val nav: NavStatus? = null,
     ) : SimHubMessage() {
         override val type get() = SimHubProtocol.TYPE_STATUS
 
@@ -165,6 +166,16 @@ sealed class SimHubMessage {
     data class AudioStop(val stream: AudioStream) : SimHubMessage() {
         override val type get() = SimHubProtocol.TYPE_AUDIO_STOP
     }
+
+    /**
+     * Tablet → plugin (#47): the now-playing artwork, a small JPEG (≤ 256 px) in [base64], sent when it
+     * changes, at most once per 2 s; the whole line stays within [SimHubProtocol.MAX_LINE_BYTES].
+     */
+    data class Artwork(val mime: String, val base64: String) : SimHubMessage() {
+        override val type get() = SimHubProtocol.TYPE_ARTWORK
+
+        override fun toString(): String = "Artwork(mime=$mime, base64=${base64.length} chars)"
+    }
 }
 
 /** §6.8: what the plugin asks the tablet to do. */
@@ -177,6 +188,18 @@ sealed class SimHubCommand {
         override fun toString() = "ShowCarPlay"
     }
 }
+
+/**
+ * `status.nav` (#47): CarPlay's next maneuver. [maneuver] is the lowerCamel name of Apple's
+ * RouteGuidanceManeuverType (`com.shilapi.xcertplay.guidance.RouteManeuverNames`); [distanceM] is the
+ * distance to it, [road] the road it leads onto, [etaEpochS] the arrival time (Unix seconds).
+ */
+data class NavStatus(
+    val maneuver: String,
+    val distanceM: Int? = null,
+    val road: String? = null,
+    val etaEpochS: Long? = null,
+)
 
 /** `state.dashboardServer` (§6.6). */
 data class DashboardServer(val reachable: Boolean, val port: Int)

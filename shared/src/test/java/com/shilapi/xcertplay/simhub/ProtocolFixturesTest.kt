@@ -179,6 +179,20 @@ class ProtocolFixturesTest {
         assertFalse(SimHubMessage.PairRequest.pin("048291").toString().contains("048291"))
     }
 
+    @Test fun statusNavIsOptionalAndArtworkStaysWithinOneLine() {
+        val status = SimHubMessage.Status(phoneConnected = true, screen = Screen.CARPLAY, nowPlaying = null)
+        assertFalse("no nav member without route guidance", SimHubProtocol.encode(status).contains("nav"))
+        val nav = status.copy(nav = NavStatus(maneuver = "leftTurn"))
+        assertEquals(
+            """{"type":"status","phoneConnected":true,"screen":"carplay","nowPlaying":null,"nav":{"maneuver":"leftTurn"}}""",
+            SimHubProtocol.encode(nav),
+        )
+        assertEquals(SimHubParseResult.Ok(nav), SimHubProtocol.parse(SimHubProtocol.encode(nav)))
+        assertMalformed("""{"type":"status","phoneConnected":true,"screen":"carplay","nowPlaying":null,"nav":{"distanceM":5}}""", "status")
+        assertMalformed("""{"type":"artwork","mime":"image/jpeg"}""", "artwork")
+        assertFalse(SimHubMessage.Artwork("image/jpeg", "QUJD".repeat(1_000)).toString().contains("QUJD"))
+    }
+
     @Test fun versionCompatibility() {
         assertTrue(SimHubProtocol.isCompatible(1, 1))
         assertTrue(SimHubProtocol.isCompatible(1, 3))
@@ -230,6 +244,7 @@ class ProtocolFixturesTest {
             "error" to SimHubMessage.Error::class.java,
             "audioStart" to SimHubMessage.AudioStart::class.java,
             "audioStop" to SimHubMessage.AudioStop::class.java,
+            "artwork" to SimHubMessage.Artwork::class.java,
         )
 
         /** Gradle runs unit tests in the module directory; walk up to the repository root. */

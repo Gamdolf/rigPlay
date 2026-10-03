@@ -2,6 +2,7 @@ package com.shilapi.xcertplay
 
 import com.shilapi.xcertplay.RigSessionLifecycle.Foreground
 import com.shilapi.xcertplay.simhub.MediaAction
+import com.shilapi.xcertplay.simhub.NavStatus
 import com.shilapi.xcertplay.simhub.NowPlaying
 import com.shilapi.xcertplay.simhub.Screen
 import com.shilapi.xcertplay.simhub.SimHubCommand
@@ -182,6 +183,19 @@ class RigSessionLifecycleTest {
         assertEquals(song, link.statuses.last().nowPlaying)
         lifecycle.updateNowPlaying(song.copy(position = 120.0))
         assertEquals(120.0, link.statuses.last().nowPlaying!!.position, 0.0)
+    }
+
+    @Test fun navIsSentOnlyWithAPhoneAndClears() {
+        val turn = NavStatus(maneuver = "leftTurn", distanceM = 200, road = "B258", etaEpochS = 1_791_044_100L)
+        lifecycle.updateNav(turn)
+        assertNull(link.statuses.last().nav)
+        phone.connected = true
+        lifecycle.onPhoneChanged()
+        assertEquals(turn, link.statuses.last().nav)
+        lifecycle.updateNav(turn.copy(distanceM = 150))
+        assertEquals(150, link.statuses.last().nav!!.distanceM)
+        lifecycle.updateNav(null)
+        assertNull(link.statuses.last().nav)
     }
 
     @Test fun showCommandsOpenTheScreens() {

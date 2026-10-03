@@ -351,16 +351,7 @@ class RigPlayActivity : ComponentActivity() {
             navigationChannelControl(card)
         }
         section(content, getString(R.string.location), R.drawable.ic_dp_navigation) { card ->
-            toggle(card, getString(R.string.report_location_to_iphone),
-                getString(R.string.sends_precise_android_location_as_carplay_gps_data_when_th),
-                AirPlayPersistence.loadLocationReportingEnabled(this)) {
-                AirPlayPersistence.saveLocationReportingEnabled(this, it)
-                if (it && !hasPreciseLocation()) {
-                    locationPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
-                } else {
-                    reconnectForLocation()
-                }
-            }
+            locationSourceControl(card)
         }
         section(content, getString(R.string.permissions_and_connection_help), R.drawable.ic_dp_permissions) { card ->
             card.addView(label(getString(R.string.nearby_devices_connects_your_iphone_microphone_enables_sir), 16, MUTED))
@@ -879,6 +870,36 @@ class RigPlayActivity : ComponentActivity() {
             }
         }
         dialog.show()
+    }
+
+    /** #41: the game car (SimHub telemetry), this tablet's GPS, or nothing. */
+    private fun locationSourceControl(card: LinearLayout) {
+        val sources = listOf(LocationSource.SIMHUB, LocationSource.TABLET, LocationSource.NONE)
+        val labels = listOf(
+            R.string.telemetry_location_source_simhub,
+            R.string.telemetry_location_source_tablet,
+            R.string.telemetry_location_source_none,
+        ).map(::getString)
+        val current = sources.indexOf(AirPlayPersistence.loadLocationSource(this))
+        choice(card, getString(R.string.telemetry_location_source), labels, current, reconnects = false) {
+            val source = sources[it]
+            AirPlayPersistence.saveLocationSource(this, source)
+            if (source == LocationSource.TABLET && !hasPreciseLocation()) {
+                locationPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+            } else {
+                reconnectForLocation()
+            }
+        }
+        card.addView(label(getString(R.string.telemetry_location_source_desc), 14, MUTED))
+        // #45: applies live, no reconnect.
+        toggle(card, getString(R.string.telemetry_night_from_simhub), getString(R.string.telemetry_night_from_simhub_desc),
+            AirPlayPersistence.loadNightFromSimHub(this)) { AirPlayPersistence.saveNightFromSimHub(this, it) }
+        // #46: part of the iAP2 identification, so a running session reconnects.
+        toggle(card, getString(R.string.telemetry_vehicle_status), getString(R.string.telemetry_vehicle_status_desc),
+            AirPlayPersistence.loadSimHubVehicleStatus(this)) {
+            AirPlayPersistence.saveSimHubVehicleStatus(this, it)
+            reconnectForLocation()
+        }
     }
 
     private fun hasPreciseLocation() =
