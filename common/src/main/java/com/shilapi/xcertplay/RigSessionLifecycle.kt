@@ -24,11 +24,22 @@ import com.shilapi.xcertplay.simhub.SimHubMessage
  * - SimHub down ⇒ the rigPlay idle screen (the PC's web server is gone with it).
  *
  * The policy only acts when its answer changes (link up/lost, phone connected/gone, a new `state`, a
- * setting), and only replaces screens it owns: CarPlay and the two idle screens. The home page and a
- * dashboard opened by hand (SimHub button, `command showDashboard`) are never taken away, and a live
- * CarPlay session is never covered since a connected phone always means CarPlay. Like the phone
- * start, a change while rigPlay is in the background waits until a rigPlay screen is in the
- * foreground (Android blocks activity starts from the background; an idle screen counts); one owed
+ * setting), and only replaces screens it owns: CarPlay and the two idle screens. A dashboard opened by
+ * hand (SimHub button, `command showDashboard`) is never taken away, and a live CarPlay session is
+ * never covered since a connected phone always means CarPlay.
+ *
+ * Inactivity (#53): the home page and settings (any non-CarPlay, non-dashboard rigPlay screen,
+ * [Foreground.HOME]) stay while the user works on them. When the policy wants the rigPlay idle screen
+ * ([PolicyScreen.OFFLINE_IDLE]: PC off, or PC on with "rigPlay screen" chosen or no dashboard to show)
+ * and nobody touched rigPlay for [IdleInputs.idleAfterMinutes] (counted from the last touch, arriving
+ * on HOME or the policy turning to the idle screen, whichever is latest), the idle screen takes over and
+ * remembers where the user was; a tap on it returns there ([returnFromIdle]). With 0 minutes it takes
+ * over at once when the policy turns to the idle screen while the user is on HOME, and not again until
+ * the next such change, so the settings stay reachable. CarPlay, dashboards and the policy's own
+ * screens are not timed.
+ *
+ * Like the phone start, a change while rigPlay is in the background waits until a rigPlay screen is in
+ * the foreground (Android blocks activity starts from the background; an idle screen counts); one owed
  * while the phone is being started waits until its session exists, because CarPlayHostActivity has
  * to lay out once to start it.
  *
@@ -39,6 +50,8 @@ class RigSessionLifecycle(
     private val phone: PhoneSession,
     private val screens: Screens,
     private val idle: IdleInputs = IdleInputs.NONE,
+    private val userActivity: UserActivityMonitor = UserActivityMonitor(),
+    private val timer: Timer = Timer.NONE,
     private val log: (String) -> Unit = {},
 ) {
     /** The CarPlay session as the coordinator sees it. */
@@ -73,6 +86,25 @@ class RigSessionLifecycle(
 
         /** The rigPlay home page: an idle screen with nothing left to show (the pairing went away). */
         fun showHome()
+
+        /** Back to the home page or settings the idle screen took over from, as the user left it (#53). */
+        fun returnHome()
+    }
+
+    /** One pending callback on the main thread: the inactivity check (#53). */
+    interface Timer {
+        /** Replaces any pending callback with [action] in [delayMs]. */
+        fun schedule(delayMs: Long, action: () -> Unit)
+
+        fun cancel()
+
+        companion object {
+            /** No timer: the idle screen never takes over after inactivity. */
+            val NONE: Timer = object : Timer {
+                override fun schedule(delayMs: Long, action: () -> Unit) = Unit
+                override fun cancel() = Unit
+            }
+        }
     }
 
     /** What the screen policy needs besides the link and the phone (#39). */
@@ -84,6 +116,9 @@ class RigSessionLifecycle(
 
         /** The idle dashboard or its fallback, the main dashboard, can be loaded ([DashboardContent.resolveIdle]). */
         fun idleDashboardAvailable(): Boolean
+
+        /** "Go idle after" (#53): minutes without a touch before the idle screen takes over HOME; 0 = immediately. */
+        fun idleAfterMinutes(): Int = IdleAfter.DEFAULT
 
         companion object {
             /** No pairing, hence no policy. */
@@ -137,6 +172,16 @@ class RigSessionLifecycle(
     /** SimHub went away and the phone is being dropped: it no longer counts as connected. */
     private var phoneStopping = false
 
+    /**
+     * The screen the idle screen took over from after inactivity (#53), always [Foreground.HOME]; a tap
+     * on the idle screen returns there. `null` when the idle screen came for another reason.
+     */
+    var idleTakenOverFrom: Foreground? = null
+        private set
+
+    /** [UserActivityMonitor.now] when the policy last turned to the rigPlay idle screen (#53). */
+    private var idleTargetSince = Long.MIN_VALUE
+
     fun onLinkUp() {
         linkUp = true
         phoneConnectionAllowed = true
@@ -177,6 +222,7 @@ class RigSessionLifecycle(
         pendingStart = false
         phoneStarting = false
         phoneConnectionAllowed = true
+        idleTakenOverFrom = null
         evaluate()
     }
 
@@ -204,12 +250,33 @@ class RigSessionLifecycle(
         // The user left CarPlayHostActivity before it could start the phone (permission prompt, Home).
         if (phoneStarting && foreground == Foreground.CARPLAY && next != Foreground.NONE) phoneStarting = false
         foreground = next
+        if (next == Foreground.HOME || next == Foreground.DASHBOARD) {
+            // The user is somewhere by hand (or back from the idle screen): arriving counts as activity.
+            idleTakenOverFrom = null
+            if (next == Foreground.HOME) userActivity.onUserInteraction()
+        }
         if (pendingStart && next != Foreground.NONE) {
             pendingStart = false
             if (linkUp && !phone.hasSession() && phone.autoStartBlocker() == null) startPhone()
         }
         settle()
+        armInactivity()
         publishStatus()
+    }
+
+    /**
+     * A tap on an idle screen (#53). When that screen took over after inactivity, goes back to where
+     * the user was and returns true: the caller finishes the idle screen. Otherwise false: the tap is
+     * the idle screen's own (its toolbar).
+     */
+    fun returnFromIdle(): Boolean {
+        val from = idleTakenOverFrom ?: return false
+        if (foreground != Foreground.OFFLINE_IDLE && foreground != Foreground.IDLE_DASHBOARD) return false
+        idleTakenOverFrom = null
+        userActivity.onUserInteraction()
+        log("screen policy: tap on the idle screen; back to $from")
+        screens.returnHome()
+        return true
     }
 
     fun updateNowPlaying(value: NowPlaying?) {
@@ -294,12 +361,59 @@ class RigSessionLifecycle(
 
     private fun evaluate() {
         val next = policyScreen()
+        if (next == PolicyScreen.CARPLAY) idleTakenOverFrom = null
         if (next != policyTarget) {
             log("screen policy: ${policyTarget ?: "none"} -> ${next ?: "none"}")
             policyTarget = next
             screenOwed = true
+            if (next == PolicyScreen.OFFLINE_IDLE) {
+                // The PC (or the phone) just went away: HOME gets the full "Go idle after" from now on (#53).
+                idleTargetSince = userActivity.now()
+                // "Go idle after: immediately": the user on HOME sees the idle screen at once.
+                if (idle.idleAfterMinutes() == 0 && inactivityApplies()) {
+                    takeOver("going idle immediately")
+                    return
+                }
+            }
         }
         settle()
+        armInactivity()
+    }
+
+    /** The idle screen may take over after inactivity (#53): the user is on HOME and the policy wants the rigPlay screen. */
+    private fun inactivityApplies(): Boolean =
+        foreground == Foreground.HOME && !phoneStarting && policyScreen() == PolicyScreen.OFFLINE_IDLE
+
+    /** When the inactivity started: the last touch, or the policy turning to the idle screen if later. */
+    private fun quietSince(): Long = maxOf(userActivity.lastInteractionAt, idleTargetSince)
+
+    /** (Re)schedules the inactivity check for [quietSince] plus "Go idle after", or cancels it. */
+    private fun armInactivity() {
+        val minutes = idle.idleAfterMinutes()
+        if (minutes <= 0 || !inactivityApplies()) {
+            timer.cancel()
+            return
+        }
+        val due = quietSince() + minutes * MINUTE_MS
+        timer.schedule((due - userActivity.now()).coerceAtLeast(0L)) { onInactivityTimer() }
+    }
+
+    private fun onInactivityTimer() {
+        val minutes = idle.idleAfterMinutes()
+        if (minutes <= 0 || !inactivityApplies()) return
+        // Touched since the check was scheduled: wait for the new deadline.
+        if (userActivity.now() - quietSince() < minutes * MINUTE_MS) return armInactivity()
+        takeOver("no touch for $minutes min")
+    }
+
+    /** Shows the rigPlay idle screen over HOME and remembers HOME for [returnFromIdle]. */
+    private fun takeOver(reason: String) {
+        log("screen policy: $reason; the idle screen takes over from $foreground")
+        timer.cancel()
+        idleTakenOverFrom = foreground
+        policyTarget = PolicyScreen.OFFLINE_IDLE
+        screenOwed = false
+        show(PolicyScreen.OFFLINE_IDLE)
     }
 
     /** Shows the owed screen once it can be; drops it when the user is on a screen the policy does not own. */
@@ -325,7 +439,9 @@ class RigSessionLifecycle(
     }
 
     private companion object {
-        /** Screens the policy may replace by itself; HOME and a hand-opened DASHBOARD stay. */
+        /** Screens the policy may replace on a change; HOME only after inactivity (#53), a hand-opened DASHBOARD never. */
         val POLICY_OWNED = setOf(Foreground.CARPLAY, Foreground.IDLE_DASHBOARD, Foreground.OFFLINE_IDLE)
+
+        const val MINUTE_MS = 60_000L
     }
 }

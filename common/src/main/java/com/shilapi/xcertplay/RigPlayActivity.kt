@@ -103,9 +103,10 @@ class RigPlayActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent); setIntent(intent)
-        page = routedPage(intent.getStringExtra("page")); render()
+        if (!intent.getBooleanExtra(EXTRA_KEEP_PAGE, false)) { page = routedPage(intent.getStringExtra("page")); render() }
         handleWirelessRecovery()
     }
+    override fun onUserInteraction() { super.onUserInteraction(); RigSessionCoordinator.onUserInteraction() }
     override fun onSaveInstanceState(outState: Bundle) { outState.putString("page", page); outState.putBoolean("pending_car_hotspot", pendingCarHotspotSetup); super.onSaveInstanceState(outState) }
     override fun onConfigurationChanged(newConfig: Configuration) { super.onConfigurationChanged(newConfig); render() }
     override fun onResume() {
@@ -609,6 +610,14 @@ class RigPlayActivity : ComponentActivity() {
                 listOf(getString(R.string.rig_settings_idle_mode_dashboard), getString(R.string.rig_settings_idle_mode_screen)),
                 modes.indexOf(AirPlayPersistence.loadIdleMode(this)).coerceAtLeast(0), reconnects = false) {
                 AirPlayPersistence.saveIdleMode(this, modes[it])
+                RigSessionCoordinator.onIdleSettingsChanged()
+            }
+            // #53: how long the home page and settings stay without a touch before the idle screen takes over.
+            val after = IdleAfter.CHOICES
+            choice(card, getString(R.string.rig_settings_idle_after),
+                after.map { if (it == 0) getString(R.string.rig_settings_idle_after_now) else getString(R.string.rig_settings_idle_after_minutes, it) },
+                after.indexOf(AirPlayPersistence.loadIdleAfterMinutes(this)).coerceAtLeast(0), reconnects = false) {
+                AirPlayPersistence.saveIdleAfterMinutes(this, after[it])
                 RigSessionCoordinator.onIdleSettingsChanged()
             }
             val minutes = IdleScreenOff.CHOICES
@@ -1418,6 +1427,9 @@ class RigPlayActivity : ComponentActivity() {
     companion object {
         /** Set by [BootReceiver]: rigPlay was opened after boot rather than by the user. */
         const val EXTRA_FROM_BOOT = "com.shilapi.xcertplay.extra.FROM_BOOT"
+
+        /** Back from the idle screen that took over after inactivity (#53): stay on the page the user was on. */
+        const val EXTRA_KEEP_PAGE = "com.shilapi.xcertplay.extra.KEEP_PAGE"
 
         private val BG = Color.rgb(12, 17, 27)
         private val SURFACE = Color.rgb(21, 30, 44)

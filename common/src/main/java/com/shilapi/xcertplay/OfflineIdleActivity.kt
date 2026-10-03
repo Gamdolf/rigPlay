@@ -29,7 +29,8 @@ import com.shilapi.xcertplay.host.R
  * A dimmed clock, the rigPlay name, what rigPlay waits for and the last PC's name. Everything is
  * local by design.
  *
- * A tap shows a small Home / Settings toolbar that hides itself again. With "Turn the screen off"
+ * A tap shows a small Home / Settings toolbar that hides itself again, except when the screen took
+ * over the home page after "Go idle after" without a touch (#53): then a tap returns there. With "Turn the screen off"
  * set, the screen goes black and the backlight to its minimum after that many minutes; the window
  * keeps the screen on, so rigPlay can still bring up the idle dashboard or CarPlay when the PC or
  * the phone comes back. A tap wakes it.
@@ -103,6 +104,8 @@ class OfflineIdleActivity : ComponentActivity() {
                 setDark(false)
                 return true
             }
+            // Took over the home page after inactivity (#53): a tap goes back there.
+            if (RigSessionCoordinator.returnFromIdle(this)) return true
             toolbar?.show()
         }
         return super.dispatchTouchEvent(event)

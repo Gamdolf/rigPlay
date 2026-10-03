@@ -18,8 +18,11 @@
     <string name="rig_settings_idle_mode">Show</string>
     <string name="rig_settings_idle_mode_dashboard">SimHub idle dashboard</string>
     <string name="rig_settings_idle_mode_screen">rigPlay screen</string>
+    <string name="rig_settings_idle_after">Go idle after</string>
+    <string name="rig_settings_idle_after_now">Immediately</string>
+    <string name="rig_settings_idle_after_minutes">%1$d min</string>
     <string name="rig_settings_idle_off">Turn the screen off</string>
     <string name="rig_settings_idle_off_never">Never</string>
     <string name="rig_settings_idle_off_after">After %1$d min</string>
-    <string name="rig_settings_idle_note">With the PC off the rigPlay screen is shown, since SimHub\'s dashboards come from the PC. Turning the screen off blacks out the rigPlay screen and dims the backlight; tap it to wake it. CarPlay comes to the front as soon as your iPhone connects.</string>
+    <string name="rig_settings_idle_note">With the PC off the rigPlay screen is shown, since SimHub\'s dashboards come from the PC. Over the home page and settings it comes only after \"Go idle after\" without a touch; tap it to return to where you were. Turning the screen off blacks out the rigPlay screen and dims the backlight; tap it to wake it. CarPlay comes to the front as soon as your iPhone connects.</string>
 </resources>

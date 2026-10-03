@@ -47,16 +47,53 @@ class RigSessionLifecycleTest {
         override fun showIdleDashboard() { idleDashboards++; shown += "idleDashboard" }
         override fun showOfflineIdle() { offlineIdles++; shown += "offlineIdle" }
         override fun showHome() { homes++; shown += "home" }
+        override fun returnHome() { shown += "returnHome" }
     }
 
     private class FakeIdle : RigSessionLifecycle.IdleInputs {
         var paired = true
         var mode = IdleMode.DASHBOARD
         var available = true
+        var idleAfter = IdleAfter.DEFAULT
         override fun paired() = paired
         override fun mode() = mode
         override fun idleDashboardAvailable() = available
+        override fun idleAfterMinutes() = idleAfter
     }
+
+    /** The fake clock (ms) behind [userActivity] and [timer]. */
+    private var now = 0L
+
+    /** One pending callback like the Handler-based timer; [advance] runs it when due. */
+    private inner class FakeTimer : RigSessionLifecycle.Timer {
+        var dueAt: Long? = null
+        private var action: (() -> Unit)? = null
+        override fun schedule(delayMs: Long, action: () -> Unit) {
+            dueAt = now + delayMs
+            this.action = action
+        }
+        override fun cancel() {
+            dueAt = null
+            action = null
+        }
+        fun runIfDue(until: Long): Boolean {
+            val due = dueAt ?: return false
+            if (due > until) return false
+            now = maxOf(now, due)
+            val pending = action!!
+            cancel()
+            pending()
+            return true
+        }
+    }
+
+    private fun advance(ms: Long) {
+        val end = now + ms
+        while (timer.runIfDue(end)) Unit
+        now = end
+    }
+
+    private fun minutes(value: Int) = value * 60_000L
 
     private val link = FakeSimHubLinkPort()
     private val phone = FakePhone()
@@ -65,7 +102,9 @@ class RigSessionLifecycleTest {
 
     // The idle policy (#39) only applies with a paired PC.
     private val idle = FakeIdle()
-    private val rig = RigSessionLifecycle(link, phone, screens, idle)
+    private val userActivity = UserActivityMonitor { now }
+    private val timer = FakeTimer()
+    private val rig = RigSessionLifecycle(link, phone, screens, idle, userActivity, timer)
 
     private val song = NowPlaying("Teardrop", "Massive Attack", "Mezzanine", "Music", true, 83.4, 330.0, 1L)
 
@@ -337,7 +376,8 @@ class RigSessionLifecycleTest {
         assertEquals(listOf("carplay", "offlineIdle"), screens.shown)
     }
 
-    @Test fun homeIsNeverTakenAway() {
+    /** Policy changes alone never replace HOME; only inactivity does (#53). */
+    @Test fun homeIsNotTakenAwayByAChange() {
         rig.onForegroundChanged(Foreground.HOME)
         phone.blocker = "no iPhone chosen"
         rig.onLinkUp()
@@ -443,5 +483,212 @@ class RigSessionLifecycleTest {
         assertEquals(listOf("idleDashboard"), screens.shown)
         assertTrue(rig.showPolicyScreen())
         assertEquals(listOf("idleDashboard", "offlineIdle"), screens.shown)
+    }
+
+    // --- inactivity (#53) ------------------------------------------------------------------------
+
+    /** The user on HOME with the PC off (paired, link down): the policy wants the rigPlay idle screen. */
+    private fun onHomeWithThePcOff() {
+        rig.onForegroundChanged(Foreground.HOME)
+        rig.onIdleInputsChanged()
+        assertEquals(RigSessionLifecycle.PolicyScreen.OFFLINE_IDLE, rig.policyScreen())
+    }
+
+    /** PC on, no phone (none chosen), the user on HOME. */
+    private fun onHomeWithThePcOn() {
+        rig.onForegroundChanged(Foreground.HOME)
+        phone.blocker = "no iPhone chosen"
+        rig.onLinkUp()
+        assertEquals(0, phone.starts)
+    }
+
+    @Test fun idleScreenTakesOverHomeAfterTheTimeoutWithoutTouches() {
+        onHomeWithThePcOff()
+        advance(minutes(3) - 1)
+        assertTrue(screens.shown.isEmpty())
+        advance(1)
+        assertEquals(listOf("offlineIdle"), screens.shown)
+        assertEquals(Foreground.HOME, rig.idleTakenOverFrom)
+        rig.onForegroundChanged(Foreground.OFFLINE_IDLE)
+        advance(minutes(30))
+        assertEquals(listOf("offlineIdle"), screens.shown)
+    }
+
+    @Test fun touchesResetTheTimeout() {
+        onHomeWithThePcOff()
+        advance(minutes(2))
+        userActivity.onUserInteraction()
+        advance(minutes(2))
+        userActivity.onUserInteraction()
+        advance(minutes(3) - 1)
+        assertTrue(screens.shown.isEmpty())
+        advance(1)
+        assertEquals(listOf("offlineIdle"), screens.shown)
+    }
+
+    @Test fun thePcGoingAwayStartsTheTimeoutAfresh() {
+        onHomeWithThePcOn()
+        advance(minutes(10)) // the idle dashboard is the target: HOME is not timed
+        assertTrue(screens.shown.isEmpty())
+        rig.onLinkLost()
+        assertTrue(screens.shown.isEmpty()) // HOME stays as it is when the PC goes away…
+        advance(minutes(3) - 1)
+        assertTrue(screens.shown.isEmpty())
+        advance(1) // …until nobody touched it for 3 minutes
+        assertEquals(listOf("offlineIdle"), screens.shown)
+    }
+
+    @Test fun pcOnWithTheRigPlayScreenChosenAlsoGoesIdleAfterTheTimeout() {
+        idle.mode = IdleMode.RIGPLAY_SCREEN
+        onHomeWithThePcOn()
+        advance(minutes(3))
+        assertEquals(listOf("offlineIdle"), screens.shown)
+    }
+
+    @Test fun pcOnWithTheIdleDashboardChosenLeavesHomeAlone() {
+        onHomeWithThePcOn()
+        advance(minutes(60))
+        assertTrue(screens.shown.isEmpty())
+        assertNull(timer.dueAt)
+    }
+
+    @Test fun immediatelyTakesOverWhenThePcGoesAwayAndOnlyThen() {
+        idle.idleAfter = 0
+        onHomeWithThePcOn()
+        rig.onLinkLost()
+        assertEquals(listOf("offlineIdle"), screens.shown)
+        assertEquals(Foreground.HOME, rig.idleTakenOverFrom)
+        rig.onForegroundChanged(Foreground.OFFLINE_IDLE)
+        assertTrue(rig.returnFromIdle())
+        rig.onForegroundChanged(Foreground.HOME)
+        // Back on HOME (settings) with the PC still off: no timer, the user stays.
+        advance(minutes(60))
+        assertEquals(listOf("offlineIdle", "returnHome"), screens.shown)
+        assertNull(timer.dueAt)
+    }
+
+    @Test fun immediatelyDoesNotYankTheUserOffHomeWithoutAChange() {
+        idle.idleAfter = 0
+        rig.onIdleInputsChanged() // the PC was already off when the user opened HOME
+        rig.onForegroundChanged(Foreground.HOME)
+        advance(minutes(60))
+        assertTrue(screens.shown.isEmpty())
+    }
+
+    @Test fun aTapOnTheIdleScreenReturnsToWhereTheUserWas() {
+        onHomeWithThePcOff()
+        advance(minutes(3))
+        rig.onForegroundChanged(Foreground.OFFLINE_IDLE)
+        assertTrue(rig.returnFromIdle())
+        assertEquals(listOf("offlineIdle", "returnHome"), screens.shown)
+        assertNull(rig.idleTakenOverFrom)
+        assertFalse(rig.returnFromIdle()) // only once
+        rig.onForegroundChanged(Foreground.HOME)
+        // Left alone again: the idle screen comes back after the timeout.
+        advance(minutes(3))
+        assertEquals(listOf("offlineIdle", "returnHome", "offlineIdle"), screens.shown)
+    }
+
+    @Test fun aTapOnAnIdleScreenThatCameByItselfIsTheToolbars() {
+        idleOnDashboard()
+        assertFalse(rig.returnFromIdle())
+        rig.onLinkLost()
+        rig.onPhoneChanged()
+        rig.onForegroundChanged(Foreground.OFFLINE_IDLE)
+        assertFalse(rig.returnFromIdle())
+        assertEquals(listOf("offlineIdle"), screens.shown)
+    }
+
+    @Test fun theWayBackSurvivesThePcComingUpButNotThePhone() {
+        onHomeWithThePcOff()
+        advance(minutes(3))
+        rig.onForegroundChanged(Foreground.OFFLINE_IDLE)
+        pcComesUp() // the phone starts behind the idle screen, then the idle dashboard
+        assertEquals(listOf("offlineIdle", "idleDashboard"), screens.shown)
+        rig.onForegroundChanged(Foreground.IDLE_DASHBOARD)
+        assertEquals(Foreground.HOME, rig.idleTakenOverFrom)
+        phone.connected = true
+        rig.onPhoneChanged()
+        assertNull(rig.idleTakenOverFrom)
+        rig.onForegroundChanged(Foreground.CARPLAY)
+        phone.connected = false
+        rig.onPhoneChanged()
+        rig.onForegroundChanged(Foreground.IDLE_DASHBOARD)
+        assertFalse(rig.returnFromIdle())
+    }
+
+    @Test fun aTapOnTheIdleDashboardAlsoReturns() {
+        onHomeWithThePcOff()
+        advance(minutes(3))
+        rig.onForegroundChanged(Foreground.OFFLINE_IDLE)
+        pcComesUp()
+        rig.onForegroundChanged(Foreground.IDLE_DASHBOARD)
+        assertTrue(rig.returnFromIdle())
+        assertEquals(listOf("offlineIdle", "idleDashboard", "returnHome"), screens.shown)
+    }
+
+    @Test fun noTimeoutWhileAPhoneIsConnected() {
+        rig.onForegroundChanged(Foreground.HOME)
+        phone.session = true
+        phone.connected = true
+        rig.onPhoneChanged()
+        advance(minutes(60))
+        assertTrue(screens.shown.isEmpty())
+        assertNull(timer.dueAt)
+    }
+
+    @Test fun noTimeoutOnADashboardOrCarPlay() {
+        rig.onForegroundChanged(Foreground.DASHBOARD)
+        rig.onIdleInputsChanged()
+        advance(minutes(60))
+        assertTrue(screens.shown.isEmpty())
+        rig.onForegroundChanged(Foreground.HOME)
+        advance(minutes(2))
+        rig.onForegroundChanged(Foreground.DASHBOARD) // opened by hand before the timeout
+        advance(minutes(60))
+        assertTrue(screens.shown.isEmpty())
+        assertNull(timer.dueAt)
+    }
+
+    @Test fun noTimeoutInTheBackground() {
+        onHomeWithThePcOff()
+        rig.onForegroundChanged(Foreground.NONE)
+        advance(minutes(60))
+        assertTrue(screens.shown.isEmpty())
+    }
+
+    @Test fun noTimeoutWithoutAPairedPc() {
+        idle.paired = false
+        rig.onForegroundChanged(Foreground.HOME)
+        rig.onIdleInputsChanged()
+        advance(minutes(60))
+        assertTrue(screens.shown.isEmpty())
+    }
+
+    @Test fun aSettingChangeAppliesLive() {
+        idle.idleAfter = 10
+        onHomeWithThePcOff()
+        advance(minutes(2))
+        idle.idleAfter = 1
+        rig.onIdleInputsChanged()
+        advance(0) // already 2 minutes without a touch
+        assertEquals(listOf("offlineIdle"), screens.shown)
+    }
+
+    @Test fun aLongerSettingPostponesAndImmediatelyStopsTheTimer() {
+        onHomeWithThePcOff()
+        advance(minutes(2))
+        idle.idleAfter = 5
+        rig.onIdleInputsChanged()
+        advance(minutes(2))
+        assertTrue(screens.shown.isEmpty())
+        idle.idleAfter = 0
+        rig.onIdleInputsChanged()
+        advance(minutes(60))
+        assertTrue(screens.shown.isEmpty())
+        idle.idleAfter = 3
+        rig.onIdleInputsChanged()
+        advance(0)
+        assertEquals(listOf("offlineIdle"), screens.shown)
     }
 }
