@@ -107,7 +107,7 @@ internal class AudioFocusCoordinator(
     }
 
     private companion object {
-        const val TAG = "DiPlay-AudioFocus"
+        const val TAG = "rigPlay-AudioFocus"
         const val FULL_VOLUME = 1f
         const val DUCKED_VOLUME = 0.2f
     }
@@ -993,7 +993,7 @@ private class AudioRenderer(
         streamOverride: Int,
     ): AudioAttributes {
         if (streamOverride in AudioManager.STREAM_SYSTEM..AudioManager.STREAM_ACCESSIBILITY) {
-            // Android accepts only its defined legacy stream IDs here. BYD audio policy can
+            // Android accepts only its defined legacy stream IDs here. Vendor audio policy can
             // map these standard streams to vehicle outputs; arbitrary channel numbers are
             // not valid AudioAttributes legacy stream types.
             try {
@@ -1417,7 +1417,7 @@ private class AudioRenderer(
         // Holds a burst after a Wi-Fi gap (~4 s of AAC) instead of dropping it.
         const val MAX_QUEUED_PACKETS = 192
         const val PREBUFFER_WRITE_CHUNK_BYTES = 2 * 1024
-        const val STATS_TAG = "DiPlay-AudioStats"
+        const val STATS_TAG = "rigPlay-AudioStats"
         const val STATS_WINDOW_NS = 5_000_000_000L
         const val DECODED_BUFFER_LOG_INTERVAL = 50
     }

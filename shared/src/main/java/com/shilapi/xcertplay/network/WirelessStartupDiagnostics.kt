@@ -22,7 +22,7 @@ internal class WirelessStartupDiagnostics(
     private var tcpAccepted = 0
     private var sessionActive = false
     @Volatile private var lastSnapshot = ""
-    private val worker = Thread(::observe, "diplay-wireless-diagnostics").apply { isDaemon = true }
+    private val worker = Thread(::observe, "rigplay-wireless-diagnostics").apply { isDaemon = true }
 
     init { require(intervalMillis > 0) }
 

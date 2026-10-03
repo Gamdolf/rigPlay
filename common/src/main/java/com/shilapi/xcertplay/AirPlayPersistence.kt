@@ -5,7 +5,6 @@ import android.os.Build
 import com.shilapi.xcertplay.airplay.AirPlayDisplaySettings
 import com.shilapi.xcertplay.airplay.AirPlayPhysicalSizeBasis
 import com.shilapi.xcertplay.airplay.CarPlayDisplayScale
-import com.shilapi.xcertplay.airplay.CarPlayClusterDisplay
 import com.shilapi.xcertplay.airplay.CarPlayUiScale
 import com.shilapi.xcertplay.airplay.AirPlayIdentity
 import com.shilapi.xcertplay.airplay.PairingStore
@@ -13,7 +12,6 @@ import com.shilapi.xcertplay.airplay.SafeAreaCodec
 import com.shilapi.xcertplay.airplay.SafeAreaRect
 import com.shilapi.xcertplay.orchestration.ManualHotspotBand
 import com.shilapi.xcertplay.orchestration.ManualHotspotSecurity
-import com.shilapi.xcertplay.orchestration.MfiTarget
 import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
 import com.shilapi.xcertplay.transport.LockdownPairRecord
 import java.io.File
@@ -58,14 +56,6 @@ object AirPlayPersistence {
     private const val KEY_OEM_LABEL = "oem_label"
     private const val KEY_FPS = "display_fps"
     private const val KEY_MEDIA_BUFFER_MS = "media_buffer_ms"
-    private const val KEY_CLUSTER_MAP = "cluster_map_enabled"
-    private const val KEY_CENTER_MAP_OVERLAY = "center_map_overlay"
-    private const val KEY_LAUNCHER_MAP_SHARING = "launcher_map_sharing"
-    private const val KEY_CLUSTER_MAP_SCALE = "cluster_map_scale_percent"
-    private const val KEY_CLUSTER_CONTENT = "cluster_content"
-    private const val KEY_CLUSTER_MARKER_X = "cluster_marker_horizontal_step"
-    private const val KEY_CLUSTER_MARKER_Y = "cluster_marker_vertical_step"
-    private const val KEY_CENTER_MAP_FOLLOWS_DASHBOARD = "center_map_follows_dashboard"
     private const val KEY_WIDTH_PHYSICAL_MM = "display_width_physical_mm"
     private const val KEY_PHYSICAL_SIZE_BASIS = "display_physical_size_basis"
     private const val KEY_MAX_DETECTED_WIDTH = "display_max_detected_width"
@@ -76,17 +66,12 @@ object AirPlayPersistence {
     private const val KEY_SAFE_AREA_DRAW_OUTSIDE = "safe_area_draw_outside"
     private const val KEY_AUTO_START_ON_BOOT = "auto_start_on_boot"
     private const val KEY_LOCATION_REPORTING_ENABLED = "location_reporting_enabled"
-    private const val KEY_MFI_TARGET = "mfi_target"
-    private const val KEY_MFI_I2C_PATH = "mfi_i2c_path"
-    private const val KEY_REMOTE_MFI_SERVER = "remote_mfi_server"
-    private const val KEY_REMOTE_MFI_TOKEN = "remote_mfi_token"
     private const val SAFE_AREA_KEY_PREFIX = "safe_area_"
     private const val CUSTOM_ICON_FILE = "airplay-icon.png"
 
-    const val DEFAULT_MANUFACTURER = "DiPlay"
-    const val DEFAULT_MODEL = "DiPlay"
-    const val DEFAULT_OEM_LABEL = "BYD"
-    const val DEFAULT_MFI_I2C_PATH = "/dev/i2c-1"
+    const val DEFAULT_MANUFACTURER = "rigPlay"
+    const val DEFAULT_MODEL = "rigPlay"
+    const val DEFAULT_OEM_LABEL = "SimHub"
 
     fun loadDisplayScaleTenths(context: Context): Int {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -192,52 +177,6 @@ object AirPlayPersistence {
     fun saveWirelessEnabled(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_WIRELESS_ENABLED, enabled)
-            .apply()
-    }
-
-    fun loadMfiTarget(context: Context): MfiTarget {
-        val stored = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_MFI_TARGET, null)
-        return MfiTarget.entries.firstOrNull { it.name == stored } ?: MfiTarget.LOCAL
-    }
-
-    fun saveMfiTarget(context: Context, target: MfiTarget) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString(KEY_MFI_TARGET, target.name)
-            .apply()
-    }
-
-    fun loadMfiI2cPath(context: Context): String =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_MFI_I2C_PATH, null)
-            ?.takeIf { it.isNotBlank() }
-            ?: DEFAULT_MFI_I2C_PATH
-
-    fun saveMfiI2cPath(context: Context, path: String) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString(KEY_MFI_I2C_PATH, path.trim())
-            .apply()
-    }
-
-    fun loadRemoteMfiServer(context: Context): String =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_REMOTE_MFI_SERVER, null)
-            .orEmpty()
-
-    fun saveRemoteMfiServer(context: Context, server: String) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString(KEY_REMOTE_MFI_SERVER, server)
-            .apply()
-    }
-
-    fun loadRemoteMfiToken(context: Context): String =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_REMOTE_MFI_TOKEN, null)
-            .orEmpty()
-
-    fun saveRemoteMfiToken(context: Context, token: String) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putString(KEY_REMOTE_MFI_TOKEN, token)
             .apply()
     }
 
@@ -455,85 +394,6 @@ object AirPlayPersistence {
             .putInt(KEY_MAX_DETECTED_WIDTH, widthPixels.coerceAtLeast(0))
             .putInt(KEY_MAX_DETECTED_HEIGHT, heightPixels.coerceAtLeast(0))
             .apply()
-    }
-
-    fun loadClusterMapEnabled(context: Context): Boolean =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_CLUSTER_MAP, false)
-
-    fun saveClusterMapEnabled(context: Context, enabled: Boolean) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_CLUSTER_MAP, enabled).apply()
-    }
-
-    /** The dashboard map as a card on the centre screen while DiPlay is in the background. */
-    fun loadCenterMapOverlay(context: Context): Boolean =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_CENTER_MAP_OVERLAY, false)
-
-    /** Other launchers may show the live dashboard map in their own screen (MapEmbedService). */
-    fun loadLauncherMapSharing(context: Context): Boolean =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_LAUNCHER_MAP_SHARING, false)
-
-    fun saveLauncherMapSharing(context: Context, enabled: Boolean) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_LAUNCHER_MAP_SHARING, enabled).apply()
-    }
-
-    /** Observe consent changes for already attached launcher maps; call the returned function to unregister. */
-    internal fun observeLauncherMapSharing(context: Context, changed: (Boolean) -> Unit): () -> Unit {
-        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key == KEY_LAUNCHER_MAP_SHARING) changed(loadLauncherMapSharing(context))
-        }
-        prefs.registerOnSharedPreferenceChangeListener(listener)
-        return { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
-    }
-
-    fun saveCenterMapOverlay(context: Context, enabled: Boolean) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_CENTER_MAP_OVERLAY, enabled).apply()
-    }
-
-    fun loadClusterContent(context: Context): CarPlayClusterDisplay.Content =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_CLUSTER_CONTENT, null)
-            ?.let { name -> CarPlayClusterDisplay.Content.entries.firstOrNull { it.name == name } }
-            ?: CarPlayClusterDisplay.Content.MAP
-
-    fun saveClusterContent(context: Context, content: CarPlayClusterDisplay.Content) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_CLUSTER_CONTENT, content.name).apply()
-    }
-
-    fun loadCenterMapFollowsDashboard(context: Context): Boolean =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getBoolean(KEY_CENTER_MAP_FOLLOWS_DASHBOARD, true)
-
-    fun saveCenterMapFollowsDashboard(context: Context, enabled: Boolean) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putBoolean(KEY_CENTER_MAP_FOLLOWS_DASHBOARD, enabled).apply()
-    }
-
-    fun loadClusterMapScalePercent(context: Context): Int = CarPlayClusterDisplay.STREAM_SCALE_PERCENT.let { default ->
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_CLUSTER_MAP_SCALE, default)
-            .takeIf { it in CarPlayClusterDisplay.scalePresets } ?: default
-    }
-
-    fun saveClusterMapScalePercent(context: Context, percent: Int) {
-        if (percent !in CarPlayClusterDisplay.scalePresets) return
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(KEY_CLUSTER_MAP_SCALE, percent).apply()
-    }
-
-    fun loadClusterMarkerHorizontalStep(context: Context): Int =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_CLUSTER_MARKER_X, 0)
-            .coerceIn(CarPlayClusterDisplay.horizontalSteps)
-
-    fun saveClusterMarkerHorizontalStep(context: Context, step: Int) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putInt(KEY_CLUSTER_MARKER_X, step.coerceIn(CarPlayClusterDisplay.horizontalSteps)).apply()
-    }
-
-    fun loadClusterMarkerVerticalStep(context: Context): Int =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_CLUSTER_MARKER_Y, 0)
-            .coerceIn(CarPlayClusterDisplay.verticalSteps)
-
-    fun saveClusterMarkerVerticalStep(context: Context, step: Int) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putInt(KEY_CLUSTER_MARKER_Y, step.coerceIn(CarPlayClusterDisplay.verticalSteps)).apply()
     }
 
     fun loadRightHandDrive(context: Context): Boolean =
