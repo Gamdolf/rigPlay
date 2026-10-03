@@ -1,6 +1,9 @@
 package com.shilapi.xcertplay
 
 import android.content.Context
+import android.graphics.BitmapFactory
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -19,6 +22,7 @@ import com.shilapi.xcertplay.simhub.SimHubMessage
 import com.shilapi.xcertplay.simhub.SimHubState
 import com.shilapi.xcertplay.simhub.SimHubStatusSink
 import com.shilapi.xcertplay.host.R
+import java.io.File
 
 /**
  * Process-wide owner of the SimHub link (#26) and discovery, created by [RigPlayApplication]; runs
@@ -52,6 +56,7 @@ object RigSessionCoordinator {
     private lateinit var lifecycle: RigSessionLifecycle
     private var discovery: SimHubDiscovery? = null
     private var onboardingVisible = false
+    private var iconCache: SimHubIconCache? = null
 
     /** The stored pairing, or `null` while unpaired. */
     var pairing: SimHubPairing? = null
@@ -117,6 +122,15 @@ object RigSessionCoordinator {
         // playing; see NowPlayingToLifecycle.
         SimHubEndpoints.statusSink = NowPlayingToLifecycle
         CarPlayBackgroundSession.onChanged = { main.post(::onPhoneSessionChanged) }
+        // SimHub's own icon (#52), fetched from the PC once per SimHub.
+        iconCache = SimHubIconCache(
+            dir = File(app.filesDir, SimHubIconCache.DIRECTORY),
+            http = SimHubIconCache.UrlSource,
+            io = { task -> Thread(task, "rigplay-simhub-icon").apply { isDaemon = true }.start() },
+            main = { task -> main.post(task) },
+            clock = { android.os.SystemClock.elapsedRealtime() },
+            log = { Log.i(TAG, it) },
+        ) { notifyObservers() }
         pairing = AirPlayPersistence.loadSimHubPairing(app)
         pairing?.let(::startPaired)
         updateDiscovery()
@@ -141,6 +155,24 @@ object RigSessionCoordinator {
      * SimHub is not running (audio would stay on the tablet); the connection goes ahead either way.
      */
     fun onManualConnect(): Boolean = initialized && lifecycle.onManualConnect(paired = isPaired)
+
+    /**
+     * SimHub's icon cached for the paired PC (#52), or `null` until it was fetched once. Reads only the
+     * stored pairing and the file, so any thread may call it (CarPlay's session start does).
+     */
+    fun simHubIconFile(context: Context): File? {
+        val app = context.applicationContext ?: context
+        val hostId = (if (Looper.myLooper() === Looper.getMainLooper()) pairing else null)?.hostId
+            ?: AirPlayPersistence.loadSimHubPairing(app)?.hostId
+        return SimHubIconCache.file(File(app.filesDir, SimHubIconCache.DIRECTORY), hostId)
+    }
+
+    /** [simHubIconFile] as a [sizePx] square drawable, for the SimHub buttons. Main thread. */
+    fun simHubIcon(context: Context, sizePx: Int): Drawable? {
+        val file = simHubIconFile(context) ?: return null
+        val bitmap = BitmapFactory.decodeFile(file.absolutePath) ?: return null
+        return BitmapDrawable(context.resources, bitmap).apply { setBounds(0, 0, sizePx, sizePx) }
+    }
 
     /** The SimHub button, CarPlay's OEM icon and `command showDashboard` (#30). Any thread. */
     fun showDashboard(context: Context) = DashboardActivity.open(context.applicationContext ?: context)
@@ -325,6 +357,7 @@ object RigSessionCoordinator {
     private fun onLinkState(next: SimHubState) {
         state = next
         flow.onStateChanged(next)
+        iconCache?.onState(next)
         // A beacon moved the paired PC to a new address (§9): remember it.
         val stored = pairing
         val target = link.currentTarget

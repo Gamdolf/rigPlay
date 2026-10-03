@@ -4,6 +4,9 @@
   the tablet without tapping Fullscreen (#50).
 - Dashboard screen: the page loads as soon as SimHub names a dashboard and stays loaded between
   opens, so the SimHub button and the CarPlay car icon show it at once instead of reloading it (#51).
+- SimHub's own icon on the SimHub button, the dashboard's return button and the CarPlay car icon,
+  fetched once from SimHub's web dash server on the PC; a custom CarPlay icon chosen in the settings
+  still wins, and the placeholder stays until the first fetch (#52).
 
 # rigPlay 0.1.0-rc.1 — 2026-10-03
 

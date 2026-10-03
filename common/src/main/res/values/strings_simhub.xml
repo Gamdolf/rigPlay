@@ -81,6 +81,8 @@
     <!-- SimHub dashboard (#30) -->
     <string name="rig_dashboard_simhub">SimHub</string>
     <string name="rig_dashboard_carplay">CarPlay</string>
+    <!-- Settings → CarPlay icon, when no custom icon is chosen and SimHub's icon was fetched from the PC (#52). -->
+    <string name="rig_simhub_carplay_icon">SimHub icon, from the PC</string>
     <string name="rig_dashboard_retry">Retry</string>
     <string name="rig_dashboard_no_dashboard">No dashboard selected on the PC. Choose one on the rigPlay page in SimHub.</string>
     <string name="rig_dashboard_server_off">SimHub\'s web dash server is off. Turn it on in SimHub: Settings → Web dash server.</string>

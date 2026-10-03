@@ -2449,6 +2449,8 @@ class CarPlayHostActivity : ComponentActivity() {
             decodeAirPlayIcon(customBytes)?.let { return it }
             AirPlayPersistence.clearCustomAirPlayIcon(this)
         }
+        // No icon chosen by the user: SimHub's own, fetched from the PC (#52), else the placeholder.
+        simHubAirPlayIconBytes()?.let { bytes -> decodeAirPlayIcon(bytes)?.let { return it } }
         return decodeAirPlayIcon(defaultAirPlayIconBytes())
             ?: throw IllegalStateException("Packaged AirPlay icon is invalid")
     }
@@ -2462,6 +2464,12 @@ class CarPlayHostActivity : ComponentActivity() {
             return null
         }
         return AirPlayIcon(bounds.outWidth, bounds.outHeight, encoded)
+    }
+
+    private fun simHubAirPlayIconBytes(): ByteArray? = try {
+        RigSessionCoordinator.simHubIconFile(this)?.readBytes()
+    } catch (_: Exception) {
+        null
     }
 
     private fun defaultAirPlayIconBytes(): ByteArray =
@@ -2478,10 +2486,18 @@ class CarPlayHostActivity : ComponentActivity() {
                 AirPlayPersistence.clearCustomAirPlayIcon(this)
             }
         }
-        val bitmap = customBitmap ?: BitmapFactory.decodeResource(resources, R.raw.placeholder_icon)
+        val simHubBitmap = if (customBitmap == null) {
+            RigSessionCoordinator.simHubIconFile(this)?.let { BitmapFactory.decodeFile(it.absolutePath) }
+        } else {
+            null
+        }
+        val bitmap = customBitmap ?: simHubBitmap ?: BitmapFactory.decodeResource(resources, R.raw.placeholder_icon)
         preview.setImageBitmap(bitmap)
-        iconStatusView?.text =
-            if (customBitmap != null) getString(R.string.custom_1_1_icon) else getString(R.string.default_placeholder_icon)
+        iconStatusView?.text = when {
+            customBitmap != null -> getString(R.string.custom_1_1_icon)
+            simHubBitmap != null -> getString(R.string.rig_simhub_carplay_icon)
+            else -> getString(R.string.default_placeholder_icon)
+        }
     }
 
     private fun currentActivitySize(): DisplaySize? {

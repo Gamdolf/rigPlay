@@ -57,6 +57,8 @@ class RigPlayActivity : ComponentActivity() {
     private var simhubRendered: Any? = null
     private var simhubStatusView: TextView? = null
     private var homeSimHubStatus: TextView? = null
+    private var simhubButton: Button? = null
+    private var simhubButtonIcon: java.io.File? = null
     private val simhubObserver: () -> Unit = { onSimHubChanged() }
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         connect(notificationTransport)
@@ -154,6 +156,7 @@ class RigPlayActivity : ComponentActivity() {
 
     private fun onSimHubChanged() {
         if (isFinishing || isDestroyed) return
+        updateSimHubButtonIcon()
         when {
             page == "simhub" && RigSessionCoordinator.pairingStep is SimHubPairingFlow.Step.Paired &&
                 RigSessionCoordinator.isPaired -> {
@@ -173,6 +176,7 @@ class RigPlayActivity : ComponentActivity() {
     private fun render() {
         status = null; connectButton = null; disconnectButton = null; lastRunning = null
         simhubContainer = null; simhubRendered = null; simhubStatusView = null; homeSimHubStatus = null
+        simhubButton = null; simhubButtonIcon = null
         val scroll = ScrollView(this).apply { setBackgroundColor(BG); isFillViewport = true; clipToPadding = false }
         val content = column().apply { setPadding(dp(32), dp(24), dp(32), dp(32)) }
         scroll.addView(content)
@@ -270,9 +274,21 @@ class RigPlayActivity : ComponentActivity() {
 
     /** The SimHub button (#30): the dashboard chosen in SimHub. */
     private fun homeExtraActions(actions: LinearLayout) {
-        actions.addView(button(getString(R.string.rig_dashboard_simhub), false) {
+        simhubButton = button(getString(R.string.rig_dashboard_simhub), false) {
             RigSessionCoordinator.showDashboard(this)
-        }, matchButton(12, 60))
+        }.also { actions.addView(it, matchButton(12, 60)) }
+        updateSimHubButtonIcon()
+    }
+
+    /** SimHub's own icon on the SimHub button once it was fetched from the PC (#52). */
+    private fun updateSimHubButtonIcon() {
+        val button = simhubButton ?: return
+        val file = RigSessionCoordinator.simHubIconFile(this)
+        if (file == simhubButtonIcon) return
+        simhubButtonIcon = file
+        val icon = RigSessionCoordinator.simHubIcon(this, dp(32))
+        button.setCompoundDrawablesRelative(icon, null, null, null)
+        button.compoundDrawablePadding = dp(12)
     }
 
     private fun phoneStatusText(): String {
