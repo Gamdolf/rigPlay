@@ -11,6 +11,8 @@ import android.os.Looper
 import android.util.Log
 import com.shilapi.xcertplay.orchestration.ManualHotspotBand
 import com.shilapi.xcertplay.orchestration.ManualHotspotSecurity
+import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
+import com.shilapi.xcertplay.orchestration.WirelessModeRequirements
 import com.shilapi.xcertplay.transport.Iap2WirelessSecurity
 import java.io.IOException
 import java.net.Inet4Address
@@ -228,7 +230,7 @@ class ManualHotspotManager(
         networkInterface: NetworkInterface,
         primaryInterface: String?,
     ): Boolean = try {
-        networkInterface.name != primaryInterface &&
+        isServingInterfaceCandidate(networkInterface.name, primaryInterface, WirelessHotspotMode.MANUAL) &&
             !networkInterface.isLoopback &&
             networkInterface.isUp &&
             EXCLUDED_INTERFACE_PREFIXES.none { networkInterface.name.startsWith(it) }
@@ -453,4 +455,19 @@ private fun ManualHotspotSecurity.toIap2Security(): Iap2WirelessSecurity = when 
     ManualHotspotSecurity.WPA2 -> Iap2WirelessSecurity.WPA_WPA2
     ManualHotspotSecurity.WPA3_TRANSITION -> Iap2WirelessSecurity.WPA3_TRANSITION
     ManualHotspotSecurity.WPA3 -> Iap2WirelessSecurity.WPA3_ONLY
+}
+
+/**
+ * Whether [name] may carry the iPhone's traffic. The modes that create a network skip the station
+ * (default-route) interface, which leads to the home router, not to the phone; the existing-network
+ * mode (#33) uses exactly that interface.
+ */
+internal fun isServingInterfaceCandidate(
+    name: String,
+    stationInterface: String?,
+    mode: WirelessHotspotMode,
+): Boolean = if (WirelessModeRequirements.servesOnStationInterface(mode)) {
+    name == stationInterface
+} else {
+    name != stationInterface
 }

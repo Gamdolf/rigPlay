@@ -14,6 +14,10 @@ package com.shilapi.xcertplay
  *   pairing blank the page, so the next dashboard loads fresh.
  * - Release: the surface is destroyed once the link has been down for [RELEASE_AFTER_MS], or on
  *   memory pressure while no screen shows it ([onTrimMemory]); the next dashboard re-creates it.
+ * - Which dashboard: [update] gets both the main dashboard and the idle one (#39). The page holds the
+ *   main one, warm for the SimHub button, except while the attached screen asks for the idle one
+ *   ([attach] / [setIdle] with `idle = true`); it goes back to the main one when that screen stops
+ *   asking or lets go ([detach]). When both name the same URL, switching loads nothing.
  * - Hidden: [Surface.setVisible] false only marks the page hidden. SimHub's page throttles to the
  *   acknowledged frames and keeps its websocket open while hidden; freezing its JavaScript (as
  *   WebView.pauseTimers would) closes the socket, so the timers keep running (see the surface).
@@ -73,9 +77,16 @@ class DashboardWebViewHolder<S : DashboardWebViewHolder.Surface>(
     var surface: S? = null
         private set
 
-    /** The latest content from [update]. */
+    /** What the page is for now: the latest idle content from [update] while [idle], else the main one. */
     var content: DashboardContent? = null
         private set
+
+    /** The attached screen wants the idle dashboard (#39) rather than the main one. */
+    var idle: Boolean = false
+        private set
+
+    private var mainContent: DashboardContent? = null
+    private var idleContent: DashboardContent? = null
 
     var page: Page = Page.Idle
         private set
@@ -95,8 +106,19 @@ class DashboardWebViewHolder<S : DashboardWebViewHolder.Surface>(
     private var failedSerial = -1
     private var releaseTask: Cancellable? = null
 
-    /** A new link state (any change; repeated contents are free). */
-    fun update(next: DashboardContent) {
+    /**
+     * A new link state (any change; repeated contents are free): [main] for the SimHub button, [idle]
+     * for the idle screen ([DashboardContent.resolveIdle]).
+     */
+    fun update(main: DashboardContent, idle: DashboardContent = main) {
+        mainContent = main
+        idleContent = idle
+        apply()
+    }
+
+    /** Brings the page in line with the wanted content. */
+    private fun apply() {
+        val next = (if (idle) idleContent else mainContent) ?: return
         content = next
         when (next) {
             is DashboardContent.Load -> {
@@ -123,18 +145,30 @@ class DashboardWebViewHolder<S : DashboardWebViewHolder.Surface>(
     /** The screen's Retry: loads the current dashboard again. */
     fun retry() {
         attempt = null
-        content?.let(::update)
+        apply()
     }
 
-    /** [owner] shows the surface from now on (creating it if a dashboard is due); returns it. */
-    fun attach(owner: Any): S? {
+    /**
+     * [owner] shows the surface from now on (creating it if a dashboard is due), the idle dashboard
+     * when [idle]; returns it.
+     */
+    fun attach(owner: Any, idle: Boolean = false): S? {
         if (this.owner !== owner) {
             this.owner = owner
-            log("dashboard attached to $owner")
+            log("dashboard attached to $owner${if (idle) " (idle dashboard)" else ""}")
         }
+        val switched = this.idle != idle
+        this.idle = idle
         // Released (memory, link down) while closed: the dashboard comes back now.
-        if (surface == null) content?.let(::update)
+        if (switched || surface == null) apply()
         return surface
+    }
+
+    /** The current owner wants the idle dashboard ([idle]) or the main one. */
+    fun setIdle(owner: Any, idle: Boolean) {
+        if (this.owner !== owner || this.idle == idle) return
+        this.idle = idle
+        apply()
     }
 
     /** Only the current owner's calls count: a screen being destroyed must not hide its successor. */
@@ -151,6 +185,11 @@ class DashboardWebViewHolder<S : DashboardWebViewHolder.Surface>(
         this.owner = null
         listener = null
         log("dashboard detached from $owner")
+        // Closed: the main dashboard is the one kept warm.
+        if (idle) {
+            idle = false
+            apply()
+        }
     }
 
     /** From the WebView: the main frame of [url] finished loading. */

@@ -100,7 +100,8 @@ namespace RigPlayPlugin.Tests
             {
                 MessageTypes.Beacon, MessageTypes.Hello, MessageTypes.Welcome, MessageTypes.PairRequest, MessageTypes.PairResult,
                 MessageTypes.Heartbeat, MessageTypes.State, MessageTypes.Status, MessageTypes.Command, MessageTypes.Telemetry,
-                MessageTypes.Error, MessageTypes.AudioStart, MessageTypes.AudioStop,
+                MessageTypes.Error, MessageTypes.AudioStart, MessageTypes.AudioStop, MessageTypes.Artwork,
+                MessageTypes.MicStart, MessageTypes.MicStop,
             })
             {
                 Assert.Contains(type, types);
@@ -148,7 +149,8 @@ namespace RigPlayPlugin.Tests
             Assert.Equal((string)v["payloadHex"], Hex(datagram.Skip(AudioHeader.Size).ToArray()));
 
             AudioHeader decoded;
-            var decodedSamples = AudioDatagram.Decode(Unhex((string)v["datagramHex"]), out decoded);
+            var direction = global::RigPlayPlugin.Audio.AudioHeader.ParseDirection((string)v["direction"]);
+            var decodedSamples = AudioDatagram.Decode(Unhex((string)v["datagramHex"]), direction, out decoded);
             Assert.Equal(header, decoded);
             Assert.Equal(samples, decodedSamples);
             Assert.Equal((int)v["frames"], decodedSamples.Length / decoded.Channels);
@@ -161,9 +163,10 @@ namespace RigPlayPlugin.Tests
         {
             var v = ((JArray)AudioVectors["invalid"]).Single(x => (string)x["name"] == name);
             var bytes = Unhex((string)v["datagramHex"]);
+            var direction = global::RigPlayPlugin.Audio.AudioHeader.ParseDirection((string)v["direction"]);
             AudioHeader header;
-            Assert.NotNull(AudioDatagram.Validate(bytes, 0, bytes.Length, out header));
-            Assert.Throws<ProtocolException>(() => AudioDatagram.Decode(bytes, out header));
+            Assert.NotNull(AudioDatagram.Validate(bytes, 0, bytes.Length, direction, out header));
+            Assert.Throws<ProtocolException>(() => AudioDatagram.Decode(bytes, direction, out header));
         }
 
         // Helpers

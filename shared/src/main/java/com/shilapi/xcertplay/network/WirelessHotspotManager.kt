@@ -8,6 +8,7 @@ enum class WirelessHotspotBackend(val label: String) {
     WIFI_P2P("Wi-Fi P2P"),
     LOCAL_ONLY_HOTSPOT("LocalOnlyHotspot"),
     MANUAL_HOTSPOT("Manual hotspot"),
+    EXISTING_NETWORK("Existing Wi-Fi network"),
 }
 
 /** The live Wi-Fi credentials and interface details for one wireless CarPlay hotspot. */
@@ -22,12 +23,17 @@ class WirelessHotspotInfo(
     val hostAddress: InetAddress?,
     val bandLabel: String,
     val backend: WirelessHotspotBackend,
+    /**
+     * Whether Android let rigPlay read the network name itself. Only meaningful when rigPlay joins a
+     * network it does not own (existing-network mode); null for the modes that create the network.
+     */
+    val ssidReadable: Boolean? = null,
 ) {
     override fun toString(): String =
         "WirelessHotspotInfo(backend=${backend.label}, ssid='$ssid', " +
             "passphrase=<redacted>, security=$security, channel=$channel, " +
             "frequencyMHz=$frequencyMHz, bssid='$bssid', interfaceName=$interfaceName, " +
-            "hostAddress=$hostAddress, bandLabel='$bandLabel')"
+            "hostAddress=$hostAddress, bandLabel='$bandLabel', ssidReadable=$ssidReadable)"
 }
 
 /** Owns one Android Wi-Fi group and all resources needed to keep it alive. */

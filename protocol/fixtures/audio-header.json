@@ -17,7 +17,7 @@
       "offset": 2,
       "size": 1,
       "field": "streamType",
-      "encoding": "u8: 1 media, 2 alt, 3 telephony, 4 reserved (mic)"
+      "encoding": "u8: 1 media, 2 alt, 3 telephony (tablet to plugin); 4 mic (plugin to tablet)"
     },
     {
       "offset": 3,
@@ -151,6 +151,56 @@
       "headerHex": "ffff0300ffffff0000a00101",
       "payloadHex": "0000e80318fc",
       "datagramHex": "ffff0300ffffff0000a001010000e80318fc"
+    },
+    {
+      "name": "mic-16k-first-datagram",
+      "description": "PC microphone to the tablet: first datagram after micStart, 16 kHz mono. Four samples.",
+      "direction": "pcToTablet",
+      "header": {
+        "seq": 0,
+        "streamType": 4,
+        "stream": "mic",
+        "flags": 1,
+        "timestamp": 0,
+        "sampleRateHz": 16000,
+        "sampleRateField": 160,
+        "channels": 1,
+        "format": 1
+      },
+      "samples": [
+        100,
+        -100,
+        0,
+        32767
+      ],
+      "frames": 4,
+      "headerHex": "000004010000000000a00101",
+      "payloadHex": "64009cff0000ff7f",
+      "datagramHex": "000004010000000000a0010164009cff0000ff7f"
+    },
+    {
+      "name": "mic-24k-midstream",
+      "description": "PC microphone mid-stream at 24 kHz mono: seq 300, timestamp 36000. Two samples.",
+      "direction": "pcToTablet",
+      "header": {
+        "seq": 300,
+        "streamType": 4,
+        "stream": "mic",
+        "flags": 0,
+        "timestamp": 36000,
+        "sampleRateHz": 24000,
+        "sampleRateField": 240,
+        "channels": 1,
+        "format": 1
+      },
+      "samples": [
+        -2,
+        2
+      ],
+      "frames": 2,
+      "headerHex": "012c040000008ca000f00101",
+      "payloadHex": "feff0200",
+      "datagramHex": "012c040000008ca000f00101feff0200"
     }
   ],
   "invalid": [
@@ -170,9 +220,10 @@
       "reason": "streamType 0 is invalid."
     },
     {
-      "name": "streamType-mic-reserved",
+      "name": "streamType-mic-from-tablet",
       "datagramHex": "000004010000000001e002010100ffff",
-      "reason": "streamType 4 (mic) is reserved and never sent tablet to plugin in protocol 1."
+      "reason": "streamType 4 (mic) flows plugin to tablet only; a plugin drops it from a tablet.",
+      "direction": "tabletToPc"
     },
     {
       "name": "format-zero",
@@ -203,6 +254,22 @@
       "name": "payload-partial-frame",
       "datagramHex": "000001010000000001e002010100ff",
       "reason": "Stereo payload of 3 bytes is not a multiple of 4."
+    },
+    {
+      "name": "media-to-tablet",
+      "direction": "pcToTablet",
+      "datagramHex": "000001010000000001e002010100ffff",
+      "reason": "streamType 1 (media) never flows plugin to tablet; a tablet's microphone receiver accepts streamType 4 only."
+    },
+    {
+      "name": "mic-format-opus",
+      "direction": "pcToTablet",
+      "datagramHex": "000004010000000000a001020100",
+      "reason": "format 2 (Opus) is reserved in protocol 1, for the microphone too."
     }
-  ]
+  ],
+  "directions": {
+    "tabletToPc": "Datagrams a plugin receives: streamType 1-3 only. The direction of a vector without a direction member.",
+    "pcToTablet": "Datagrams a tablet receives on its microphone port: streamType 4 only."
+  }
 }

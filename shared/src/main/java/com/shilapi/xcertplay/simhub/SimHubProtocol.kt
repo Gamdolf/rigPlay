@@ -72,6 +72,11 @@ object SimHubProtocol {
     const val TYPE_ERROR = "error"
     const val TYPE_AUDIO_START = "audioStart"
     const val TYPE_AUDIO_STOP = "audioStop"
+    const val TYPE_ARTWORK = "artwork"
+    const val TYPE_MIC_START = "micStart"
+    const val TYPE_MIC_STOP = "micStop"
+
+    const val MIME_JPEG = "image/jpeg"
 
     // §14.1 error codes.
     const val ERROR_UNSUPPORTED_PROTOCOL = "unsupportedProtocol"
@@ -142,7 +147,10 @@ object SimHubProtocol {
                 TYPE_TELEMETRY -> decodeTelemetry(root)
                 TYPE_ERROR -> decodeError(fields)
                 TYPE_AUDIO_START -> decodeAudioStart(fields)
-                TYPE_AUDIO_STOP -> SimHubMessage.AudioStop(fields.reqEnum("stream"))
+                TYPE_AUDIO_STOP -> SimHubMessage.AudioStop(fields.reqStream())
+                TYPE_MIC_START -> decodeMicStart(fields)
+                TYPE_MIC_STOP -> SimHubMessage.MicStop(fields.reqMicStreamType())
+                TYPE_ARTWORK -> SimHubMessage.Artwork(mime = fields.reqString("mime", 1..255), base64 = fields.reqString("base64", 1..MAX_LINE_BYTES))
                 else -> return SimHubParseResult.Unknown(type)
             }
             SimHubParseResult.Ok(message)
@@ -203,11 +211,13 @@ object SimHubProtocol {
                     .put("enabled", message.audio.enabled)
                     .put("port", message.audio.port)
                     .put("formats", JSONArray(message.audio.formats)))
+                .putOpt("mic", message.mic?.let { JSONObject().put("enabled", it.enabled) })
             is SimHubMessage.Status -> json
                 .put("phoneConnected", message.phoneConnected)
                 .putOpt("phoneName", message.phoneName)
                 .put("screen", message.screen.wire)
                 .put("nowPlaying", message.nowPlaying?.let(::nowPlayingJson) ?: JSONObject.NULL)
+                .putOpt("nav", message.nav?.let(::navJson))
             is SimHubMessage.Command -> when (val command = message.command) {
                 is SimHubCommand.Media -> json.put("command", COMMAND_MEDIA).put("action", command.action.wire)
                 SimHubCommand.ShowDashboard -> json.put("command", COMMAND_SHOW_DASHBOARD)
@@ -240,9 +250,23 @@ object SimHubProtocol {
                 .put("sampleRate", message.sampleRate)
                 .put("channels", message.channels)
             is SimHubMessage.AudioStop -> json.put("stream", message.stream.wire)
+            is SimHubMessage.MicStart -> json
+                .put("streamType", message.streamType)
+                .put("format", message.format.wire)
+                .put("sampleRate", message.sampleRate)
+                .put("channels", message.channels)
+                .put("port", message.port)
+            is SimHubMessage.MicStop -> json.put("streamType", message.streamType)
+            is SimHubMessage.Artwork -> json.put("mime", message.mime).put("base64", message.base64)
         }
         return json
     }
+
+    private fun navJson(nav: NavStatus): JSONObject = JSONObject()
+        .put("maneuver", nav.maneuver)
+        .putOpt("distanceM", nav.distanceM)
+        .putOpt("road", nav.road)
+        .putOpt("etaEpochS", nav.etaEpochS)
 
     private fun nowPlayingJson(nowPlaying: NowPlaying): JSONObject {
         // §3: a decimal that is not finite and has no null option means the message is not sent.
@@ -340,6 +364,7 @@ object SimHubProtocol {
             idleDashboardUrl = f.optString("idleDashboardUrl")?.also { requireHttpUrl("idleDashboardUrl", it) },
             dashboardServer = server,
             audio = audio,
+            mic = f.optObject("mic")?.let { MicSettings(enabled = it.reqBoolean("enabled")) },
         )
     }
 
@@ -368,11 +393,20 @@ object SimHubProtocol {
                 updatedAt = it.reqInt("updatedAt", Long.MIN_VALUE..Long.MAX_VALUE),
             )
         }
+        val nav = f.optObject("nav")?.let {
+            NavStatus(
+                maneuver = it.reqString("maneuver", 1..64),
+                distanceM = it.optInt("distanceM", 0L..Int.MAX_VALUE)?.toInt(),
+                road = it.optString("road"),
+                etaEpochS = it.optInt("etaEpochS", 0L..Long.MAX_VALUE),
+            )
+        }
         return SimHubMessage.Status(
             phoneConnected = f.reqBoolean("phoneConnected"),
             phoneName = f.optString("phoneName"),
             screen = f.reqEnum("screen"),
             nowPlaying = nowPlaying,
+            nav = nav,
         )
     }
 
@@ -433,10 +467,23 @@ object SimHubProtocol {
         val sampleRate = f.reqInt("sampleRate", 8_000L..48_000L).toInt()
         if (sampleRate % 100 != 0) throw BadMember("sampleRate must be a multiple of 100")
         return SimHubMessage.AudioStart(
-            stream = f.reqEnum("stream"),
+            stream = f.reqStream(),
             format = f.reqEnum("format"),
             sampleRate = sampleRate,
             channels = f.reqInt("channels", 1L..2L).toInt(),
+        )
+    }
+
+    /** §6.13: a mono `pcm_s16le` stream with `streamType` 4 at a protocol sample rate, to a valid port. */
+    private fun decodeMicStart(f: Fields): SimHubMessage.MicStart {
+        val sampleRate = f.reqInt("sampleRate", 8_000L..48_000L).toInt()
+        if (sampleRate % 100 != 0) throw BadMember("sampleRate must be a multiple of 100")
+        return SimHubMessage.MicStart(
+            streamType = f.reqMicStreamType(),
+            format = f.reqEnum("format"),
+            sampleRate = sampleRate,
+            channels = f.reqInt("channels", 1L..1L).toInt(),
+            port = f.reqPort("port"),
         )
     }
 
@@ -476,6 +523,16 @@ object SimHubProtocol {
         }
 
         fun reqPort(name: String): Int = reqInt(name, 1L..65_535L).toInt()
+
+        /** `stream` of audioStart / audioStop: media, alt or telephony; `mic` is a datagram stream only (§6.13). */
+        fun reqStream(): AudioStream {
+            val stream = reqEnum<AudioStream>("stream")
+            if (stream == AudioStream.MIC) throw BadMember("unknown stream value mic")
+            return stream
+        }
+
+        /** `streamType` of micStart / micStop: always 4. */
+        fun reqMicStreamType(): Int = reqInt("streamType", AudioStream.MIC.code.toLong()..AudioStream.MIC.code.toLong()).toInt()
 
         fun reqDecimal(name: String): Double = optDecimal(name) ?: throw BadMember("missing $name")
 

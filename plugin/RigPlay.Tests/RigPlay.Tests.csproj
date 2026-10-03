@@ -20,6 +20,12 @@
     <Compile Include="../RigPlay/Net/**/*.cs" Link="Plugin/Net/%(RecursiveDir)%(Filename)%(Extension)" />
     <Compile Include="../RigPlay/Pairing/**/*.cs" Link="Plugin/Pairing/%(RecursiveDir)%(Filename)%(Extension)" />
     <Compile Include="../RigPlay/Dashboards/**/*.cs" Link="Plugin/Dashboards/%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="../RigPlay/Telemetry/**/*.cs" Link="Plugin/Telemetry/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <!-- The shipped track table of strategy C (#44), under the name ShippedTracks.Default reads. -->
+  <ItemGroup>
+    <EmbeddedResource Include="../RigPlay/Resources/tracks.json" LogicalName="RigPlay.Tracks.json" Link="Plugin/Resources/tracks.json" />
   </ItemGroup>
 
   <!-- The golden samples of docs/protocol.md, read by ProtocolFixturesTests. -->
@@ -35,6 +41,8 @@
     <Compile Include="../RigPlay/Audio/AudioStats.cs" Link="Plugin/Audio/AudioStats.cs" />
     <Compile Include="../RigPlay/Audio/AudioReceiver.cs" Link="Plugin/Audio/AudioReceiver.cs" />
     <Compile Include="../RigPlay/Audio/AudioGlue.cs" Link="Plugin/Audio/AudioGlue.cs" />
+    <!-- The PC microphone (#34): packetizer, stream lifecycle and glue. MicCapture.cs and MicSection.cs need NAudio and WPF and stay out. -->
+    <Compile Include="../RigPlay/Audio/MicSender.cs" Link="Plugin/Audio/MicSender.cs" />
   </ItemGroup>
 
   <ItemGroup>

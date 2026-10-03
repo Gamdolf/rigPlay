@@ -247,4 +247,71 @@ class DashboardWebViewHolderTest {
         assertEquals(1, surface.clears)
         assertEquals(1, scheduler.tasks.size)
     }
+
+    // --- the idle dashboard (#39) in the same page ---
+
+    @Test fun mainDashboardIsWarmedNotTheIdleOne() {
+        holder.update(pit, clock)
+        assertEquals(listOf(pit.url), surface.loads)
+        assertFalse(holder.idle)
+    }
+
+    @Test fun idleScreenLoadsTheIdleDashboardAndClosingRewarmsTheMainOne() {
+        holder.update(pit, clock)
+        holder.onPageFinished(pit.url)
+        val screen = Any()
+        assertSame(surface, holder.attach(screen, idle = true))
+        assertTrue(holder.idle)
+        assertEquals(clock, holder.content)
+        assertEquals(Page.Loading(clock.url), holder.page)
+        holder.update(pit, clock)
+        assertEquals(listOf(pit.url, clock.url), surface.loads)
+        holder.detach(screen)
+        assertFalse(holder.idle)
+        assertEquals(pit, holder.content)
+        assertEquals(listOf(pit.url, clock.url, pit.url), surface.loads)
+    }
+
+    @Test fun sameUrlForBothDashboardsSwitchesWithoutALoad() {
+        holder.update(pit)
+        holder.onPageFinished(pit.url)
+        val screen = Any()
+        holder.attach(screen, idle = true)
+        holder.setIdle(screen, false)
+        holder.setIdle(screen, true)
+        assertEquals(listOf(pit.url), surface.loads)
+        assertEquals(Page.Loaded(pit.url), holder.page)
+    }
+
+    @Test fun onlyTheOwnerSwitchesTheDashboard() {
+        holder.update(pit, clock)
+        val screen = Any()
+        holder.attach(screen)
+        holder.setIdle(Any(), true)
+        holder.detach(Any())
+        assertFalse(holder.idle)
+        holder.setIdle(screen, true)
+        assertEquals(listOf(pit.url, clock.url), surface.loads)
+    }
+
+    @Test fun idleDashboardWithoutAMainOneCreatesThePageOnlyForTheIdleScreen() {
+        holder.update(DashboardContent.NoDashboard, clock)
+        assertTrue(surfaces.isEmpty())
+        val screen = Any()
+        assertNotNull(holder.attach(screen, idle = true))
+        assertEquals(listOf(clock.url), surface.loads)
+        holder.detach(screen)
+        assertEquals(DashboardContent.NoDashboard, holder.content)
+        assertEquals(1, surface.clears)
+    }
+
+    @Test fun retryReloadsTheIdleDashboardWhileShown() {
+        holder.update(pit, clock)
+        val screen = Any()
+        holder.attach(screen, idle = true)
+        holder.onMainFrameError(clock.url, "-6 refused")
+        assertEquals(Page.Failed(clock.url, "-6 refused"), holder.page)
+        holder.retry()
+        assertEquals(listOf(pit.url, clock.url, clock.url), surface.loads)
+    }
 }

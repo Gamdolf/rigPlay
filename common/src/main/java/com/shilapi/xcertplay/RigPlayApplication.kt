@@ -39,9 +39,14 @@ class RigPlayApplication : Application() {
     }
 
     private fun onSimHubChanged() {
-        val content = DashboardContent.resolve(RigSessionCoordinator.state, RigSessionCoordinator.isPaired)
-        // No WebView at all until there is a dashboard to load.
-        if (content is DashboardContent.Load || dashboardCreated) dashboard.update(content)
+        val state = RigSessionCoordinator.state
+        val paired = RigSessionCoordinator.isPaired
+        val content = DashboardContent.resolve(state, paired)
+        // No WebView at all until there is a dashboard to load. The idle dashboard (#39) only loads
+        // while the idle screen asks for it; the main one is the one kept warm.
+        if (content is DashboardContent.Load || dashboardCreated) {
+            dashboard.update(content, DashboardContent.resolveIdle(state, paired))
+        }
     }
 
     private class ForegroundTracker : ActivityLifecycleCallbacks {
@@ -67,7 +72,9 @@ class RigPlayApplication : Application() {
     companion object {
         fun foregroundOf(activity: Activity): RigSessionLifecycle.Foreground = when (activity) {
             is CarPlayHostActivity -> RigSessionLifecycle.Foreground.CARPLAY
-            is DashboardActivity -> RigSessionLifecycle.Foreground.DASHBOARD
+            is DashboardActivity ->
+                if (activity.idleMode) RigSessionLifecycle.Foreground.IDLE_DASHBOARD else RigSessionLifecycle.Foreground.DASHBOARD
+            is OfflineIdleActivity -> RigSessionLifecycle.Foreground.OFFLINE_IDLE
             else -> RigSessionLifecycle.Foreground.HOME
         }
     }

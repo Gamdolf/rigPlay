@@ -23,6 +23,8 @@ data class SimHubState(
     val idleDashboardUrl: String? = null,
     val dashboardServer: DashboardServer? = null,
     val audio: AudioSettings? = null,
+    /** From the latest `state.mic` (§6.6); `null` when absent. */
+    val mic: MicSettings? = null,
     /** Last pairing answer while Unpaired, for the onboarding UI (§8). */
     val lastPairResult: SimHubMessage.PairResult? = null,
 ) {
@@ -59,6 +61,12 @@ data class SimHubState(
     val audioEnabled: Boolean get() = paired && audio?.enabled == true
 
     fun hasFeature(feature: String): Boolean = feature in features
+
+    /**
+     * The PC can supply the phone's microphone (§6.13): the link is up, the session has feature `mic` and the
+     * latest `state.mic.enabled` is true.
+     */
+    val micAvailable: Boolean get() = paired && hasFeature(SimHubProtocol.FEATURE_MIC) && mic?.enabled == true
 
     companion object {
         val STOPPED = SimHubState()

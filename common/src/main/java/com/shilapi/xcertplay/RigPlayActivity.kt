@@ -122,6 +122,10 @@ class RigPlayActivity : ComponentActivity() {
                 // With a paired PC the coordinator connects the phone when SimHub comes up (#29).
                 !RigSessionCoordinator.isPaired) {
                 handler.post { connect(AirPlayPersistence.loadWirelessEnabled(this)) }
+            } else if (intent.getBooleanExtra(EXTRA_FROM_BOOT, false) && RigSessionCoordinator.isPaired &&
+                intent.getStringExtra("page") == null && page == "home") {
+                // Opened after boot on the rig (#39): straight to the idle screen (or CarPlay), not the menu.
+                handler.post { RigSessionCoordinator.showPolicyScreen() }
             }
         }
     }
@@ -228,6 +232,7 @@ class RigPlayActivity : ComponentActivity() {
         val connectionHint = when (AirPlayPersistence.loadWirelessHotspotMode(this)) {
             WirelessHotspotMode.MANUAL -> getString(R.string.hotspot_hint_manual)
             WirelessHotspotMode.LOCAL_ONLY_HOTSPOT -> getString(R.string.hotspot_hint_local)
+            WirelessHotspotMode.EXISTING_NETWORK -> getString(R.string.hotspot_hint_existing)
             else -> getString(R.string.hotspot_hint_p2p)
         }
         phoneCard.addView(label(connectionHint, 15, MUTED).apply { setPadding(0, dp(12), 0, 0) })
@@ -278,6 +283,12 @@ class RigPlayActivity : ComponentActivity() {
             RigSessionCoordinator.showDashboard(this)
         }.also { actions.addView(it, matchButton(12, 60)) }
         updateSimHubButtonIcon()
+        // The idle dashboard or the rigPlay idle screen (#39), whichever the policy would show now.
+        if (RigSessionCoordinator.isPaired && !CarPlayBackgroundSession.active) {
+            actions.addView(button(getString(R.string.rig_idle_show), false) {
+                RigSessionCoordinator.showPolicyScreen()
+            }, matchButton(12, 60))
+        }
     }
 
     /** SimHub's own icon on the SimHub button once it was fetched from the PC (#52). */
@@ -308,6 +319,7 @@ class RigPlayActivity : ComponentActivity() {
         content.addView(label(getString(R.string.your_rig_your_way), 34, TEXT, true))
         content.addView(label(getString(R.string.apply_reconnects_carplay_for_size_resolution_music_buffer), 17, MUTED).apply { setPadding(0, dp(8), 0, dp(24)) })
         simHubSettings(content)
+        idleSettings(content)
         section(content, getString(R.string.connection_setup), R.drawable.ic_dp_connection) { card ->
             card.addView(label(getString(R.string.choose_how_to_connect_follow_the_setup_steps_and_save_your), 16, MUTED))
             card.addView(button(getString(R.string.open_connection_setup), false) { page = "connection"; render() }, matchButton(12, 60))
@@ -344,6 +356,7 @@ class RigPlayActivity : ComponentActivity() {
         }
         section(content, getString(R.string.audio_routing)) { card ->
             audioOutputControl(card)
+            microphoneSourceControl(card)
             toggle(card, getString(R.string.contrib_audio_home_toggle_audio_focus), getString(R.string.contrib_audio_home_toggle_audio_focus_desc), AirPlayPersistence.loadAudioFocusEnabled(this)) { AirPlayPersistence.saveAudioFocusEnabled(this, it) }
             if (resources.getBoolean(R.bool.config_advanced_audio_channel_mapping)) {
                 toggle(card, getString(R.string.advanced_audio_channel_mapping),
@@ -356,16 +369,7 @@ class RigPlayActivity : ComponentActivity() {
             navigationChannelControl(card)
         }
         section(content, getString(R.string.location), R.drawable.ic_dp_navigation) { card ->
-            toggle(card, getString(R.string.report_location_to_iphone),
-                getString(R.string.sends_precise_android_location_as_carplay_gps_data_when_th),
-                AirPlayPersistence.loadLocationReportingEnabled(this)) {
-                AirPlayPersistence.saveLocationReportingEnabled(this, it)
-                if (it && !hasPreciseLocation()) {
-                    locationPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
-                } else {
-                    reconnectForLocation()
-                }
-            }
+            locationSourceControl(card)
         }
         section(content, getString(R.string.permissions_and_connection_help), R.drawable.ic_dp_permissions) { card ->
             card.addView(label(getString(R.string.nearby_devices_connects_your_iphone_microphone_enables_sir), 16, MUTED))
@@ -597,6 +601,26 @@ class RigPlayActivity : ComponentActivity() {
         }
     }
 
+    /** "When no iPhone is connected" (#39): idle dashboard or rigPlay screen, and when it turns off. */
+    private fun idleSettings(content: LinearLayout) {
+        section(content, getString(R.string.rig_settings_idle), R.drawable.ic_dp_display) { card ->
+            val modes = listOf(IdleMode.DASHBOARD, IdleMode.RIGPLAY_SCREEN)
+            choice(card, getString(R.string.rig_settings_idle_mode),
+                listOf(getString(R.string.rig_settings_idle_mode_dashboard), getString(R.string.rig_settings_idle_mode_screen)),
+                modes.indexOf(AirPlayPersistence.loadIdleMode(this)).coerceAtLeast(0), reconnects = false) {
+                AirPlayPersistence.saveIdleMode(this, modes[it])
+                RigSessionCoordinator.onIdleSettingsChanged()
+            }
+            val minutes = IdleScreenOff.CHOICES
+            choice(card, getString(R.string.rig_settings_idle_off),
+                minutes.map { if (it == 0) getString(R.string.rig_settings_idle_off_never) else getString(R.string.rig_settings_idle_off_after, it) },
+                minutes.indexOf(AirPlayPersistence.loadIdleScreenOffMinutes(this)).coerceAtLeast(0), reconnects = false) {
+                AirPlayPersistence.saveIdleScreenOffMinutes(this, minutes[it])
+            }
+            card.addView(label(getString(R.string.rig_settings_idle_note), 14, MUTED))
+        }
+    }
+
     private fun askPort(title: String, current: Int, save: (Int) -> Unit) {
         val input = EditText(this).apply {
             setText(current.toString()); setSingleLine()
@@ -624,7 +648,7 @@ class RigPlayActivity : ComponentActivity() {
 
     // The car hotspot link needs the hotspot on; rigPlay only checks it (turning it on needs ADB-only permission).
     private fun carHotspotOff(): Boolean =
-        AirPlayPersistence.loadWirelessHotspotMode(this) == WirelessHotspotMode.MANUAL &&
+        com.shilapi.xcertplay.orchestration.WirelessModeRequirements.requiresTethering(AirPlayPersistence.loadWirelessHotspotMode(this)) &&
             com.shilapi.xcertplay.network.CarHotspotStatus.isEnabled(this) == false
 
     private fun carHotspotOffDialog() {
@@ -674,11 +698,12 @@ class RigPlayActivity : ComponentActivity() {
 
     private fun wirelessLinkControls(parent: LinearLayout) {
         val mode = if (pendingCarHotspotSetup) WirelessHotspotMode.MANUAL else AirPlayPersistence.loadWirelessHotspotMode(this)
-        val modes = listOf(WirelessHotspotMode.MANUAL, WirelessHotspotMode.WIFI_P2P)
-        val titles = listOf(getString(R.string.tablet_hotspot), getString(R.string.wifi_direct))
+        val modes = listOf(WirelessHotspotMode.MANUAL, WirelessHotspotMode.WIFI_P2P, WirelessHotspotMode.EXISTING_NETWORK)
+        val titles = listOf(getString(R.string.tablet_hotspot), getString(R.string.wifi_direct), getString(R.string.wireless_mode_existing_network))
         val descriptions = listOf(
             getString(R.string.hotspot_mode_manual_desc),
-            getString(R.string.hotspot_mode_p2p_desc)
+            getString(R.string.hotspot_mode_p2p_desc),
+            getString(R.string.wireless_mode_existing_network_desc),
         )
         val wide = resources.configuration.screenWidthDp >= 850
         val choices = if (wide) row().apply { gravity = Gravity.TOP } else column()
@@ -692,6 +717,9 @@ class RigPlayActivity : ComponentActivity() {
                 if (candidate == WirelessHotspotMode.MANUAL) {
                     pendingCarHotspotSetup = true
                     render()
+                } else if (candidate == WirelessHotspotMode.EXISTING_NETWORK) {
+                    pendingCarHotspotSetup = false
+                    askExistingNetworkDetails()
                 } else {
                     pendingCarHotspotSetup = false
                     applyWirelessLink(candidate)
@@ -711,10 +739,81 @@ class RigPlayActivity : ComponentActivity() {
                 }
             }, matchButton(12, 60))
             parent.addView(label(if (pendingCarHotspotSetup) getString(R.string.finish_setup_save_your_hotspot_details_to_use_this_mode) else if (carHotspotOff()) getString(R.string.hotspot_details_off) else getString(R.string.hotspot_details_saved), 15, if (carHotspotOff()) WARNING else MUTED).apply { setPadding(0, dp(12), 0, 0) })
+        } else if (mode == WirelessHotspotMode.EXISTING_NETWORK) {
+            existingNetworkControls(parent)
         } else {
             parent.addView(label(getString(R.string.wifi_direct_setup_hint), 16, MUTED))
             parent.addView(button(getString(R.string.open_tablet_wi_fi_settings), false) { openCarClientWifiSettings() }, matchButton(12, 60))
         }
+    }
+
+    // --- Existing Wi-Fi network mode (#33) ---------------------------------------------------------
+
+    /** The tablet's current Wi-Fi client connection, read without changing anything. */
+    private fun stationWifi(): com.shilapi.xcertplay.network.StationWifiSnapshot? = runCatching {
+        val reader = com.shilapi.xcertplay.network.AndroidStationWifiReader(this)
+        com.shilapi.xcertplay.network.stationWifiSnapshot(reader.wifiLinkProperties(), reader.wifiInfo(), reader::interfaceIndex)
+    }.getOrNull()
+
+    private fun existingNetworkStatus(): String {
+        val station = stationWifi() ?: return getString(R.string.existing_network_status_none)
+        val unknown = getString(R.string.existing_network_channel_unknown)
+        return getString(R.string.existing_network_status, station.interfaceName,
+            station.hostAddress?.hostAddress?.substringBefore('%') ?: getString(R.string.existing_network_status_no_address),
+            station.channel.takeIf { it > 0 }?.toString() ?: unknown, station.bandLabel ?: unknown)
+    }
+
+    private fun existingNetworkControls(parent: LinearLayout) {
+        parent.addView(label(getString(R.string.existing_network_setup), 22, TEXT, true))
+        parent.addView(label(getString(R.string.wireless_mode_existing_network_desc), 16, MUTED).apply { setPadding(0, dp(8), 0, dp(8)) })
+        parent.addView(label(existingNetworkStatus(), 15, if (stationWifi()?.hostAddress == null) WARNING else MUTED).apply { setPadding(0, 0, 0, dp(12)) })
+        parent.addView(button(getString(R.string.existing_network_edit, AirPlayPersistence.loadExistingNetworkSsid(this)), false) { askExistingNetworkDetails() }, matchButton(0, 60))
+        parent.addView(button(getString(R.string.open_tablet_wi_fi_settings), false) { openCarClientWifiSettings() }, matchButton(12, 60))
+    }
+
+    /** Name prefilled from Android when readable; the password is only ever typed by the user. */
+    private fun askExistingNetworkDetails() {
+        val liveName = stationWifi()?.ssid
+        val fields = column().apply { setPadding(dp(24), dp(12), dp(24), dp(12)) }
+        fields.addView(label(getString(R.string.existing_network_details_intro), 16, MUTED))
+        val ssid = EditText(this).apply {
+            hint = getString(R.string.existing_network_name); setSingleLine()
+            setText(liveName ?: AirPlayPersistence.loadExistingNetworkSsid(this@RigPlayActivity))
+        }
+        val password = EditText(this).apply {
+            hint = getString(R.string.existing_network_password); setSingleLine()
+            setText(AirPlayPersistence.loadExistingNetworkPassphrase(this@RigPlayActivity))
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        fields.addView(ssid)
+        if (liveName == null) fields.addView(label(getString(R.string.existing_network_name_hidden), 14, MUTED))
+        fields.addView(password)
+        fields.addView(CheckBox(this).apply {
+            text = getString(R.string.show_password)
+            setOnCheckedChangeListener { _, checked ->
+                password.transformationMethod = if (checked) null else android.text.method.PasswordTransformationMethod.getInstance()
+                password.setSelection(password.text.length)
+            }
+        })
+        val error = label("", 14, WARNING).apply { accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
+        fields.addView(error)
+        val dialog = AlertDialog.Builder(this).setTitle(getString(R.string.existing_network_details_title))
+            .setView(ScrollView(this).apply { addView(fields) })
+            .setPositiveButton(getString(R.string.existing_network_save_and_use), null)
+            .setNegativeButton(getString(R.string.cancel), null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val name = ssid.text.toString().trim()
+                val secret = password.text.toString()
+                val problem = hotspotError(name, secret)
+                if (problem != null) { error.text = problem; return@setOnClickListener }
+                AirPlayPersistence.saveExistingNetworkSsid(this, name)
+                AirPlayPersistence.saveExistingNetworkPassphrase(this, secret)
+                dialog.dismiss()
+                applyWirelessLink(WirelessHotspotMode.EXISTING_NETWORK)
+            }
+        }
+        dialog.show()
     }
 
     /** "Audio output: PC via SimHub / this tablet" (#31); applies when CarPlay next connects. */
@@ -726,6 +825,17 @@ class RigPlayActivity : ComponentActivity() {
             AirPlayPersistence.saveAudioOutputTarget(this, targets[it])
         }
         parent.addView(label(getString(R.string.audio_simhub_output_note), 14, MUTED).apply { setPadding(0, 0, 0, dp(12)) })
+    }
+
+    /** "Microphone: PC via SimHub / this tablet" (#34); applies the next time the phone opens the microphone. */
+    private fun microphoneSourceControl(parent: LinearLayout) {
+        val sources = listOf(com.shilapi.xcertplay.media.MicrophoneSource.PC, com.shilapi.xcertplay.media.MicrophoneSource.TABLET)
+        choice(parent, getString(R.string.mic_source),
+            listOf(getString(R.string.mic_source_pc), getString(R.string.mic_source_tablet)),
+            sources.indexOf(AirPlayPersistence.loadMicrophoneSource(this)).coerceAtLeast(0)) {
+            AirPlayPersistence.saveMicrophoneSource(this, sources[it])
+        }
+        parent.addView(label(getString(R.string.mic_source_note), 14, MUTED).apply { setPadding(0, 0, 0, dp(12)) })
     }
 
     private fun mediaChannelControl(parent: LinearLayout) {
@@ -866,6 +976,36 @@ class RigPlayActivity : ComponentActivity() {
         dialog.show()
     }
 
+    /** #41: the game car (SimHub telemetry), this tablet's GPS, or nothing. */
+    private fun locationSourceControl(card: LinearLayout) {
+        val sources = listOf(LocationSource.SIMHUB, LocationSource.TABLET, LocationSource.NONE)
+        val labels = listOf(
+            R.string.telemetry_location_source_simhub,
+            R.string.telemetry_location_source_tablet,
+            R.string.telemetry_location_source_none,
+        ).map(::getString)
+        val current = sources.indexOf(AirPlayPersistence.loadLocationSource(this))
+        choice(card, getString(R.string.telemetry_location_source), labels, current, reconnects = false) {
+            val source = sources[it]
+            AirPlayPersistence.saveLocationSource(this, source)
+            if (source == LocationSource.TABLET && !hasPreciseLocation()) {
+                locationPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+            } else {
+                reconnectForLocation()
+            }
+        }
+        card.addView(label(getString(R.string.telemetry_location_source_desc), 14, MUTED))
+        // #45: applies live, no reconnect.
+        toggle(card, getString(R.string.telemetry_night_from_simhub), getString(R.string.telemetry_night_from_simhub_desc),
+            AirPlayPersistence.loadNightFromSimHub(this)) { AirPlayPersistence.saveNightFromSimHub(this, it) }
+        // #46: part of the iAP2 identification, so a running session reconnects.
+        toggle(card, getString(R.string.telemetry_vehicle_status), getString(R.string.telemetry_vehicle_status_desc),
+            AirPlayPersistence.loadSimHubVehicleStatus(this)) {
+            AirPlayPersistence.saveSimHubVehicleStatus(this, it)
+            reconnectForLocation()
+        }
+    }
+
     private fun hasPreciseLocation() =
         checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
@@ -916,6 +1056,10 @@ class RigPlayActivity : ComponentActivity() {
             render()
             toast(getString(R.string.save_the_name_and_password_from_the_tablet_hotspot_settings))
             return
+        }
+        if (wireless && AirPlayPersistence.loadWirelessHotspotMode(this) == WirelessHotspotMode.EXISTING_NETWORK &&
+            hotspotError(AirPlayPersistence.loadExistingNetworkSsid(this), AirPlayPersistence.loadExistingNetworkPassphrase(this)) != null) {
+            page = "connection"; render(); toast(getString(R.string.existing_network_details_missing)); return
         }
         if (wireless && carHotspotOff()) { carHotspotOffDialog(); return }
         if (wireless && RigPlayPreferences.phoneAddress(this) == null) {
@@ -1272,6 +1416,9 @@ class RigPlayActivity : ComponentActivity() {
     private fun space(height: Int) = View(this).apply { layoutParams = LinearLayout.LayoutParams(1, dp(height)) }
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
     companion object {
+        /** Set by [BootReceiver]: rigPlay was opened after boot rather than by the user. */
+        const val EXTRA_FROM_BOOT = "com.shilapi.xcertplay.extra.FROM_BOOT"
+
         private val BG = Color.rgb(12, 17, 27)
         private val SURFACE = Color.rgb(21, 30, 44)
         private val BORDER = Color.rgb(42, 56, 75)

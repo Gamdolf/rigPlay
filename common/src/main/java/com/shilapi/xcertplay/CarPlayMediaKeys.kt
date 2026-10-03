@@ -113,6 +113,7 @@ internal object CarPlayMediaKeys {
                     artwork = update.artworkTransferId?.let { id ->
                         if (artworkCache.containsKey(id)) artworkCache[id] else null
                     }
+                    artwork?.let(SimHubArtworkPublisher::onArtwork)
                 }
                 if (nowPlaying.elapsedMillis != update.elapsedMillis) elapsedUpdatedAt = SystemClock.elapsedRealtime()
                 nowPlaying = update
@@ -139,6 +140,7 @@ internal object CarPlayMediaKeys {
         while (artworkCache.size > MAX_CACHED_ARTWORK) artworkCache.remove(artworkCache.keys.first())
         if (nowPlaying.artworkTransferId == id) {
             artwork = decoded
+            decoded?.let(SimHubArtworkPublisher::onArtwork) // #47
             session?.setMetadata(androidMetadata(nowPlaying, artwork))
         }
     }

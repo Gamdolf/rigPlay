@@ -19,6 +19,8 @@ class BootReceiver : BroadcastReceiver() {
                     Intent.FLAG_ACTIVITY_CLEAR_TOP or
                     Intent.FLAG_ACTIVITY_SINGLE_TOP,
             )
+            // With a paired PC, rigPlay goes on to the idle screen (#39).
+            putExtra(RigPlayActivity.EXTRA_FROM_BOOT, true)
         }
         try {
             context.startActivity(launch)

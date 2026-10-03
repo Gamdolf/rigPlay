@@ -1,5 +1,9 @@
 package com.shilapi.xcertplay.network
 
+import android.content.Context
+import android.net.wifi.WifiManager
+import android.os.Build
+import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
 import java.io.Closeable
 import java.net.Inet4Address
 import java.net.Inet6Address
@@ -13,6 +17,8 @@ internal class WirelessStartupDiagnostics(
     private val sample: () -> String,
     private val log: (String) -> Unit,
     private val intervalMillis: Long = 10_000,
+    /** Fixed per-session facts (mode, interface, channel) repeated on every line; see [wirelessStartupContext]. */
+    private val context: String = "",
 ) : Closeable {
     private val closed = AtomicBoolean(false)
     private val startedNanos = System.nanoTime()
@@ -63,7 +69,7 @@ internal class WirelessStartupDiagnostics(
                 }
                 if (closed.get()) return
                 lastSnapshot = snapshot
-                emit("${summary()} $snapshot")
+                emit(listOf(summary(), context, snapshot).filter { it.isNotEmpty() }.joinToString(" "))
                 Thread.sleep(intervalMillis)
             }
         } catch (_: InterruptedException) {
@@ -74,7 +80,7 @@ internal class WirelessStartupDiagnostics(
     @Synchronized override fun close() {
         if (!closed.compareAndSet(false, true)) return
         worker.interrupt()
-        emit("${summary()} observation=ended $lastSnapshot".trimEnd())
+        emit(listOf(summary(), context, "observation=ended", lastSnapshot).filter { it.isNotEmpty() }.joinToString(" "))
     }
 
     private fun emit(message: String) {
@@ -82,6 +88,40 @@ internal class WirelessStartupDiagnostics(
             // An observer cannot fail startup or teardown.
         }
     }
+}
+
+/**
+ * The wireless mode and the network it handed to the iPhone, for exported reports (#33). Contains no
+ * SSID, password or hardware address, and avoids the words the report redactor drops lines for
+ * ("ssid", "pass"); `networkNameReadable` is `not_applicable` when rigPlay owns the network.
+ */
+fun wirelessStartupContext(
+    mode: WirelessHotspotMode,
+    info: WirelessHotspotInfo,
+): String = "mode=${mode.name} iface=${info.interfaceName ?: "unknown"} channel=${info.channel} " +
+    "frequency=${info.frequencyMHz?.let { "${it}MHz" } ?: "unknown"} " +
+    "networkNameReadable=${info.ssidReadable?.toString() ?: "not_applicable"}"
+
+/**
+ * What the Wi-Fi chip reports it can run at once, logged at each wireless start for the tablet spike
+ * (#33). `unknown` where the Android version lacks the API or the firmware throws.
+ */
+fun wifiConcurrencySummary(context: Context): String {
+    val wifi = context.applicationContext.getSystemService(WifiManager::class.java)
+        ?: return "wifiRadio=unavailable"
+    fun read(value: () -> Boolean): String = runCatching(value).map(Boolean::toString).getOrDefault("unknown")
+    val staAp = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        read { wifi.isStaApConcurrencySupported }
+    } else {
+        "unknown"
+    }
+    val staLocalOnly = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        read { wifi.isStaConcurrencyForLocalOnlyConnectionsSupported }
+    } else {
+        "unknown"
+    }
+    return "p2pSupported=${read { wifi.isP2pSupported }} staApConcurrency=$staAp " +
+        "staLocalOnlyConcurrency=$staLocalOnly band5GHz=${read { wifi.is5GHzBandSupported }}"
 }
 
 /** Counts are useful in exported reports; literals, hardware identifiers and names are not. */

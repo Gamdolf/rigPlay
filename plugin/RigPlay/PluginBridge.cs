@@ -89,6 +89,12 @@ namespace RigPlayPlugin
             plugin.AttachDelegate("NowPlaying.Playing", () => s().Playing);
             plugin.AttachDelegate("NowPlaying.Position", () => plugin.Host?.NowPlayingPosition ?? 0.0);
             plugin.AttachDelegate("NowPlaying.Duration", () => s().Duration);
+            plugin.AttachDelegate("NowPlaying.ArtworkPath", () => s().ArtworkPath);
+            plugin.AttachDelegate("Nav.Active", () => s().NavActive);
+            plugin.AttachDelegate("Nav.Maneuver", () => s().NavManeuver);
+            plugin.AttachDelegate("Nav.Distance", () => s().NavDistance);
+            plugin.AttachDelegate("Nav.Road", () => s().NavRoad);
+            plugin.AttachDelegate("Nav.Eta", () => s().NavEta);
 
             foreach (SurfaceAction action in Enum.GetValues(typeof(SurfaceAction)))
             {
@@ -98,7 +104,7 @@ namespace RigPlayPlugin
                     try { plugin.Host?.RunAction(a); } catch (Exception ex) { Log.Error("Action " + a + " failed", ex); }
                 }, (manager, name) => { });
             }
-            Log.Info("SimHub properties RigPlay.TabletConnected, PhoneConnected, Screen, NowPlaying.* and actions RigPlay."
+            Log.Info("SimHub properties RigPlay.TabletConnected, PhoneConnected, Screen, NowPlaying.*, Nav.* and actions RigPlay."
                 + string.Join(", RigPlay.", Enum.GetNames(typeof(SurfaceAction))) + " registered");
         }
 

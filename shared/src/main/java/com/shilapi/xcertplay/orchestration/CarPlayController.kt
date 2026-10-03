@@ -43,6 +43,9 @@ import com.shilapi.xcertplay.network.WirelessHotspotBackend
 import com.shilapi.xcertplay.network.WirelessHotspotManager
 import com.shilapi.xcertplay.network.WirelessInterfaceDiagnostics
 import com.shilapi.xcertplay.network.WirelessStartupDiagnostics
+import com.shilapi.xcertplay.network.ExistingNetworkHotspotManager
+import com.shilapi.xcertplay.network.wirelessStartupContext
+import com.shilapi.xcertplay.network.wifiConcurrencySummary
 import com.shilapi.xcertplay.transport.BlockingDuplexByteStream
 import com.shilapi.xcertplay.transport.BluetoothRfcommDuplexStream
 import com.shilapi.xcertplay.transport.Iap2IdentificationConfig
@@ -658,6 +661,10 @@ class CarPlayController(
             )
             var startedBonjour: CarPlayBonjour? = null
             val diagnostics = WirelessStartupDiagnostics(
+                context = wirelessStartupContext(
+                    WirelessModeRequirements.effectiveMode(config.wirelessHotspotMode, Build.VERSION.SDK_INT),
+                    hotspotInfo,
+                ),
                 sample = {
                     "${WirelessInterfaceDiagnostics.snapshot(hotspotInfo.interfaceName)} " +
                         "${startedHotspot?.connectionDiagnosticSnapshot() ?: "association=unknown"} " +
@@ -1478,14 +1485,10 @@ class CarPlayController(
             type.equals("disable-bluetooth", ignoreCase = true)
 
     private fun startWirelessHotspot(generation: Int): WirelessHotspotInfo {
-        val hotspotMode = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
-            config.wirelessHotspotMode == WirelessHotspotMode.WIFI_P2P
-        ) {
-            WirelessHotspotMode.LOCAL_ONLY_HOTSPOT
-        } else {
-            config.wirelessHotspotMode
-        }
-        if (hotspotMode == WirelessHotspotMode.MANUAL &&
+        val hotspotMode = WirelessModeRequirements.effectiveMode(config.wirelessHotspotMode, Build.VERSION.SDK_INT)
+        debugLog("wireless radio mode=${hotspotMode.name} ${wifiConcurrencySummary(appContext)}")
+        // Only the tablet-hotspot mode needs tethering on; the existing-network mode joins the router's network.
+        if (WirelessModeRequirements.requiresTethering(hotspotMode) &&
             com.shilapi.xcertplay.network.CarHotspotStatus.isEnabled(appContext) == false
         ) {
             throw IOException("The car hotspot is off. Turn it on in the car settings and connect again.")
@@ -1501,6 +1504,13 @@ class CarPlayController(
                 band = config.manualHotspotBand,
                 channel = config.manualHotspotChannel,
                 security = config.manualHotspotSecurity,
+                onDiagnostic = ::debugLog,
+            )
+            // Uses the station interface itself; ManualHotspotManager's interface search is not involved.
+            WirelessHotspotMode.EXISTING_NETWORK -> ExistingNetworkHotspotManager(
+                context = appContext,
+                ssid = config.existingNetworkSsid.orEmpty(),
+                passphrase = config.existingNetworkPassphrase.orEmpty(),
                 onDiagnostic = ::debugLog,
             )
         }

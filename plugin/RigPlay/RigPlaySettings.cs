@@ -12,8 +12,11 @@ namespace RigPlayPlugin
     public class RigPlaySettings
     {
         /// <summary>The shape of this file; bump it when a field changes meaning so Normalize can migrate.</summary>
-        /// <remarks>2: protocol ports (23711/23712), host id, token hashes instead of tokens.</remarks>
-        public const int CurrentSchemaVersion = 2;
+        /// <remarks>
+        /// 2: protocol ports (23711/23712), host id, token hashes instead of tokens. 3: Telemetry (#40).
+        /// 4: Telemetry.Tracks, the track calibrations of fake GPS strategy C (#44). 5: MicEnabled and MicDeviceId (#34).
+        /// </remarks>
+        public const int CurrentSchemaVersion = 5;
 
         /// <summary>Placeholder defaults of schema 1, migrated by Normalize.</summary>
         internal const int LegacyControlPort = 18877;
@@ -62,7 +65,19 @@ namespace RigPlayPlugin
 
         public bool Muted { get; set; }
 
+        /// <summary>
+        /// "Microphone to the phone" (#34, spec §6.13): a tablet that asks with micStart gets this PC's microphone for Siri
+        /// and calls. Off: micStart is ignored and state.mic.enabled is false, so tablets use their own microphone.
+        /// </summary>
+        public bool MicEnabled { get; set; } = true;
+
+        /// <summary>The input device sent to the phone; empty for the Windows default recording device.</summary>
+        public string MicDeviceId { get; set; } = "";
+
         public List<PairedTablet> PairedTablets { get; set; } = new List<PairedTablet>();
+
+        /// <summary>The "Data to CarPlay" section: what goes into the telemetry message (spec §6.9).</summary>
+        public TelemetrySettings Telemetry { get; set; } = new TelemetrySettings();
 
         /// <summary>
         /// Clamps and repairs every value in place, so the rest of the plugin can trust the object: ports in range
@@ -78,7 +93,9 @@ namespace RigPlayPlugin
                 if (AudioPort == LegacyAudioPort) AudioPort = ProtocolDefaults.AudioPort;
                 SchemaVersion = CurrentSchemaVersion;
             }
-            if (SchemaVersion < 1 || SchemaVersion > CurrentSchemaVersion) SchemaVersion = CurrentSchemaVersion;
+            // 2 -> 3 only added Telemetry, 3 -> 4 Telemetry.Tracks and 4 -> 5 the microphone fields; a file without them gets
+            // the defaults, so any in-range older version is simply stamped with the current one.
+            if (SchemaVersion != CurrentSchemaVersion) SchemaVersion = CurrentSchemaVersion;
 
             if (!IsValidHostId(HostId)) HostId = NewHostId();
             HostName = Clean(HostName);
@@ -98,8 +115,11 @@ namespace RigPlayPlugin
             SelectedDashboard = Clean(SelectedDashboard);
             IdleDashboard = Clean(IdleDashboard);
             AudioDeviceId = Clean(AudioDeviceId);
+            MicDeviceId = Clean(MicDeviceId);
 
             Volume = Math.Min(MaxVolume, Math.Max(MinVolume, Volume));
+
+            Telemetry = (Telemetry ?? new TelemetrySettings()).Normalize();
 
             PairedTablets = (PairedTablets ?? new List<PairedTablet>())
                 .Where(t => t != null && !string.IsNullOrWhiteSpace(t.Id))
@@ -142,6 +162,124 @@ namespace RigPlayPlugin
         internal static string Clean(string value)
         {
             return value == null ? "" : value.Trim();
+        }
+    }
+
+    /// <summary>
+    /// The "Data to CarPlay" section (#40): a master switch, one switch per telemetry field, and the fake-GPS strategy
+    /// that produces lat/lon/alt. gameRunning is always sent: it is how the tablet learns that the game stopped.
+    /// </summary>
+    public class TelemetrySettings
+    {
+        /// <summary>Master switch: nothing is sent while it is off.</summary>
+        public bool Enabled { get; set; } = true;
+
+        public bool SendSpeed { get; set; } = true;
+        public bool SendGear { get; set; } = true;
+        public bool SendHeading { get; set; } = true;
+        public bool SendNight { get; set; } = true;
+        public bool SendFuel { get; set; } = true;
+        public bool SendRange { get; set; } = true;
+        public bool SendRpm { get; set; } = true;
+        public bool SendTrackName { get; set; } = true;
+        public bool SendSessionType { get; set; } = true;
+
+        /// <summary>How lat/lon/alt are made up (<see cref="Telemetry.GpsStrategies"/>); "off" sends no position.</summary>
+        public string GpsStrategy { get; set; } = global::RigPlayPlugin.Telemetry.GpsStrategies.Off;
+
+        /// <summary>Default origin: the Nürburgring, a place every sim racer knows.</summary>
+        public const double DefaultOriginLat = 50.3356;
+        public const double DefaultOriginLon = 6.9475;
+        public const double DefaultOriginAlt = 617.0;
+
+        /// <summary>The origin of the fake GPS (#42): latitude in degrees, WGS 84.</summary>
+        public double OriginLat { get; set; } = DefaultOriginLat;
+
+        /// <summary>Longitude in degrees, WGS 84.</summary>
+        public double OriginLon { get; set; } = DefaultOriginLon;
+
+        /// <summary>Altitude in metres above mean sea level.</summary>
+        public double OriginAlt { get; set; } = DefaultOriginAlt;
+
+        public const double DefaultDriftRadiusKm = 20;
+        public const double MinDriftRadiusKm = 0.5;
+        public const double MaxDriftRadiusKm = 1000;
+        public const int DefaultStationaryResetSec = 30;
+        public const int MaxStationaryResetSec = 3600;
+
+        /// <summary>Dead reckoning (#43): further than this from the origin, the car is put back on it.</summary>
+        public double DriftRadiusKm { get; set; } = DefaultDriftRadiusKm;
+
+        /// <summary>Dead reckoning: standing still this many seconds puts the car back on the origin; 0 never.</summary>
+        public int StationaryResetSec { get; set; } = DefaultStationaryResetSec;
+
+        /// <summary>Night mode (#45): "auto" (from the game), "day" or "night" (<see cref="global::RigPlayPlugin.Telemetry.NightModes"/>).</summary>
+        public string NightMode { get; set; } = global::RigPlayPlugin.Telemetry.NightModes.Auto;
+
+        /// <summary>
+        /// Optional SimHub property that says "night" when non-zero or true (for example a game's headlight or
+        /// time-of-day flag); in Auto it wins over the built-in sources. Empty: not used.
+        /// </summary>
+        public string NightProperty { get; set; } = "";
+
+        /// <summary>
+        /// Strategy C (#44): the user's track calibrations (origin, rotation, scale, axes, recorded centreline), one per
+        /// normalised track key. They win over the shipped table (Resources/tracks.json).
+        /// </summary>
+        public List<global::RigPlayPlugin.Telemetry.TrackCalibration> Tracks { get; set; } = new List<global::RigPlayPlugin.Telemetry.TrackCalibration>();
+
+        private int tracksRevision;
+
+        /// <summary>Bumped by <see cref="MarkTracksChanged"/>; part of the strategy key, so strategy C rebuilds. Not saved.</summary>
+        internal int TracksRevision => tracksRevision;
+
+        /// <summary>Call after editing <see cref="Tracks"/> (or a calibration in it) so strategy C picks the change up.</summary>
+        public void MarkTracksChanged()
+        {
+            System.Threading.Interlocked.Increment(ref tracksRevision);
+        }
+
+        /// <summary>The user's calibration for a normalised track key; null when none.</summary>
+        public global::RigPlayPlugin.Telemetry.TrackCalibration FindTrack(string trackKey)
+        {
+            return Tracks?.FirstOrDefault(t => t != null && string.Equals(t.TrackKey, trackKey, StringComparison.Ordinal));
+        }
+
+        /// <summary>True when at least one data field would be sent (spec §6.9: nothing is sent otherwise).</summary>
+        public bool AnyFieldEnabled()
+        {
+            return SendSpeed || SendGear || SendHeading || SendNight || SendFuel || SendRange || SendRpm || SendTrackName || SendSessionType
+                || GpsStrategy != global::RigPlayPlugin.Telemetry.GpsStrategies.Off;
+        }
+
+        public TelemetrySettings Normalize()
+        {
+            if (!global::RigPlayPlugin.Telemetry.GpsStrategies.IsKnown(GpsStrategy)) GpsStrategy = global::RigPlayPlugin.Telemetry.GpsStrategies.Off;
+            if (!Finite(OriginLat) || OriginLat < -90 || OriginLat > 90 || !Finite(OriginLon) || OriginLon < -180 || OriginLon > 180)
+            {
+                OriginLat = DefaultOriginLat;
+                OriginLon = DefaultOriginLon;
+            }
+            if (!Finite(OriginAlt) || OriginAlt < -1000 || OriginAlt > 10000) OriginAlt = DefaultOriginAlt;
+            if (!Finite(DriftRadiusKm) || DriftRadiusKm < MinDriftRadiusKm || DriftRadiusKm > MaxDriftRadiusKm) DriftRadiusKm = DefaultDriftRadiusKm;
+            if (StationaryResetSec < 0 || StationaryResetSec > MaxStationaryResetSec) StationaryResetSec = DefaultStationaryResetSec;
+            if (!global::RigPlayPlugin.Telemetry.NightModes.IsKnown(NightMode)) NightMode = global::RigPlayPlugin.Telemetry.NightModes.Auto;
+            NightProperty = RigPlaySettings.Clean(NightProperty);
+            // One calibration per track key; a key that appears twice keeps its last entry (the newest edit).
+            Tracks = (Tracks ?? new List<global::RigPlayPlugin.Telemetry.TrackCalibration>())
+                .Where(t => t != null)
+                .Select(t => t.Normalize())
+                .Where(t => t.TrackKey.Length > 0)
+                .GroupBy(t => t.TrackKey, StringComparer.Ordinal)
+                .Select(g => g.Last())
+                .OrderBy(t => t.TrackKey, StringComparer.Ordinal)
+                .ToList();
+            return this;
+        }
+
+        private static bool Finite(double value)
+        {
+            return !double.IsNaN(value) && !double.IsInfinity(value);
         }
     }
 
