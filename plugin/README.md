@@ -38,6 +38,7 @@ codec against every file in [`protocol/fixtures/`](../protocol/fixtures/).
 | Audio header | `Protocol/AudioHeader.cs` | The 12-byte datagram header codec (§10.2). |
 | Beacon | `Net/DiscoveryBeacon.cs` | UDP 23710 every second, to each interface's directed broadcast and 255.255.255.255. |
 | Control server | `Net/ControlServer.cs`, `Net/ClientSession.cs` | TCP 23711 (configurable), newline JSON, hello/welcome, heartbeats, 5 s watchdog, one session per tablet, `shutdown` on exit, LAN peers only. |
+| Pairing | `Pairing/PairingService.cs` | PIN shown on the page (6 digits, 120 s, single use, 3 attempts, 5 starts/min), token issue and resume. Only the token's SHA-256 is stored (`PairedTablets[].TokenHash`). |
 | Host | `Core/RigPlayHost.cs` | Runs the above inside SimHub without depending on it; the page and the SimHub glue read it. |
 
 A port that cannot be bound is shown in the page's Status section and logged; the plugin keeps running. To poke the

@@ -12,7 +12,7 @@ namespace RigPlayPlugin.Tests
     {
         private static PairedTablet Tablet(string id, string name, string token, DateTime pairedAt)
         {
-            return new PairedTablet { Id = id, Name = name, Token = token, PairedAt = pairedAt };
+            return new PairedTablet { Id = id, Name = name, TokenHash = string.IsNullOrWhiteSpace(token) ? token : RigPlayPlugin.Pairing.PairingTokens.Hash(token.Trim()), PairedAt = pairedAt };
         }
 
         [Fact]
@@ -163,7 +163,7 @@ namespace RigPlayPlugin.Tests
             var a = settings.FindTablet("tab-a");
             Assert.NotNull(a);
             Assert.Equal("Driver", a.Name);
-            Assert.Equal("new", a.Token);
+            Assert.Equal(RigPlayPlugin.Pairing.PairingTokens.Hash("new"), a.TokenHash);
             Assert.Equal(late, a.PairedAt);
         }
 
@@ -230,7 +230,8 @@ namespace RigPlayPlugin.Tests
             Assert.Equal(42, copy.Volume);
             Assert.True(copy.Muted);
             var tablet = Assert.Single(copy.PairedTablets);
-            Assert.Equal("secret", tablet.Token);
+            Assert.Equal(RigPlayPlugin.Pairing.PairingTokens.Hash("secret"), tablet.TokenHash);
+            Assert.DoesNotContain("secret\"", json);
             Assert.Equal(pairedAt, tablet.PairedAt);
             Assert.Equal(DateTimeKind.Utc, tablet.PairedAt.Kind);
         }

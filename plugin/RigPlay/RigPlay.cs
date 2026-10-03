@@ -76,16 +76,18 @@ namespace RigPlayPlugin
             LoadSettings();
             Log.Info("Settings loaded: control port " + Settings.ControlPort + ", discovery port " + Settings.DiscoveryPort
                 + ", audio port " + Settings.AudioPort + ", " + Settings.PairedTablets.Count + " paired tablet(s)");
-            // Writes the normalised file back, so a repaired or first-run file is on disk from the start.
-            SaveSettings();
             bridge = new PluginBridge(this);
             bridge.Start(pluginManager);
+            // TODO(merge): wire RigPlay.Audio to Host: Host.AudioEnabled, Host.AudioStart/AudioStop/SessionLost,
+            // Receiver.SourceFilter = Host.IsPairedAddress, Receiver.AutoStartOnFirstFlag = false (see RigPlayHost).
+            // Writes the normalised file back, so a repaired or first-run file is on disk from the start.
+            SaveSettings();
         }
 
         public void End(PluginManager pluginManager)
         {
-            bridge?.Stop();
             SaveSettings();
+            bridge?.Stop();
             Log.Info("rigPlay plugin stopped");
         }
 

@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using RigPlayPlugin.Net;
+using RigPlayPlugin.Pairing;
 using RigPlayPlugin.Protocol;
 
 namespace RigPlayPlugin
@@ -34,7 +35,12 @@ namespace RigPlayPlugin
             this.env = env ?? new HostEnvironment();
             this.clock = clock ?? SystemClock.Instance;
             Timings = timings ?? SessionTimings.Default;
+            Pairing = new PairingService(settings, () => this.env.SaveSettings(), this.clock);
+            Pairing.Changed += RaiseChanged;
         }
+
+        /// <summary>PINs, tokens and the paired-tablet list (spec §8).</summary>
+        public PairingService Pairing { get; }
 
         public RigPlaySettings Settings { get; }
 
@@ -49,6 +55,12 @@ namespace RigPlayPlugin
         /// receiver (#24) sets this; until it does, tablets are told to play locally.
         /// </summary>
         public Func<bool> AudioEnabled { get; set; } = () => false;
+
+        /// <summary>Tests: listen on this port instead of Settings.ControlPort (0 picks a free one).</summary>
+        public int? ControlPortOverride { get; set; }
+
+        /// <summary>Tests turn the beacon off so they do not broadcast on the LAN.</summary>
+        public bool BeaconEnabled { get; set; } = true;
 
         /// <summary>Something the page shows changed (sessions, status, server state). Raised on any thread.</summary>
         public event Action Changed;
@@ -72,7 +84,7 @@ namespace RigPlayPlugin
             }
             StartServer();
             Beacon = new DiscoveryBeacon(BuildBeacon);
-            Beacon.Start();
+            if (BeaconEnabled) Beacon.Start();
             RaiseChanged();
         }
 
@@ -145,11 +157,32 @@ namespace RigPlayPlugin
             };
         }
 
+        /// <summary>Deny on the page: discards the pending PIN and tells the tablet `denied` (spec §8 step 4).</summary>
+        public void DenyPairing(string tabletId)
+        {
+            if (!Pairing.Deny(tabletId)) return;
+            var session = Server?.FindByTabletId(tabletId);
+            if (session == null || session.State != SessionState.Unpaired) return;
+            session.Send(PairResultMessage.Failure(PairReasons.Denied));
+            session.RestartPairRequestTimer();
+        }
+
+        /// <summary>Forget on the page: deletes the token hash and closes the tablet's live session with `forgotten`.</summary>
+        public void ForgetTablet(string tabletId)
+        {
+            var known = Pairing.Forget(tabletId);
+            var session = Server?.FindByTabletId(tabletId);
+            if (session != null && (known || session.State == SessionState.Paired))
+                session.CloseWithError(ErrorCodes.Forgotten, "this tablet was removed on the PC");
+            RaiseChanged();
+        }
+
         private void StartServer()
         {
-            var server = new ControlServer(Settings.ControlPort, BuildWelcomeTemplate, Timings, clock)
+            var server = new ControlServer(ControlPortOverride ?? Settings.ControlPort, BuildWelcomeTemplate, Timings, clock)
             {
                 StateFactory = BuildState,
+                Pairing = Pairing,
             };
             server.SessionsChanged += RaiseChanged;
             Server = server;

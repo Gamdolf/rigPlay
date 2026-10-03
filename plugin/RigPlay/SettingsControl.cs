@@ -60,13 +60,7 @@ namespace RigPlayPlugin
 
         private FrameworkElement BuildPairing()
         {
-            var count = Settings.PairedTablets.Count;
-            var pair = Ui.PrimaryButton("Pair a tablet");
-            pair.IsEnabled = false;
-            return Ui.Section("Pairing",
-                "Pair a tablet once with a PIN; after that it connects on its own.",
-                Ui.Row("Paired tablets", count == 0 ? "None yet" : count.ToString()),
-                pair);
+            return new PairingSection(plugin).Build();
         }
 
         private FrameworkElement BuildDashboards()

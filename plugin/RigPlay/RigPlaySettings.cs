@@ -81,8 +81,10 @@ namespace RigPlayPlugin
             Volume = Math.Min(MaxVolume, Math.Max(MinVolume, Volume));
 
             PairedTablets = (PairedTablets ?? new List<PairedTablet>())
-                .Where(t => t != null && !string.IsNullOrWhiteSpace(t.Id) && !string.IsNullOrWhiteSpace(t.Token))
+                .Where(t => t != null && !string.IsNullOrWhiteSpace(t.Id))
                 .Select(t => t.Normalize())
+                // A tablet without a valid token hash could never resume; drop it rather than show a dead entry.
+                .Where(t => PairedTablet.IsTokenHash(t.TokenHash))
                 // One entry per tablet: a tablet that paired twice keeps its newest pairing.
                 .GroupBy(t => t.Id, StringComparer.Ordinal)
                 .Select(g => g.OrderByDescending(t => t.PairedAt).First())
@@ -131,8 +133,11 @@ namespace RigPlayPlugin
         /// <summary>Display name, as the tablet reported it or the user renamed it.</summary>
         public string Name { get; set; } = "";
 
-        /// <summary>Shared secret issued at pairing.</summary>
-        public string Token { get; set; } = "";
+        /// <summary>
+        /// SHA-256 of the token issued at pairing, lower-case hex. The token itself is never stored (spec §15); the
+        /// tablet presents it on every later connection and the plugin compares hashes.
+        /// </summary>
+        public string TokenHash { get; set; } = "";
 
         /// <summary>When pairing completed, in UTC.</summary>
         public DateTime PairedAt { get; set; }
@@ -140,12 +145,23 @@ namespace RigPlayPlugin
         public PairedTablet Normalize()
         {
             Id = RigPlaySettings.Clean(Id);
-            Token = RigPlaySettings.Clean(Token);
+            TokenHash = RigPlaySettings.Clean(TokenHash).ToLowerInvariant();
             Name = RigPlaySettings.Clean(Name);
             if (Name.Length == 0) Name = RigPlaySettings.DefaultTabletName;
             if (PairedAt.Kind == DateTimeKind.Local) PairedAt = PairedAt.ToUniversalTime();
             else if (PairedAt.Kind == DateTimeKind.Unspecified) PairedAt = DateTime.SpecifyKind(PairedAt, DateTimeKind.Utc);
             return this;
+        }
+
+        /// <summary>64 lower-case hex digits.</summary>
+        public static bool IsTokenHash(string value)
+        {
+            if (value == null || value.Length != 64) return false;
+            foreach (var c in value)
+            {
+                if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+            }
+            return true;
         }
     }
 }
