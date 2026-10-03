@@ -102,6 +102,8 @@ namespace RigPlayPlugin.Tests
         // Web dash probe
 
         /// <summary>A minimal HTTP server on loopback that answers every request with 200.</summary>
+        /// <remarks>Runs on its own thread with blocking I/O: the probe's 1 s budget must not depend on a pool
+        /// thread being free while the other tests saturate the pool on a small CI runner.</remarks>
         internal sealed class TinyHttpServer : IDisposable
         {
             private readonly TcpListener listener = new TcpListener(IPAddress.Loopback, 0);
@@ -110,24 +112,24 @@ namespace RigPlayPlugin.Tests
             public TinyHttpServer()
             {
                 listener.Start();
-                Task.Run(Loop);
+                new Thread(Loop) { IsBackground = true, Name = "TinyHttpServer" }.Start();
             }
 
             public int Port => ((IPEndPoint)listener.LocalEndpoint).Port;
 
-            private async Task Loop()
+            private void Loop()
             {
                 while (running)
                 {
                     try
                     {
-                        using (var client = await listener.AcceptTcpClientAsync())
+                        using (var client = listener.AcceptTcpClient())
                         {
                             var stream = client.GetStream();
                             var buffer = new byte[1024];
-                            await stream.ReadAsync(buffer, 0, buffer.Length);
+                            stream.Read(buffer, 0, buffer.Length);
                             var response = Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
-                            await stream.WriteAsync(response, 0, response.Length);
+                            stream.Write(response, 0, response.Length);
                         }
                     }
                     catch (Exception)
@@ -153,14 +155,17 @@ namespace RigPlayPlugin.Tests
             return port;
         }
 
+        // Well above the plugin's 1 s default: a loaded CI runner must not turn a reachable server into "not reachable".
+        private const int ProbeTimeoutMs = 5000;
+
         [Fact]
         public void TheProbeSeesAnHttpServerAndAClosedPort()
         {
             using (var http = new TinyHttpServer())
             {
-                Assert.True(WebDashProbe.Probe(http.Port, 1000));
+                Assert.True(WebDashProbe.Probe(http.Port, ProbeTimeoutMs));
             }
-            Assert.False(WebDashProbe.Probe(ClosedPort(), 1000));
+            Assert.False(WebDashProbe.Probe(ClosedPort(), ProbeTimeoutMs));
         }
 
         [Fact]
@@ -170,7 +175,7 @@ namespace RigPlayPlugin.Tests
             {
                 var port = http.Port;
                 var changes = 0;
-                var probe = new WebDashProbe(() => port);
+                var probe = new WebDashProbe(() => port, timeoutMs: ProbeTimeoutMs);
                 probe.Changed += () => changes++;
                 Assert.Null(probe.Current);
                 probe.ProbeNow();
