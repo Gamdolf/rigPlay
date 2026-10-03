@@ -13,21 +13,24 @@ import java.util.concurrent.TimeUnit
 /** Records what a sender does with the link, in order. */
 class FakeAudioTransport : SimHubAudioTransport {
     sealed class Event {
-        data class Start(val stream: AudioStream, val sampleRate: Int, val channels: Int) : Event()
+        data class Start(val stream: AudioStream, val sampleRate: Int, val channels: Int, val format: WireFormat = WireFormat.PCM_S16LE) : Event()
         data class Stop(val stream: AudioStream) : Event()
         data class Datagram(val datagram: AudioDatagram) : Event()
     }
 
     @Volatile var target: InetSocketAddress? = InetSocketAddress(InetAddress.getLoopbackAddress(), 23712)
     @Volatile var epoch: Long = 1L
+    /** What the plugin prefers (the first of its `state.audio.formats`). */
+    @Volatile var format: WireFormat = WireFormat.PCM_S16LE
     val events = LinkedBlockingQueue<Event>()
 
     override val audioTarget: InetSocketAddress? get() = target
+    override val audioFormat: WireFormat? get() = if (target == null) null else format
     override val audioEpoch: Long get() = epoch
 
     override fun audioStart(stream: AudioStream, sampleRate: Int, channels: Int, format: WireFormat): Boolean {
         if (target == null) return false
-        events.add(Event.Start(stream, sampleRate, channels))
+        events.add(Event.Start(stream, sampleRate, channels, format))
         return true
     }
 

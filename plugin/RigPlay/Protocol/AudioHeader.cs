@@ -20,7 +20,7 @@ namespace RigPlayPlugin.Protocol
         public const byte FlagStart = 0x01;
 
         public const byte FormatPcmS16Le = 1;
-        public const byte FormatOpusReserved = 2;
+        public const byte FormatOpus = 2;
 
         public const int MinSampleRateField = 80;
         public const int MaxSampleRateField = 480;
@@ -44,6 +44,8 @@ namespace RigPlayPlugin.Protocol
 
         /// <summary>Frame size in bytes for pcm_s16le.</summary>
         public int FrameBytes => 2 * Channels;
+
+        public bool IsOpus => Format == FormatOpus;
 
         public static byte StreamTypeOf(string stream)
         {
@@ -142,30 +144,47 @@ namespace RigPlayPlugin.Protocol
         }
 
         /// <summary>
-        /// Reads and checks a datagram from a tablet (spec §10.2): header fields valid for protocol 1 (stream 1-3,
-        /// rate field 80-480, 1 or 2 channels, format pcm_s16le) and a payload of at least one whole frame, a multiple
-        /// of the frame size, at most <see cref="AudioHeader.MaxPayloadBytes"/>. Returns null when valid, otherwise why not.
+        /// Reads and checks a datagram from a tablet (spec §10.2, §10.4): header fields valid (stream 1-3, rate field
+        /// 80-480, 1 or 2 channels, format pcm_s16le or opus) and a payload of at least one whole frame and a multiple
+        /// of the frame size for pcm_s16le, or one Opus packet of 1-1275 bytes whose TOC describes at least one frame
+        /// for opus, at most <see cref="AudioHeader.MaxPayloadBytes"/>. Returns null when valid, otherwise why not.
         /// </summary>
         public static string Validate(byte[] buffer, int offset, int length, out AudioHeader h)
         {
             if (!TryReadHeader(buffer, offset, length, out h)) return "shorter than the 12-byte header";
             if (h.StreamType < AudioHeader.StreamMedia || h.StreamType > AudioHeader.StreamTelephony) return "invalid streamType " + h.StreamType;
-            if (h.Format != AudioHeader.FormatPcmS16Le) return "invalid format " + h.Format;
+            if (h.Format != AudioHeader.FormatPcmS16Le && h.Format != AudioHeader.FormatOpus) return "invalid format " + h.Format;
             if (h.Channels != 1 && h.Channels != 2) return "invalid channels " + h.Channels;
             if (h.SampleRateField < AudioHeader.MinSampleRateField || h.SampleRateField > AudioHeader.MaxSampleRateField)
                 return "sampleRate field " + h.SampleRateField + " outside 80-480";
             var payload = length - AudioHeader.Size;
+            if (payload > AudioHeader.MaxPayloadBytes) return "payload of " + payload + " bytes exceeds " + AudioHeader.MaxPayloadBytes;
+            if (h.IsOpus)
+            {
+                if (payload < 1) return "no Opus packet";
+                if (payload > RigPlayPlugin.Audio.AudioHeader.MaxOpusPacketBytes) return "Opus packet of " + payload + " bytes exceeds " + RigPlayPlugin.Audio.AudioHeader.MaxOpusPacketBytes;
+                if (RigPlayPlugin.Audio.OpusToc.Frames(buffer, offset + AudioHeader.Size, payload, h.SampleRateHz) <= 0) return "Opus packet with no frame";
+                return null;
+            }
             if (payload < h.FrameBytes) return "no complete frame";
             if (payload % h.FrameBytes != 0) return "payload of " + payload + " bytes is not a whole number of frames";
-            if (payload > AudioHeader.MaxPayloadBytes) return "payload of " + payload + " bytes exceeds " + AudioHeader.MaxPayloadBytes;
             return null;
         }
 
-        /// <summary>Checks a datagram and returns its samples; throws <see cref="ProtocolException"/> when invalid.</summary>
+        /// <summary>Sample frames a valid datagram stands for: whole PCM frames, or what an Opus packet's TOC says.</summary>
+        public static int Frames(byte[] buffer, int offset, int length, AudioHeader h)
+        {
+            var payload = length - AudioHeader.Size;
+            if (h.IsOpus) return RigPlayPlugin.Audio.OpusToc.Frames(buffer, offset + AudioHeader.Size, payload, h.SampleRateHz);
+            return payload / h.FrameBytes;
+        }
+
+        /// <summary>Checks a pcm_s16le datagram and returns its samples; throws <see cref="ProtocolException"/> when invalid or opus.</summary>
         public static short[] Decode(byte[] datagram, out AudioHeader h)
         {
             var problem = Validate(datagram, 0, datagram == null ? 0 : datagram.Length, out h);
             if (problem != null) throw new ProtocolException(problem);
+            if (h.IsOpus) throw new ProtocolException("an opus datagram has no PCM samples");
             var count = (datagram.Length - AudioHeader.Size) / 2;
             var samples = new short[count];
             for (var i = 0; i < count; i++)

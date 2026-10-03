@@ -86,6 +86,33 @@ namespace RigPlayPlugin.Tests.Audio
         }
 
         [Fact]
+        public void OpusIsOfferedFirstOnlyWhileTheSettingIsOnAndAChangeIsPushed()
+        {
+            Assert.True(OpusSupport.Available);
+            receiver.OpusEnabled = true;
+            using (var t = new FakeTablet(host.Server.Port))
+            {
+                Pair(t);
+                using (var glue = new AudioGlue(host, receiver))
+                {
+                    var state = t.Expect<StateMessage>();
+                    Assert.Equal(new List<string> { "opus", "pcm_s16le" }, state.Audio.Formats);
+
+                    // The setting goes off (AudioPipeline.ApplyOpus): the next state lists PCM only.
+                    receiver.OpusEnabled = false;
+                    glue.ListenerChanged();
+                    Assert.Equal(new List<string> { "pcm_s16le" }, t.Expect<StateMessage>().Audio.Formats);
+
+                    // And an opus audioStart is refused while it is off.
+                    t.Send(new AudioStartMessage { Stream = "media", Format = "opus", SampleRate = 48000, Channels = 2 });
+                    t.Send(new AudioStartMessage { Stream = "alt", Format = "pcm_s16le", SampleRate = 48000, Channels = 2 });
+                    Assert.True(FakeTablet.WaitFor(() => receiver.IsStarted(AudioStreamType.Alt)));
+                    Assert.False(receiver.IsStarted(AudioStreamType.Media));
+                }
+            }
+        }
+
+        [Fact]
         public void APairedTabletsStreamPlaysAndOtherSourcesAreDropped()
         {
             using (new AudioGlue(host, receiver))

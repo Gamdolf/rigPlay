@@ -26,6 +26,12 @@ interface SimHubAudioTransport {
     val audioTarget: InetSocketAddress?
 
     /**
+     * The format to send in: the first of `state.audio.formats` the tablet knows (§6.6, §10.4), so the
+     * plugin's preference decides. `null` when there is none (and [audioTarget] is then `null` too).
+     */
+    val audioFormat: AudioFormat? get() = AudioFormat.PCM_S16LE
+
+    /**
      * Changes whenever a new Paired session begins. Link loss stops every stream on the plugin (§10.1),
      * so a stream announced in an older epoch is announced again before more datagrams are sent.
      */
@@ -64,12 +70,19 @@ class SimHubLinkAudioTransport(
         runCatching { socket.trafficClass = EXPEDITED_FORWARDING_TOS }
     }
 
+    override val audioFormat: AudioFormat?
+        get() {
+            val state = link.state
+            if (!state.audioEnabled) return null
+            return preferredFormat(state.audio?.formats ?: return null)
+        }
+
     override val audioTarget: InetSocketAddress?
         get() {
             val state = link.state
             if (!state.audioEnabled) return null
             val audio = state.audio ?: return null
-            if (SimHubProtocol.FORMAT_PCM_S16LE !in audio.formats) return null
+            if (preferredFormat(audio.formats) == null) return null
             val host = state.host ?: return null
             resolved?.let { if (it.host == host && it.port == audio.port) return it.address }
             // The host is the beacon's (or the stored) IP literal, so this does not hit DNS in practice.
@@ -100,5 +113,8 @@ class SimHubLinkAudioTransport(
     companion object {
         /** IP TOS byte for DSCP EF (46 << 2): WMM access category voice. */
         const val EXPEDITED_FORWARDING_TOS = 0xB8
+
+        /** The first format of `state.audio.formats` this tablet can send; names it does not know are skipped. */
+        fun preferredFormat(formats: List<String>): AudioFormat? = formats.firstNotNullOfOrNull(AudioFormat::fromWire)
     }
 }

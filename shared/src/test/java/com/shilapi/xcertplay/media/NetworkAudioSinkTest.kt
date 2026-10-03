@@ -4,6 +4,7 @@ import com.shilapi.xcertplay.airplay.AudioCodecKind
 import com.shilapi.xcertplay.airplay.AudioFormat
 import com.shilapi.xcertplay.airplay.AudioStreamId
 import com.shilapi.xcertplay.media.FakeAudioTransport.Event
+import com.shilapi.xcertplay.simhub.AudioFormat as WireFormat
 import com.shilapi.xcertplay.simhub.AudioStream
 import com.shilapi.xcertplay.simhub.SimHubDiscovery
 import java.util.concurrent.CopyOnWriteArrayList
@@ -220,13 +221,86 @@ class NetworkAudioSinkTest {
         assertEquals(1L, sink.stats.timestampSkips)
     }
 
+    @Test fun opusIsSentWhenThePluginPrefersIt() {
+        val encoders = CopyOnWriteArrayList<FakeOpusEncoder>()
+        transport.format = WireFormat.OPUS
+        sink = NetworkAudioSink(transport = { transport }, opusEncoderFactory = { rate, ch -> FakeOpusEncoder(rate, ch).also { encoders += it } }, log = {})
+        assertEquals(WireFormat.OPUS, sink.wireFormat)
+        sink.onAudioRtp(music, musicFormat, rtp(960, 2), 0)
+        sink.onAudioRtp(music, musicFormat, rtp(960, 2, first = 1920), 960)
+        sink.onAudioStopped(music)
+
+        val events = transport.drain()
+        assertEquals(Event.Start(AudioStream.MEDIA, 48_000, 2, WireFormat.OPUS), events.first())
+        assertEquals(Event.Stop(AudioStream.MEDIA), events.last())
+        val datagrams = events.filterIsInstance<Event.Datagram>().map { it.datagram }
+        assertEquals(2, datagrams.size)
+        assertTrue(datagrams.all { it.header.format == WireFormat.OPUS })
+        assertEquals(listOf(0L, 960L), datagrams.map { it.header.timestamp })
+        assertEquals(listOf(960, 960), datagrams.map { it.frames })
+        assertEquals(1, encoders.size)
+        assertEquals(48_000, encoders[0].sampleRate)
+        assertTrue(encoders[0].closed)
+        assertEquals(0L, sink.stats.opusFallbacks)
+    }
+
+    @Test fun fortyFourKiloHertzIsResampledToFortyEightForOpus() {
+        transport.format = WireFormat.OPUS
+        sink = NetworkAudioSink(transport = { transport }, opusEncoderFactory = { rate, ch -> FakeOpusEncoder(rate, ch) }, log = {})
+        val cd = AudioFormat(AudioCodecKind.LPCM, 44_100, 2, 100, "media")
+        sink.onAudioRtp(music, cd, rtp(882, 2), 0)
+        sink.onAudioRtp(music, cd, rtp(882, 2), 882)
+        assertEquals(Event.Start(AudioStream.MEDIA, 48_000, 2, WireFormat.OPUS), transport.await<Event.Start>())
+        assertEquals(48_000, transport.await<Event.Datagram>().datagram.header.sampleRateHz)
+
+        // Mono 16 kHz is a rate Opus takes: it stays as it is.
+        val siri = AudioStreamId(100, "speechrecognition")
+        sink.onAudioRtp(siri, AudioFormat(AudioCodecKind.LPCM, 16_000, 1, 100, "speechrecognition"), rtp(640, 1), 0)
+        assertEquals(Event.Start(AudioStream.ALT, 16_000, 1, WireFormat.OPUS), transport.await<Event.Start>())
+        assertEquals(320, transport.await<Event.Datagram>().datagram.frames)
+    }
+
+    @Test fun withoutAnOpusEncoderTheSinkFallsBackToPcm() {
+        transport.format = WireFormat.OPUS
+        sink = NetworkAudioSink(transport = { transport }, opusEncoderFactory = { _, _ -> throw IllegalStateException("no codec") }, log = {})
+        val cd = AudioFormat(AudioCodecKind.LPCM, 44_100, 2, 100, "media")
+        sink.onAudioRtp(music, cd, rtp(441, 2), 0) // this chunk is lost to the failed encoder
+        sink.onAudioRtp(music, cd, rtp(441, 2), 441)
+        sink.onAudioRtp(music, cd, rtp(441, 2), 882)
+        sink.onAudioStopped(music)
+
+        val events = transport.drain()
+        // PCM at the source rate, not the Opus rate: 44.1 kHz needs no resampling for PCM.
+        assertEquals(listOf(Event.Start(AudioStream.MEDIA, 44_100, 2, WireFormat.PCM_S16LE)), events.filterIsInstance<Event.Start>())
+        assertTrue(events.filterIsInstance<Event.Datagram>().all { it.datagram.header.format == WireFormat.PCM_S16LE })
+        assertEquals(1L, sink.stats.opusFallbacks)
+        assertEquals(WireFormat.PCM_S16LE, sink.wireFormat)
+    }
+
+    @Test fun aChangedPreferenceRestartsTheStreamInTheNewFormat() {
+        sink = NetworkAudioSink(transport = { transport }, opusEncoderFactory = { rate, ch -> FakeOpusEncoder(rate, ch) }, log = {})
+        sink.onAudioRtp(music, musicFormat, rtp(240, 2), 0)
+        assertEquals(Event.Start(AudioStream.MEDIA, 48_000, 2, WireFormat.PCM_S16LE), transport.await<Event.Start>())
+        assertEquals(WireFormat.PCM_S16LE, transport.await<Event.Datagram>().datagram.header.format)
+
+        transport.format = WireFormat.OPUS // the plugin's Opus setting went on: a new state
+        sink.onAudioRtp(music, musicFormat, rtp(1000, 2), 240)
+        assertEquals(Event.Start(AudioStream.MEDIA, 48_000, 2, WireFormat.OPUS), transport.await<Event.Start>())
+        val opus = transport.await<Event.Datagram>().datagram
+        assertEquals(WireFormat.OPUS, opus.header.format)
+        assertTrue(opus.header.start)
+        assertEquals(0L, opus.header.timestamp)
+    }
+
     @Test fun theWifiLockIsHeldWhileAStreamIsAnnounced() {
         val events = CopyOnWriteArrayList<String>()
         val lock = object : SimHubDiscovery.NetworkLock {
             override fun acquire() { events += "acquire" }
             override fun release() { events += "release" }
         }
-        sink = NetworkAudioSink(transport = { transport }, wifiLock = lock, log = {})
+        // A long idle stop: on a loaded CI box the 3 s default can end the one-datagram music stream before the
+        // second stream starts, which releases and re-acquires the lock and is not what this test is about.
+        sink = NetworkAudioSink(transport = { transport }, wifiLock = lock, idleStopMillis = 60_000L, log = {})
         sink.onAudioStarted(music, musicFormat, 0)
         assertEquals(emptyList<String>(), events) // nothing announced before the first PCM
         sink.onAudioRtp(music, musicFormat, rtp(240, 2), 0)

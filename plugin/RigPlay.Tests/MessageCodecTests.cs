@@ -74,7 +74,9 @@ namespace RigPlayPlugin.Tests
         [InlineData("{\"type\":\"error\",\"code\":\"unsupportedProtocol\"}", false)]
         [InlineData("{\"type\":\"error\",\"code\":\"somethingNew\",\"fatal\":true}", true)]
         [InlineData("{\"type\":\"audioStart\",\"stream\":\"alt\",\"format\":\"pcm_s16le\",\"sampleRate\":7900,\"channels\":1}", false)]
-        [InlineData("{\"type\":\"audioStart\",\"stream\":\"alt\",\"format\":\"opus\",\"sampleRate\":24000,\"channels\":1}", false)]
+        [InlineData("{\"type\":\"audioStart\",\"stream\":\"alt\",\"format\":\"opus\",\"sampleRate\":24000,\"channels\":1}", true)]
+        [InlineData("{\"type\":\"audioStart\",\"stream\":\"media\",\"format\":\"opus\",\"sampleRate\":44100,\"channels\":2}", false)]
+        [InlineData("{\"type\":\"audioStart\",\"stream\":\"media\",\"format\":\"flac\",\"sampleRate\":48000,\"channels\":2}", false)]
         [InlineData("{\"type\":\"audioStart\",\"stream\":\"alt\",\"format\":\"pcm_s16le\",\"sampleRate\":24000,\"channels\":3}", false)]
         public void ContentRules(string line, bool valid)
         {

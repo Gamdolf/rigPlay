@@ -118,6 +118,34 @@ class ProtocolFixturesTest {
             assertEquals("$name frames", vector.getInt("frames"), decoded.frames)
             assertArrayEquals("$name samples", samples, decoded.samples())
         }
+        val opus = vectors.getJSONArray("opus")
+        assertTrue(opus.length() >= 3)
+        for (index in 0 until opus.length()) {
+            val vector = opus.getJSONObject(index)
+            val name = vector.getString("name")
+            val fields = vector.getJSONObject("header")
+            val header = AudioHeader(
+                seq = fields.getInt("seq"),
+                stream = AudioStream.fromCode(fields.getInt("streamType"))!!,
+                start = fields.getInt("flags") and AudioHeader.FLAG_START != 0,
+                timestamp = fields.getLong("timestamp"),
+                sampleRateHz = fields.getInt("sampleRateHz"),
+                channels = fields.getInt("channels"),
+                format = AudioFormat.fromCode(fields.getInt("format"))!!,
+            )
+            assertEquals(name, AudioFormat.OPUS, header.format)
+            val payload = vector.getString("payloadHex").unhex()
+            assertEquals("$name header", vector.getString("headerHex"), SimHubAudioCodec.encodeHeader(header).hex())
+            assertEquals("$name datagram", vector.getString("datagramHex"), SimHubAudioCodec.encode(header, payload).hex())
+            // The frames come from the TOC byte alone: no decoder on either side.
+            assertEquals("$name frames", vector.getInt("frames"), OpusPacket.frames(payload, sampleRate = header.sampleRateHz))
+
+            val decoded = SimHubAudioCodec.decode(vector.getString("datagramHex").unhex())
+                ?: fail("$name: decode rejected a valid opus datagram") as Nothing
+            assertEquals("$name decoded header", header, decoded.header)
+            assertEquals("$name frames", vector.getInt("frames"), decoded.frames)
+            assertArrayEquals("$name payload", payload, decoded.payload)
+        }
         val invalid = vectors.getJSONArray("invalid")
         assertTrue(invalid.length() >= 10)
         for (index in 0 until invalid.length()) {

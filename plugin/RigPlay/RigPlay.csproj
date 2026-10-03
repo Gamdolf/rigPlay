@@ -14,7 +14,21 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <!-- Concentus, the managed libopus, decodes the optional Opus audio format (docs/protocol.md §10.4). SimHub does
+         not ship it, so it is the one assembly installed next to RigPlay.dll (CopyConcentus below; the package
+         script zips it). Its dependencies System.Memory and System.Numerics.Vectors are SimHub's own copies, with
+         SimHub's binding redirects, and are not copied. -->
+    <PackageReference Include="Concentus" Version="2.2.2" />
+    <!-- Pinned to the versions SimHub 9.12.6 ships (System.Memory 4.0.1.2, Unsafe 6.0.0.0), so the build does not
+         warn about Concentus asking for older ones; compile-only, never copied. -->
+    <PackageReference Include="System.Memory" Version="4.5.5" />
+    <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" />
   </ItemGroup>
+
+  <!-- CopyLocalLockFileAssemblies is off (SimHub ships everything else), so copy Concentus.dll by hand. -->
+  <Target Name="CopyConcentus" AfterTargets="Build">
+    <Copy SourceFiles="@(ReferencePath)" Condition="'%(Filename)' == 'Concentus'" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
 
   <!-- Framework assemblies. WPF is referenced directly; there is no XAML to compile. -->
   <ItemGroup>

@@ -5,18 +5,18 @@ import com.shilapi.xcertplay.simhub.AudioStream
 import com.shilapi.xcertplay.simhub.SimHubAudioCodec
 
 /**
- * Cuts one stream's s16le PCM into audio datagrams (`docs/protocol.md` §10.2): [framesPerDatagram]
- * frames each, `seq` from 0 and +1 per datagram, `timestamp` = frames sent before the datagram, and
- * the `start` flag on the first one. Audio that was lost before it got here is declared with [skip], which
- * moves the timestamp on so the PC plays silence there instead of closing the gap. A new packetizer belongs
- * to each `audioStart`.
+ * [AudioPacketizer] for `pcm_s16le`: cuts one stream's s16le PCM into audio datagrams (`docs/protocol.md`
+ * §10.2) of [framesPerDatagram] frames each, `seq` from 0 and +1 per datagram, `timestamp` = frames sent
+ * before the datagram, and the `start` flag on the first one. Audio that was lost before it got here is
+ * declared with [skip], which moves the timestamp on so the PC plays silence there instead of closing the
+ * gap. A new packetizer belongs to each `audioStart`.
  */
 class PcmPacketizer(
     val stream: AudioStream,
-    val sampleRate: Int,
-    val channels: Int,
+    override val sampleRate: Int,
+    override val channels: Int,
     val framesPerDatagram: Int = defaultFramesPerDatagram(sampleRate, channels),
-) {
+) : AudioPacketizer {
     init {
         require(PcmConversion.isWireRate(sampleRate)) { "sampleRate must be a multiple of 100 in 8000..48000" }
         require(channels == 1 || channels == 2) { "channels must be 1 or 2" }
@@ -38,7 +38,7 @@ class PcmPacketizer(
     var timestamp: Long = 0L
         private set
 
-    var datagrams: Long = 0L
+    override var datagrams: Long = 0L
         private set
 
     /** Bytes buffered towards the next datagram. */
@@ -48,7 +48,7 @@ class PcmPacketizer(
      * Appends PCM and calls [emit] once per complete datagram with a buffer and its length. The buffer
      * is reused: it is valid only during the call.
      */
-    fun push(pcm: ByteArray, offset: Int = 0, length: Int = pcm.size - offset, emit: (ByteArray, Int) -> Unit) {
+    override fun push(pcm: ByteArray, offset: Int, length: Int, emit: (ByteArray, Int) -> Unit) {
         var cursor = offset
         var left = length
         while (left > 0) {
@@ -62,7 +62,7 @@ class PcmPacketizer(
     }
 
     /** Sends the buffered whole frames as a short datagram (end of stream); a partial frame is dropped. */
-    fun flush(emit: (ByteArray, Int) -> Unit) {
+    override fun flush(emit: (ByteArray, Int) -> Unit) {
         pending -= pending % frameBytes
         if (pending > 0) emitPending(emit)
         pending = 0
@@ -74,7 +74,7 @@ class PcmPacketizer(
      * plays as silence of that length (§10.2) while its buffer depth stays what it was. Before the first
      * datagram there is nothing to place the gap after, so it is ignored: the stream still starts at 0.
      */
-    fun skip(frames: Long, emit: (ByteArray, Int) -> Unit) {
+    override fun skip(frames: Long, emit: (ByteArray, Int) -> Unit) {
         if (frames <= 0 || (datagrams == 0L && pending < frameBytes)) return
         flush(emit)
         timestamp = (timestamp + frames) and 0xFFFF_FFFFL

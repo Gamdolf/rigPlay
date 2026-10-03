@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-only
 # package-plugin.sh: builds the SimHub plugin in Release and zips what a user installs (#25):
-# RigPlay.dll and plugin/INSTALL.md, flat, nothing else (no SimHub assemblies, no .pdb). SimHub ships every
-# assembly the plugin references, NAudio included.
+# RigPlay.dll, Concentus.dll (the Opus decoder, docs/protocol.md §10.4; SimHub does not ship it) and
+# plugin/INSTALL.md, flat, nothing else (no SimHub assemblies, no .pdb). SimHub ships every other assembly the
+# plugin references, NAudio included.
 #
 #   bash plugin/scripts/package-plugin.sh                       # -> build/rigPlay-plugin.zip
 #   bash plugin/scripts/package-plugin.sh --no-build --out dist/rigPlay-plugin.zip   # what release.yml runs
@@ -26,12 +27,13 @@ done
 
 cd "$root"
 dll="plugin/RigPlay/bin/Release/net48/RigPlay.dll"
+opus="plugin/RigPlay/bin/Release/net48/Concentus.dll"
 install="plugin/INSTALL.md"
 
 if [ "$build" = 1 ]; then
   dotnet build plugin/RigPlay -c Release
 fi
-for f in "$dll" "$install"; do
+for f in "$dll" "$opus" "$install"; do
   if [ ! -f "$f" ]; then
     echo "package-plugin.sh: $f is missing" >&2
     exit 1
@@ -40,5 +42,5 @@ done
 
 mkdir -p "$(dirname "$out")"
 rm -f "$out"
-zip -j -X "$out" "$dll" "$install" > /dev/null
+zip -j -X "$out" "$dll" "$opus" "$install" > /dev/null
 unzip -l "$out"

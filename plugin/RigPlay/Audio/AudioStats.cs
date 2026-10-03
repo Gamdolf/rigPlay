@@ -34,6 +34,8 @@ namespace RigPlayPlugin.Audio
         public long Underruns;
         /// <summary>Times the buffer grew past its maximum and skipped ahead: each one is a jump.</summary>
         public long Skips;
+        /// <summary>Opus packets the decoder could not decode (opus streams only).</summary>
+        public long DecodeFailures;
 
         public string FormatText
         {
@@ -57,7 +59,8 @@ namespace RigPlayPlugin.Audio
                 + (AutoStarted ? " (auto-started)" : "")
                 + " · underruns " + Underruns.ToString(inv)
                 + " · late " + Late.ToString(inv)
-                + " · skips " + Skips.ToString(inv);
+                + " · skips " + Skips.ToString(inv)
+                + (Format == AudioFormat.Opus ? " · undecodable " + DecodeFailures.ToString(inv) : "");
         }
     }
 

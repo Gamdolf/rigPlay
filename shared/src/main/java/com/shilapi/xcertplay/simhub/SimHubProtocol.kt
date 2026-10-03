@@ -57,6 +57,7 @@ object SimHubProtocol {
     const val MAX_LINE_BYTES = 65_536
 
     const val FORMAT_PCM_S16LE = "pcm_s16le"
+    const val FORMAT_OPUS = "opus"
 
     // §5.3 message types.
     const val TYPE_BEACON = "beacon"
@@ -432,9 +433,13 @@ object SimHubProtocol {
     private fun decodeAudioStart(f: Fields): SimHubMessage.AudioStart {
         val sampleRate = f.reqInt("sampleRate", 8_000L..48_000L).toInt()
         if (sampleRate % 100 != 0) throw BadMember("sampleRate must be a multiple of 100")
+        val format: AudioFormat = f.reqEnum("format")
+        if (format == AudioFormat.OPUS && sampleRate !in AudioFormat.OPUS_SAMPLE_RATES) {
+            throw BadMember("sampleRate for opus must be 8000, 12000, 16000, 24000 or 48000")
+        }
         return SimHubMessage.AudioStart(
             stream = f.reqEnum("stream"),
-            format = f.reqEnum("format"),
+            format = format,
             sampleRate = sampleRate,
             channels = f.reqInt("channels", 1L..2L).toInt(),
         )

@@ -5,7 +5,7 @@ import java.nio.ByteOrder
 
 /**
  * The 12-byte header of an audio datagram (`docs/protocol.md` §10.2). Header fields are big-endian;
- * the PCM payload that follows is little-endian.
+ * a PCM payload that follows is little-endian, an Opus payload (§10.4) is one Opus packet.
  *
  * @property seq u16 datagram counter per stream, wraps at 65535.
  * @property timestamp u32 sample-frame clock, wraps at 4294967295.
@@ -30,19 +30,27 @@ data class AudioHeader(
         require(channels == 1 || channels == 2) { "channels must be 1 or 2" }
     }
 
-    /** Bytes per sample frame of the payload. */
+    /** Bytes per sample frame of a PCM payload. */
     val frameBytes: Int get() = 2 * channels
+
+    val isOpus: Boolean get() = format == AudioFormat.OPUS
 
     companion object {
         const val SIZE = 12
         const val FLAG_START = 0x01
         val SAMPLE_RATE_FIELD_RANGE = 80..480
+
+        /** The longest Opus packet a datagram carries (§10.4). */
+        const val MAX_OPUS_PACKET_BYTES = 1275
     }
 }
 
-/** A decoded audio datagram: header plus the raw little-endian PCM payload. */
+/**
+ * A decoded audio datagram: header plus the payload (little-endian PCM, or one Opus packet). [frames] is what
+ * the payload stands for on the sample clock: whole PCM frames, or what the Opus packet's TOC says.
+ */
 class AudioDatagram(val header: AudioHeader, val payload: ByteArray) {
-    val frames: Int get() = payload.size / header.frameBytes
+    val frames: Int = if (header.isOpus) OpusPacket.frames(payload, 0, payload.size, header.sampleRateHz) else payload.size / header.frameBytes
 
     /** The payload as interleaved signed 16-bit samples. */
     fun samples(): ShortArray {
@@ -73,10 +81,16 @@ object SimHubAudioCodec {
         return out
     }
 
-    /** Header followed by [pcm] (already little-endian s16, as decoded from AirPlay). */
+    /** Header followed by [pcm] (already little-endian s16, as decoded from AirPlay), or by one Opus packet. */
     fun encode(header: AudioHeader, pcm: ByteArray, offset: Int = 0, length: Int = pcm.size - offset): ByteArray {
-        require(length > 0 && length % header.frameBytes == 0) {
-            "payload must be a positive multiple of ${header.frameBytes} bytes"
+        if (header.isOpus) {
+            require(length in 1..AudioHeader.MAX_OPUS_PACKET_BYTES && OpusPacket.frames(pcm, offset, length, header.sampleRateHz) > 0) {
+                "payload must be one Opus packet"
+            }
+        } else {
+            require(length > 0 && length % header.frameBytes == 0) {
+                "payload must be a positive multiple of ${header.frameBytes} bytes"
+            }
         }
         val out = ByteArray(AudioHeader.SIZE + length)
         encodeHeader(header, out)
@@ -94,7 +108,8 @@ object SimHubAudioCodec {
     /**
      * Decodes a datagram, or returns `null` for anything §10.2 says to drop: shorter than one complete
      * frame after the header, an invalid stream type (including reserved `mic`), format, channel
-     * count or sample rate, or a payload that is not a whole number of frames.
+     * count or sample rate, a PCM payload that is not a whole number of frames, or an Opus payload
+     * (§10.4) that is empty, longer than one packet can be, or whose TOC describes no frame.
      */
     fun decode(data: ByteArray, offset: Int = 0, length: Int = data.size - offset): AudioDatagram? {
         if (length < AudioHeader.SIZE) return null
@@ -109,7 +124,12 @@ object SimHubAudioCodec {
         if (rateField !in AudioHeader.SAMPLE_RATE_FIELD_RANGE) return null
         if (channels != 1 && channels != 2) return null
         val payloadLength = length - AudioHeader.SIZE
-        if (payloadLength < 2 * channels || payloadLength % (2 * channels) != 0) return null
+        if (format == AudioFormat.OPUS) {
+            if (payloadLength !in 1..AudioHeader.MAX_OPUS_PACKET_BYTES) return null
+            if (OpusPacket.frames(data, offset + AudioHeader.SIZE, payloadLength, rateField * 100) <= 0) return null
+        } else if (payloadLength < 2 * channels || payloadLength % (2 * channels) != 0) {
+            return null
+        }
         val header = AudioHeader(
             seq = seq,
             stream = stream,
