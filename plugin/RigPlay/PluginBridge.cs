@@ -159,18 +159,30 @@ namespace RigPlayPlugin
         {
             try
             {
-                var entry = Assembly.GetEntryAssembly();
-                if (entry == null) return null;
-                var info = FileVersionInfo.GetVersionInfo(entry.Location);
-                if (info.FileMajorPart > 0 || info.FileMinorPart > 0)
-                    return info.FileMajorPart + "." + info.FileMinorPart + "." + info.FileBuildPart;
-                var v = entry.GetName().Version;
-                return v == null ? null : v.Major + "." + v.Minor + "." + v.Build;
+                // SimHub's own idea of its version (SimHub.Plugins.Configuration.SimHubVersion); SimHubWPF.exe is 1.0.0.0.
+                var property = typeof(PluginManager).Assembly.GetType("SimHub.Plugins.Configuration")
+                    ?.GetProperty("SimHubVersion", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                var value = property?.GetValue(null);
+                // A SimHub.Plugins.VersionParser: GetVersionAsString() gives "9.12.6" (plus "bN" for betas).
+                var asString = value?.GetType().GetMethod("GetVersionAsString", Type.EmptyTypes);
+                var configured = asString != null ? asString.Invoke(value, null) as string : value as string;
+                if (!string.IsNullOrWhiteSpace(configured)) return configured.Trim();
             }
-            catch (Exception)
+            catch (Exception) { }
+            try
             {
-                return null;
+                // The installer's uninstaller carries the release version (9.12.6 on the test VM).
+                var dir = AppDomain.CurrentDomain.BaseDirectory;
+                var uninstaller = System.IO.Path.Combine(dir ?? "", "unins000.exe");
+                if (System.IO.File.Exists(uninstaller))
+                {
+                    var product = FileVersionInfo.GetVersionInfo(uninstaller).ProductVersion;
+                    if (!string.IsNullOrWhiteSpace(product) && !product.StartsWith("1.0.0")) return product.Trim();
+                }
             }
+            catch (Exception) { }
+            // SimHubWPF.exe itself is versioned 1.0.0.0, which says nothing; better no version than a wrong one.
+            return null;
         }
     }
 }
