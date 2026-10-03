@@ -6,6 +6,11 @@ plugins {
 val localAuthenticationAssets = providers.environmentVariable("RIGPLAY_AUTH_ASSETS_DIR")
     .orNull?.let { file(it).canonicalFile }
 
+// The root VERSION file is the one version of the project: the APK, the SimHub plugin
+// (plugin/Directory.Build.props) and the release tag (.github/workflows/release.yml) all read it.
+val rigPlayVersion = providers.fileContents(layout.settingsDirectory.file("VERSION"))
+    .asText.map { it.trim() }
+
 android {
     namespace = "com.shilapi.xcertplay"
     compileSdk {
@@ -16,9 +21,9 @@ android {
         applicationId = "io.xorob.rigplay"
         minSdk = 28
         targetSdk = 37
-        versionCode = 29
-        versionName = "0.2.10"
-
+        // Bumped by hand for every release (it must grow for Android to accept an update).
+        versionCode = 1
+        versionName = rigPlayVersion.get()
     }
 
 

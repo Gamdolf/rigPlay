@@ -2,6 +2,13 @@
 
 Requirements: JDK 25, Android SDK 37, NDK 28.2.13676358 and the included Gradle wrapper.
 
+## Version
+
+The root `VERSION` file holds the version (`0.1.0`). `mobile/build.gradle.kts` reads it as the APK's
+`versionName`, `plugin/Directory.Build.props` as the plugin's assembly version, and the release
+workflow refuses a tag other than `v<VERSION>`. The Android `versionCode` lives in
+`mobile/build.gradle.kts` and is bumped by hand for every release.
+
 ## Source and CI builds
 
 ```sh
@@ -20,7 +27,7 @@ Set `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, a
 ./gradlew :shared:testDebugUnitTest :common:testDebugUnitTest :mobile:lintRelease :mobile:assembleRelease
 ```
 
-Output: `mobile/build/outputs/apk/release/mobile-release.apk`. The release APK deliberately contains the experimental identity described in the notices; it is extractable by recipients. The separate Android signing key is not included. The retired build-beta.py helper is not used; this Gradle workflow uses explicit environment inputs.
+Output: `mobile/build/outputs/apk/release/mobile-release.apk`. The release APK deliberately contains the experimental identity described in the notices; it is extractable by recipients. The separate Android signing key is not included. This Gradle workflow uses explicit environment inputs.
 
 The public release source archive corresponds to the tagged source and excludes runtime identities, signing keys, local configuration and build output.
 
