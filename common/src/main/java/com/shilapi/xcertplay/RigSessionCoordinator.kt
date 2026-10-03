@@ -15,6 +15,7 @@ import com.shilapi.xcertplay.simhub.SimHubDiscovery
 import com.shilapi.xcertplay.simhub.SimHubEndpoints
 import com.shilapi.xcertplay.simhub.SimHubLink
 import com.shilapi.xcertplay.simhub.SimHubLinkAudioTransport
+import com.shilapi.xcertplay.simhub.SimHubLinkMicTransport
 import com.shilapi.xcertplay.simhub.SimHubMediaBridge
 import com.shilapi.xcertplay.simhub.SimHubMessage
 import com.shilapi.xcertplay.simhub.SimHubNav
@@ -49,7 +50,7 @@ object RigSessionCoordinator {
     private const val NAV_EXPIRY_CHECK_MS = 2_000L
 
     /** `hello.features` (§7.3): `telemetry` feeds [SimHubEndpoints.telemetry] (#41). */
-    private val LINK_FEATURES = setOf(SimHubProtocol.FEATURE_IDLE_DASHBOARD, SimHubProtocol.FEATURE_TELEMETRY)
+    private val LINK_FEATURES = setOf(SimHubProtocol.FEATURE_IDLE_DASHBOARD, SimHubProtocol.FEATURE_TELEMETRY, SimHubProtocol.FEATURE_MIC)
 
     private val main = Handler(Looper.getMainLooper())
     private val observers = LinkedHashSet<() -> Unit>()
@@ -297,6 +298,11 @@ object RigSessionCoordinator {
     /** Plugs the PC audio path into the link, unless it is already there. Main thread. */
     private fun attachAudioTransport() {
         if (!initialized || SimHubEndpoints.audioTransport != null) return
+        // The PC microphone (#34), when the user chose it: MicrophoneUplink asks for it each time the phone listens.
+        val app = appContext
+        SimHubEndpoints.microphone = SimHubLinkMicTransport(link) {
+            app != null && AirPlayPersistence.loadMicrophoneSource(app) == com.shilapi.xcertplay.media.MicrophoneSource.PC
+        }
         SimHubEndpoints.audioTransport = try {
             SimHubLinkAudioTransport(link)
         } catch (error: java.io.IOException) {
@@ -308,6 +314,7 @@ object RigSessionCoordinator {
 
     /** The link stopped on purpose (Forget, a new PC): audio falls back to the tablet. */
     private fun detachAudioTransport() {
+        SimHubEndpoints.microphone = null
         val transport = SimHubEndpoints.audioTransport
         SimHubEndpoints.audioTransport = null
         (transport as? java.io.Closeable)?.let { runCatching { it.close() } }

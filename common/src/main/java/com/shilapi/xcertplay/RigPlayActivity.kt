@@ -339,6 +339,7 @@ class RigPlayActivity : ComponentActivity() {
         }
         section(content, getString(R.string.audio_routing)) { card ->
             audioOutputControl(card)
+            microphoneSourceControl(card)
             toggle(card, getString(R.string.contrib_audio_home_toggle_audio_focus), getString(R.string.contrib_audio_home_toggle_audio_focus_desc), AirPlayPersistence.loadAudioFocusEnabled(this)) { AirPlayPersistence.saveAudioFocusEnabled(this, it) }
             if (resources.getBoolean(R.bool.config_advanced_audio_channel_mapping)) {
                 toggle(card, getString(R.string.advanced_audio_channel_mapping),
@@ -732,6 +733,17 @@ class RigPlayActivity : ComponentActivity() {
             AirPlayPersistence.saveAudioOutputTarget(this, targets[it])
         }
         parent.addView(label(getString(R.string.audio_simhub_output_note), 14, MUTED).apply { setPadding(0, 0, 0, dp(12)) })
+    }
+
+    /** "Microphone: PC via SimHub / this tablet" (#34); applies the next time the phone opens the microphone. */
+    private fun microphoneSourceControl(parent: LinearLayout) {
+        val sources = listOf(com.shilapi.xcertplay.media.MicrophoneSource.PC, com.shilapi.xcertplay.media.MicrophoneSource.TABLET)
+        choice(parent, getString(R.string.mic_source),
+            listOf(getString(R.string.mic_source_pc), getString(R.string.mic_source_tablet)),
+            sources.indexOf(AirPlayPersistence.loadMicrophoneSource(this)).coerceAtLeast(0)) {
+            AirPlayPersistence.saveMicrophoneSource(this, sources[it])
+        }
+        parent.addView(label(getString(R.string.mic_source_note), 14, MUTED).apply { setPadding(0, 0, 0, dp(12)) })
     }
 
     private fun mediaChannelControl(parent: LinearLayout) {

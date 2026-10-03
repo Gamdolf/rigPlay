@@ -72,6 +72,7 @@ object AirPlayPersistence {
     private const val KEY_NIGHT_FROM_SIMHUB = "night_from_simhub"
     private const val KEY_SIMHUB_VEHICLE_STATUS = "simhub_vehicle_status"
     private const val KEY_AUDIO_OUTPUT_TARGET = "audio_output_target"
+    private const val KEY_MIC_SOURCE = "mic_source"
     private const val KEY_SIMHUB_HOST_ID = "simhub_host_id"
     private const val KEY_SIMHUB_HOST = "simhub_host"
     private const val KEY_SIMHUB_PORT = "simhub_port"
@@ -170,6 +171,18 @@ object AirPlayPersistence {
     fun saveAudioOutputTarget(context: Context, target: AudioOutputTarget) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(KEY_AUDIO_OUTPUT_TARGET, target.key)
+            .apply()
+    }
+
+    /** Where the phone's microphone comes from (#34); the tablet's own by default. */
+    fun loadMicrophoneSource(context: Context): com.shilapi.xcertplay.media.MicrophoneSource =
+        com.shilapi.xcertplay.media.MicrophoneSource.fromKey(
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_MIC_SOURCE, null),
+        )
+
+    fun saveMicrophoneSource(context: Context, source: com.shilapi.xcertplay.media.MicrophoneSource) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_MIC_SOURCE, source.key)
             .apply()
     }
 
