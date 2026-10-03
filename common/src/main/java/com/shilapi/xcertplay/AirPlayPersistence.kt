@@ -49,6 +49,8 @@ object AirPlayPersistence {
     private const val KEY_WIRELESS_HOTSPOT_MODE = "wireless_hotspot_mode"
     private const val KEY_MANUAL_HOTSPOT_SSID = "manual_hotspot_ssid"
     private const val KEY_MANUAL_HOTSPOT_PASSPHRASE = "manual_hotspot_passphrase"
+    private const val KEY_EXISTING_NETWORK_SSID = "existing_network_ssid"
+    private const val KEY_EXISTING_NETWORK_PASSPHRASE = "existing_network_passphrase"
     private const val KEY_MANUAL_HOTSPOT_BAND = "manual_hotspot_band"
     private const val KEY_MANUAL_HOTSPOT_CHANNEL = "manual_hotspot_channel"
     private const val KEY_MANUAL_HOTSPOT_SECURITY = "manual_hotspot_security"
@@ -245,6 +247,30 @@ object AirPlayPersistence {
     fun saveManualHotspotPassphrase(context: Context, passphrase: String) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(KEY_MANUAL_HOTSPOT_PASSPHRASE, passphrase)
+            .apply()
+    }
+
+    /** Existing Wi-Fi network mode (#33): kept apart from the tablet-hotspot details so switching keeps both. */
+    fun loadExistingNetworkSsid(context: Context): String =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_EXISTING_NETWORK_SSID, null)
+            .orEmpty()
+
+    fun saveExistingNetworkSsid(context: Context, ssid: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_EXISTING_NETWORK_SSID, ssid)
+            .apply()
+    }
+
+    /** The home Wi-Fi password, handed to the iPhone over iAP2 only; never logged. */
+    fun loadExistingNetworkPassphrase(context: Context): String =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_EXISTING_NETWORK_PASSPHRASE, null)
+            .orEmpty()
+
+    fun saveExistingNetworkPassphrase(context: Context, passphrase: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_EXISTING_NETWORK_PASSPHRASE, passphrase)
             .apply()
     }
 

@@ -228,6 +228,7 @@ class RigPlayActivity : ComponentActivity() {
         val connectionHint = when (AirPlayPersistence.loadWirelessHotspotMode(this)) {
             WirelessHotspotMode.MANUAL -> getString(R.string.hotspot_hint_manual)
             WirelessHotspotMode.LOCAL_ONLY_HOTSPOT -> getString(R.string.hotspot_hint_local)
+            WirelessHotspotMode.EXISTING_NETWORK -> getString(R.string.hotspot_hint_existing)
             else -> getString(R.string.hotspot_hint_p2p)
         }
         phoneCard.addView(label(connectionHint, 15, MUTED).apply { setPadding(0, dp(12), 0, 0) })
@@ -630,7 +631,7 @@ class RigPlayActivity : ComponentActivity() {
 
     // The car hotspot link needs the hotspot on; rigPlay only checks it (turning it on needs ADB-only permission).
     private fun carHotspotOff(): Boolean =
-        AirPlayPersistence.loadWirelessHotspotMode(this) == WirelessHotspotMode.MANUAL &&
+        com.shilapi.xcertplay.orchestration.WirelessModeRequirements.requiresTethering(AirPlayPersistence.loadWirelessHotspotMode(this)) &&
             com.shilapi.xcertplay.network.CarHotspotStatus.isEnabled(this) == false
 
     private fun carHotspotOffDialog() {
@@ -680,11 +681,12 @@ class RigPlayActivity : ComponentActivity() {
 
     private fun wirelessLinkControls(parent: LinearLayout) {
         val mode = if (pendingCarHotspotSetup) WirelessHotspotMode.MANUAL else AirPlayPersistence.loadWirelessHotspotMode(this)
-        val modes = listOf(WirelessHotspotMode.MANUAL, WirelessHotspotMode.WIFI_P2P)
-        val titles = listOf(getString(R.string.tablet_hotspot), getString(R.string.wifi_direct))
+        val modes = listOf(WirelessHotspotMode.MANUAL, WirelessHotspotMode.WIFI_P2P, WirelessHotspotMode.EXISTING_NETWORK)
+        val titles = listOf(getString(R.string.tablet_hotspot), getString(R.string.wifi_direct), getString(R.string.wireless_mode_existing_network))
         val descriptions = listOf(
             getString(R.string.hotspot_mode_manual_desc),
-            getString(R.string.hotspot_mode_p2p_desc)
+            getString(R.string.hotspot_mode_p2p_desc),
+            getString(R.string.wireless_mode_existing_network_desc),
         )
         val wide = resources.configuration.screenWidthDp >= 850
         val choices = if (wide) row().apply { gravity = Gravity.TOP } else column()
@@ -698,6 +700,9 @@ class RigPlayActivity : ComponentActivity() {
                 if (candidate == WirelessHotspotMode.MANUAL) {
                     pendingCarHotspotSetup = true
                     render()
+                } else if (candidate == WirelessHotspotMode.EXISTING_NETWORK) {
+                    pendingCarHotspotSetup = false
+                    askExistingNetworkDetails()
                 } else {
                     pendingCarHotspotSetup = false
                     applyWirelessLink(candidate)
@@ -717,10 +722,81 @@ class RigPlayActivity : ComponentActivity() {
                 }
             }, matchButton(12, 60))
             parent.addView(label(if (pendingCarHotspotSetup) getString(R.string.finish_setup_save_your_hotspot_details_to_use_this_mode) else if (carHotspotOff()) getString(R.string.hotspot_details_off) else getString(R.string.hotspot_details_saved), 15, if (carHotspotOff()) WARNING else MUTED).apply { setPadding(0, dp(12), 0, 0) })
+        } else if (mode == WirelessHotspotMode.EXISTING_NETWORK) {
+            existingNetworkControls(parent)
         } else {
             parent.addView(label(getString(R.string.wifi_direct_setup_hint), 16, MUTED))
             parent.addView(button(getString(R.string.open_tablet_wi_fi_settings), false) { openCarClientWifiSettings() }, matchButton(12, 60))
         }
+    }
+
+    // --- Existing Wi-Fi network mode (#33) ---------------------------------------------------------
+
+    /** The tablet's current Wi-Fi client connection, read without changing anything. */
+    private fun stationWifi(): com.shilapi.xcertplay.network.StationWifiSnapshot? = runCatching {
+        val reader = com.shilapi.xcertplay.network.AndroidStationWifiReader(this)
+        com.shilapi.xcertplay.network.stationWifiSnapshot(reader.wifiLinkProperties(), reader.wifiInfo(), reader::interfaceIndex)
+    }.getOrNull()
+
+    private fun existingNetworkStatus(): String {
+        val station = stationWifi() ?: return getString(R.string.existing_network_status_none)
+        val unknown = getString(R.string.existing_network_channel_unknown)
+        return getString(R.string.existing_network_status, station.interfaceName,
+            station.hostAddress?.hostAddress?.substringBefore('%') ?: getString(R.string.existing_network_status_no_address),
+            station.channel.takeIf { it > 0 }?.toString() ?: unknown, station.bandLabel ?: unknown)
+    }
+
+    private fun existingNetworkControls(parent: LinearLayout) {
+        parent.addView(label(getString(R.string.existing_network_setup), 22, TEXT, true))
+        parent.addView(label(getString(R.string.wireless_mode_existing_network_desc), 16, MUTED).apply { setPadding(0, dp(8), 0, dp(8)) })
+        parent.addView(label(existingNetworkStatus(), 15, if (stationWifi()?.hostAddress == null) WARNING else MUTED).apply { setPadding(0, 0, 0, dp(12)) })
+        parent.addView(button(getString(R.string.existing_network_edit, AirPlayPersistence.loadExistingNetworkSsid(this)), false) { askExistingNetworkDetails() }, matchButton(0, 60))
+        parent.addView(button(getString(R.string.open_tablet_wi_fi_settings), false) { openCarClientWifiSettings() }, matchButton(12, 60))
+    }
+
+    /** Name prefilled from Android when readable; the password is only ever typed by the user. */
+    private fun askExistingNetworkDetails() {
+        val liveName = stationWifi()?.ssid
+        val fields = column().apply { setPadding(dp(24), dp(12), dp(24), dp(12)) }
+        fields.addView(label(getString(R.string.existing_network_details_intro), 16, MUTED))
+        val ssid = EditText(this).apply {
+            hint = getString(R.string.existing_network_name); setSingleLine()
+            setText(liveName ?: AirPlayPersistence.loadExistingNetworkSsid(this@RigPlayActivity))
+        }
+        val password = EditText(this).apply {
+            hint = getString(R.string.existing_network_password); setSingleLine()
+            setText(AirPlayPersistence.loadExistingNetworkPassphrase(this@RigPlayActivity))
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        fields.addView(ssid)
+        if (liveName == null) fields.addView(label(getString(R.string.existing_network_name_hidden), 14, MUTED))
+        fields.addView(password)
+        fields.addView(CheckBox(this).apply {
+            text = getString(R.string.show_password)
+            setOnCheckedChangeListener { _, checked ->
+                password.transformationMethod = if (checked) null else android.text.method.PasswordTransformationMethod.getInstance()
+                password.setSelection(password.text.length)
+            }
+        })
+        val error = label("", 14, WARNING).apply { accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
+        fields.addView(error)
+        val dialog = AlertDialog.Builder(this).setTitle(getString(R.string.existing_network_details_title))
+            .setView(ScrollView(this).apply { addView(fields) })
+            .setPositiveButton(getString(R.string.existing_network_save_and_use), null)
+            .setNegativeButton(getString(R.string.cancel), null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val name = ssid.text.toString().trim()
+                val secret = password.text.toString()
+                val problem = hotspotError(name, secret)
+                if (problem != null) { error.text = problem; return@setOnClickListener }
+                AirPlayPersistence.saveExistingNetworkSsid(this, name)
+                AirPlayPersistence.saveExistingNetworkPassphrase(this, secret)
+                dialog.dismiss()
+                applyWirelessLink(WirelessHotspotMode.EXISTING_NETWORK)
+            }
+        }
+        dialog.show()
     }
 
     /** "Audio output: PC via SimHub / this tablet" (#31); applies when CarPlay next connects. */
@@ -952,6 +1028,10 @@ class RigPlayActivity : ComponentActivity() {
             render()
             toast(getString(R.string.save_the_name_and_password_from_the_tablet_hotspot_settings))
             return
+        }
+        if (wireless && AirPlayPersistence.loadWirelessHotspotMode(this) == WirelessHotspotMode.EXISTING_NETWORK &&
+            hotspotError(AirPlayPersistence.loadExistingNetworkSsid(this), AirPlayPersistence.loadExistingNetworkPassphrase(this)) != null) {
+            page = "connection"; render(); toast(getString(R.string.existing_network_details_missing)); return
         }
         if (wireless && carHotspotOff()) { carHotspotOffDialog(); return }
         if (wireless && RigPlayPreferences.phoneAddress(this) == null) {

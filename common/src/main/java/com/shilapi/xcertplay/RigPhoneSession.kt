@@ -5,6 +5,7 @@ import android.content.Intent
 import com.shilapi.xcertplay.network.CarHotspotStatus
 import com.shilapi.xcertplay.orchestration.ManualHotspotValidation
 import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
+import com.shilapi.xcertplay.orchestration.WirelessModeRequirements
 
 /**
  * The real [RigSessionLifecycle.PhoneSession]: [CarPlayBackgroundSession] plus the same start path as
@@ -36,18 +37,25 @@ internal class RigPhoneSession(private val context: Context) : RigSessionLifecyc
          */
         fun autoStartBlocker(
             context: Context,
+            tetheringOn: () -> Boolean? = { CarHotspotStatus.isEnabled(context) },
             authenticationReady: () -> Boolean = { runCatching { RigPlayBootstrap.ensure(context) }.isSuccess },
         ): String? {
             if (!RigPlayPreferences.autoConnect(context)) return "automatic connection is off"
             if (!authenticationReady()) return "CarPlay authentication unavailable"
             if (!AirPlayPersistence.loadWirelessEnabled(context)) return null
             if (RigPlayPreferences.phoneAddress(context) == null) return "no iPhone chosen"
-            if (AirPlayPersistence.loadWirelessHotspotMode(context) == WirelessHotspotMode.MANUAL) {
+            val mode = AirPlayPersistence.loadWirelessHotspotMode(context)
+            if (mode == WirelessHotspotMode.MANUAL) {
                 val ssid = AirPlayPersistence.loadManualHotspotSsid(context)
                 val passphrase = AirPlayPersistence.loadManualHotspotPassphrase(context)
                 if (ManualHotspotValidation.error(ssid, passphrase) != null) return "hotspot details missing"
-                if (CarHotspotStatus.isEnabled(context) == false) return "hotspot is off"
             }
+            if (mode == WirelessHotspotMode.EXISTING_NETWORK) {
+                val ssid = AirPlayPersistence.loadExistingNetworkSsid(context)
+                val passphrase = AirPlayPersistence.loadExistingNetworkPassphrase(context)
+                if (ManualHotspotValidation.error(ssid, passphrase) != null) return "Wi-Fi network details missing"
+            }
+            if (WirelessModeRequirements.requiresTethering(mode) && tetheringOn() == false) return "hotspot is off"
             return null
         }
     }

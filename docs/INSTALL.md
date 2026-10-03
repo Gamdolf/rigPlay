@@ -80,6 +80,14 @@ without reconnecting the phone.
    any Wi-Fi network by hand. Keep Wi-Fi and Bluetooth on, on both devices. The tablet's home Wi-Fi stays
    connected.
 
+**Choosing the wireless mode** (**Settings → Open connection setup → 1 · Choose your connection**):
+**Wi-Fi Direct** and **Tablet hotspot** have the tablet create a network for the phone while it stays on
+the home Wi-Fi, which only works if its Wi-Fi chip can do both at once. **Existing Wi-Fi network
+(experimental)** creates nothing: the iPhone joins the home Wi-Fi the tablet is already on. Enter that
+network's name and password when you pick it; the iPhone must be able to join the same network. It is
+untested with iOS, so use it only if the other two modes fail on your tablet, and report the result. See
+[Compatibility → Tablets](COMPATIBILITY.md#tablets).
+
 Allow CarPlay on the iPhone when it asks. Once paired, the phone connects whenever the PC is running SimHub
 and the phone is near the tablet.
 
