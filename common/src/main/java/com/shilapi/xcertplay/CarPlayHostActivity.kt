@@ -63,10 +63,13 @@ import com.shilapi.xcertplay.airplay.AirPlaySafeArea
 import com.shilapi.xcertplay.airplay.AirPlaySession
 import com.shilapi.xcertplay.airplay.AirPlaySessionListener
 import com.shilapi.xcertplay.airplay.CarPlayMediaEngine
+import com.shilapi.xcertplay.airplay.MediaSink
 import com.shilapi.xcertplay.airplay.SafeAreaRect
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.location.AndroidCarPlayLocationProvider
 import com.shilapi.xcertplay.media.AndroidMediaSink
+import com.shilapi.xcertplay.media.AudioOutputTarget
+import com.shilapi.xcertplay.media.SwitchingMediaSink
 import com.shilapi.xcertplay.media.CarPlayTouchMapper
 import com.shilapi.xcertplay.media.CarPlayVideoLayout
 import com.shilapi.xcertplay.network.CarPlayVpnService
@@ -2607,6 +2610,7 @@ class CarPlayHostActivity : ComponentActivity() {
         videoWidth: Int,
         videoHeight: Int,
         controllerGeneration: Int,
+        onMediaAudioChanged: (Boolean) -> Unit = CarPlayMediaKeys::onMediaAudioChanged,
     ): AndroidMediaSink {
         // Capture this session's log: late decoder shutdown must not write into a new session.
         val diagnosticLog = sessionLog
@@ -2632,11 +2636,11 @@ class CarPlayHostActivity : ComponentActivity() {
                     diagnosticLog?.append(formattedLogLine(message, System.currentTimeMillis()))
                 }
             },
-            onMediaAudioChanged = CarPlayMediaKeys::onMediaAudioChanged,
+            onMediaAudioChanged = onMediaAudioChanged,
         )
     }
 
-    private fun createMediaEngine(sink: AndroidMediaSink): CarPlayMediaEngine =
+    private fun createMediaEngine(sink: MediaSink): CarPlayMediaEngine =
         CarPlayMediaEngine(
             sink = sink,
             microphoneEnabled = microphoneAvailable,
@@ -2813,14 +2817,22 @@ class CarPlayHostActivity : ComponentActivity() {
                 "location=${config.locationReportingEnabled} " +
                 "mfi=local",
         )
+        // Audio to the PC (#31): the router sends audio to SimHub while the link takes it, else to the
+        // tablet, and reports music activity for both, so the tablet sink reports none of its own.
+        val audioToPc = AirPlayPersistence.loadAudioOutputTarget(this) == AudioOutputTarget.PC
         val renderer = createMediaSink(
             videoWidth = airPlayConfig.main.widthPixels,
             videoHeight = airPlayConfig.main.heightPixels,
             controllerGeneration = controllerGeneration,
+            onMediaAudioChanged = if (audioToPc) { _ -> } else CarPlayMediaKeys::onMediaAudioChanged,
         )
         sink = renderer
         currentSurface?.let(::attachSurface)
-        val media = createMediaEngine(renderer)
+        val audioRouter = if (audioToPc) {
+            SwitchingMediaSink(renderer, onMediaAudioChanged = CarPlayMediaKeys::onMediaAudioChanged)
+        } else null
+        CarPlayMediaKeys.audioFocusAllowed = audioRouter?.let { router -> { !router.routesToPc } } ?: { true }
+        val media = createMediaEngine(audioRouter ?: renderer)
         val pairings = AirPlayPersistence.loadPairings(this) { id, key ->
             AirPlayPersistence.savePairing(this, id, key)
         }
