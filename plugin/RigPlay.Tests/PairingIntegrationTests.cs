@@ -144,6 +144,28 @@ namespace RigPlayPlugin.Tests
         }
 
         [Fact]
+        public void AudioHooksSeeOnlyPairedSessions()
+        {
+            string started = null;
+            System.Net.IPAddress from = null, lost = null;
+            host.AudioStart += (stream, format, rate, channels, ip) => { started = stream + "/" + format + "/" + rate + "/" + channels; from = ip; };
+            host.SessionLost += ip => lost = ip;
+            Assert.False(host.IsPairedAddress(System.Net.IPAddress.Loopback));
+            using (var t = Connect())
+            {
+                PairWithPin(t);
+                Assert.True(host.IsPairedAddress(System.Net.IPAddress.Loopback));
+                Assert.Contains(System.Net.IPAddress.Loopback, host.PairedAddresses);
+                t.SendLine("{\"type\":\"audioStart\",\"stream\":\"telephony\",\"format\":\"pcm_s16le\",\"sampleRate\":16000,\"channels\":1}");
+                Assert.True(FakeTablet.WaitFor(() => started != null));
+                Assert.Equal("telephony/pcm_s16le/16000/1", started);
+                Assert.Equal(System.Net.IPAddress.Loopback, from);
+            }
+            Assert.True(FakeTablet.WaitFor(() => lost != null));
+            Assert.False(host.IsPairedAddress(System.Net.IPAddress.Loopback));
+        }
+
+        [Fact]
         public void APendingPinDisappearsWhenItsSessionCloses()
         {
             using (var t = Connect())

@@ -5,6 +5,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using RigPlayPlugin.Net;
 using RigPlayPlugin.Pairing;
 using RigPlayPlugin.Protocol;
@@ -185,8 +186,44 @@ namespace RigPlayPlugin
                 Pairing = Pairing,
             };
             server.SessionsChanged += RaiseChanged;
+            server.AudioStartReceived += (s, m) => RaiseAudio(AudioStart, h => h(m.Stream, m.Format, m.SampleRate, m.Channels, s.Remote.Address));
+            server.AudioStopReceived += (s, m) => RaiseAudio(AudioStop, h => h(m.Stream, s.Remote.Address));
+            server.SessionClosed += s =>
+            {
+                if (s.PairedOrder > 0) RaiseAudio(SessionLost, h => h(s.Remote.Address));
+            };
             Server = server;
             server.Start();
+        }
+
+        // Audio hooks for the receiver (#24, spec §10.1). Raised on network threads; keep handlers short.
+
+        /// <summary>A Paired session sent audioStart: stream, format, sample rate (Hz), channels, the tablet's IP.</summary>
+        public event Action<string, string, int, int, IPAddress> AudioStart;
+
+        /// <summary>A Paired session sent audioStop: stream, the tablet's IP.</summary>
+        public event Action<string, IPAddress> AudioStop;
+
+        /// <summary>A Paired session closed (link loss, replaced, forgotten, shutdown): every stream from that IP stops.</summary>
+        public event Action<IPAddress> SessionLost;
+
+        /// <summary>Remote IPs of the Paired sessions: the only sources audio is accepted from (spec §10.1).</summary>
+        public List<IPAddress> PairedAddresses
+        {
+            get { return Server == null ? new List<IPAddress>() : Server.PairedSessions.Select(s => s.Remote.Address).Distinct().ToList(); }
+        }
+
+        /// <summary>For Receiver.SourceFilter: true when <paramref name="address"/> belongs to a Paired session.</summary>
+        public bool IsPairedAddress(IPAddress address)
+        {
+            var normalized = NetUtil.Normalize(address);
+            return normalized != null && Server != null && Server.PairedSessions.Any(s => s.Remote.Address.Equals(normalized));
+        }
+
+        private static void RaiseAudio<T>(T handler, Action<T> invoke) where T : class
+        {
+            if (handler == null) return;
+            try { invoke(handler); } catch (Exception ex) { PluginLog.Error("An audio handler failed", ex); }
         }
 
         internal void RaiseChanged()
