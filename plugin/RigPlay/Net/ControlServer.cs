@@ -139,6 +139,8 @@ namespace RigPlayPlugin.Net
             try { l?.Stop(); } catch { }
             var open = Sessions;
             foreach (var s in open) s.CloseWithError(ErrorCodes.Shutdown, reason);
+            // Give each tablet the linger time to read the line and close its end (no RST that would eat it).
+            foreach (var s in open) s.WaitClosed(timings.LingerMs + 200);
             PluginLog.Info("Control server stopped (" + open.Count + " session(s) told: " + reason + ")");
         }
 
@@ -231,6 +233,7 @@ namespace RigPlayPlugin.Net
             if (!result.Ok)
             {
                 PluginLog.Info(session + ": pairRequest (" + request.Form + ") answered " + result.Reason);
+                if (result.Reason != PairReasons.PinRequired && result.Reason != PairReasons.WrongPin) session.RestartPairRequestTimer();
                 return;
             }
             session.MarkPaired();

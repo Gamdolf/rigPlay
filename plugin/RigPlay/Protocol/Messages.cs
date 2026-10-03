@@ -991,8 +991,9 @@ namespace RigPlayPlugin.Protocol
         {
             var s = AsString(t, name, 1, int.MaxValue);
             Uri uri;
-            if (!Uri.TryCreate(s, UriKind.Absolute, out uri) || uri.Scheme != Uri.UriSchemeHttp)
-                throw new ProtocolException(name + " must be an absolute http URL");
+            // http is what the plugin sends; https is accepted too, for a future TLS-fronted web dash server.
+            if (!Uri.TryCreate(s, UriKind.Absolute, out uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+                throw new ProtocolException(name + " must be an absolute http or https URL");
             return s;
         }
 

@@ -174,7 +174,7 @@ namespace RigPlayPlugin.Tests
             Assert.InRange(elapsed, 400, 3000);
             Assert.True(t.HeartbeatsReceived >= 3);
             Assert.True(FakeTablet.WaitFor(() => server.PairedSessions.Count == 0));
-            lock (closed) Assert.Contains(closed, s => s.CloseReason.StartsWith("link lost"));
+            Assert.True(FakeTablet.WaitFor(() => { lock (closed) return closed.Any(s => s.CloseReason.StartsWith("link lost")); }));
         }
 
         [Fact]
@@ -336,6 +336,52 @@ namespace RigPlayPlugin.Tests
                 }
             }
             Assert.True(closedAt != DateTime.MaxValue, "the session was not closed");
+        }
+
+        [Fact]
+        public void TheTimeoutRestartsAfterARefusalThatLeavesNoPinPending()
+        {
+            var t = Connect();
+            t.Hello();
+            var started = DateTime.UtcNow;
+            var refusedAt = DateTime.MaxValue;
+            var closedAt = DateTime.MaxValue;
+            while (DateTime.UtcNow < started.AddMilliseconds(4000))
+            {
+                try
+                {
+                    if (refusedAt == DateTime.MaxValue && DateTime.UtcNow > started.AddMilliseconds(500))
+                    {
+                        t.Send(new PairRequestMessage { Token = "bad" });
+                        refusedAt = DateTime.UtcNow;
+                    }
+                    else
+                    {
+                        t.Send(new HeartbeatMessage());
+                    }
+                    if (t.ReadLine() == null) { closedAt = DateTime.UtcNow; break; }
+                }
+                catch (Exception)
+                {
+                    closedAt = DateTime.UtcNow;
+                    break;
+                }
+            }
+            Assert.Contains(t.Received, l => l.Contains("tokenInvalid"));
+            Assert.True(closedAt != DateTime.MaxValue, "the session was not closed");
+            // Closed about PairRequestTimeoutMs (800) after the refusal, not after welcome.
+            Assert.True((closedAt - refusedAt).TotalMilliseconds >= 600, "closed " + (closedAt - refusedAt).TotalMilliseconds + " ms after the refusal");
+        }
+
+        [Fact]
+        public void AFatalErrorReachesATabletThatKeepsSending()
+        {
+            // The tablet has more input in flight when the plugin gives up; the error must still arrive (no RST).
+            var t = Connect();
+            t.SendLine("not a hello");
+            for (var i = 0; i < 50; i++) t.SendLine("{\"type\":\"heartbeat\",\"seq\":" + i + "}");
+            Assert.True(t.ExpectError(ErrorCodes.HelloRequired).IsFatal);
+            t.ExpectClosed();
         }
 
         [Fact]

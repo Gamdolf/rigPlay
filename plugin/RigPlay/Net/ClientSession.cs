@@ -38,6 +38,9 @@ namespace RigPlayPlugin.Net
         /// <summary>How often the session's timer checks the timeouts.</summary>
         public int TickMs { get; set; } = 100;
 
+        /// <summary>After a fatal error, how long the session drains input waiting for the tablet to close.</summary>
+        public int LingerMs { get; set; } = 300;
+
         /// <summary>Socket send timeout, so a stalled tablet cannot block a broadcast forever.</summary>
         public int SendTimeoutMs { get; set; } = 3000;
 
@@ -59,6 +62,9 @@ namespace RigPlayPlugin.Net
         private readonly LineFramer framer = new LineFramer();
         private Timer timer;
         private int closed;
+        private int closing;
+        private long closeDeadline;
+        private string pendingCloseReason;
 
         private long acceptedAt;
         private long welcomeAt;
@@ -120,7 +126,11 @@ namespace RigPlayPlugin.Net
         /// <summary>Order in which sessions' phoneConnected became true; 0 when no phone. Set by the server.</summary>
         public long PhoneConnectedOrder { get; internal set; }
 
-        public bool IsOpen => Volatile.Read(ref closed) == 0;
+        /// <summary>Usable: not closed and not closing after a fatal error.</summary>
+        public bool IsOpen => Volatile.Read(ref closed) == 0 && Volatile.Read(ref closing) == 0;
+
+        /// <summary>The socket is still open (possibly draining after a fatal error).</summary>
+        internal bool IsAlive => Volatile.Read(ref closed) == 0;
 
         /// <summary>Why the session closed, once it has.</summary>
         public string CloseReason { get; private set; }
@@ -145,6 +155,12 @@ namespace RigPlayPlugin.Net
         public bool Send(Message message)
         {
             if (!IsOpen) return false;
+            return SendRaw(message);
+        }
+
+        private bool SendRaw(Message message)
+        {
+            if (!IsAlive) return false;
             var bytes = Utf8.GetBytes(MessageCodec.Encode(message) + "\n");
             try
             {
@@ -173,18 +189,53 @@ namespace RigPlayPlugin.Net
             return Send(state);
         }
 
-        /// <summary>Sends a fatal error, flushes, and closes (spec §14.2).</summary>
+        /// <summary>
+        /// Sends a fatal error and closes (spec §14.2) without losing the line: write it, shut down the sending side
+        /// (FIN), keep reading and discarding until the tablet closes or <see cref="SessionTimings.LingerMs"/> pass, then
+        /// close. Closing with unread input pending would make the OS send RST, and the tablet would drop the line.
+        /// </summary>
         public void CloseWithError(string code, string message)
         {
-            if (!IsOpen) return;
-            Send(ErrorMessage.Of(code, message, fatal: true));
-            Close(code + (string.IsNullOrEmpty(message) ? "" : ": " + message));
+            CloseWithError(ErrorMessage.Of(code, message, fatal: true));
+        }
+
+        /// <summary>As <see cref="CloseWithError(string, string)"/> with a prepared error; it is sent with fatal: true.</summary>
+        public void CloseWithError(ErrorMessage error)
+        {
+            if (!IsOpen || Interlocked.Exchange(ref closing, 1) != 0) return;
+            error.Fatal = true;
+            var reason = error.Code + (string.IsNullOrEmpty(error.Message) ? "" : ": " + error.Message);
+            lock (stateLock)
+            {
+                pendingCloseReason = reason;
+                closeDeadline = clock.NowMs + timings.LingerMs;
+            }
+            if (!SendRaw(error)) return;
+            try
+            {
+                client.Client.Shutdown(SocketShutdown.Send);
+            }
+            catch (Exception)
+            {
+                Close(reason);
+                return;
+            }
+            server.OnSessionChanged(this);
+        }
+
+        /// <summary>Waits up to <paramref name="ms"/> for the session to finish closing.</summary>
+        internal bool WaitClosed(int ms)
+        {
+            var until = DateTime.UtcNow.AddMilliseconds(ms);
+            while (IsAlive && DateTime.UtcNow < until) Thread.Sleep(10);
+            return !IsAlive;
         }
 
         /// <summary>Closes the connection. Idempotent.</summary>
         public void Close(string reason)
         {
             if (Interlocked.Exchange(ref closed, 1) != 0) return;
+            Interlocked.Exchange(ref closing, 1);
             lock (stateLock)
             {
                 State = SessionState.Closed;
@@ -209,14 +260,16 @@ namespace RigPlayPlugin.Net
             var buffer = new byte[8192];
             try
             {
-                while (IsOpen)
+                while (IsAlive)
                 {
                     var read = await stream.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
                     if (read <= 0)
                     {
-                        Close("connection closed by the tablet");
+                        Close(Volatile.Read(ref closing) != 0 ? PendingCloseReason : "connection closed by the tablet");
                         return;
                     }
+                    // After a fatal error the session only drains what the tablet still sends.
+                    if (Volatile.Read(ref closing) != 0) continue;
                     List<string> lines;
                     try
                     {
@@ -225,19 +278,24 @@ namespace RigPlayPlugin.Net
                     catch (LineTooLongException)
                     {
                         CloseWithError(ErrorCodes.LineTooLong, "line exceeds " + ProtocolDefaults.MaxLineBytes + " bytes");
-                        return;
+                        continue;
                     }
                     foreach (var line in lines)
                     {
-                        if (!IsOpen) return;
+                        if (!IsOpen) break;
                         HandleLine(line);
                     }
                 }
             }
             catch (Exception ex)
             {
-                if (IsOpen) Close("read failed: " + ex.Message);
+                if (IsAlive) Close((Volatile.Read(ref closing) != 0 ? PendingCloseReason + "; " : "") + "read failed: " + ex.Message);
             }
+        }
+
+        private string PendingCloseReason
+        {
+            get { lock (stateLock) return pendingCloseReason ?? "closed"; }
         }
 
         private void HandleLine(string line)
@@ -273,7 +331,7 @@ namespace RigPlayPlugin.Net
             if (v < Math.Max(hello.EffectiveMinProtocol, ProtocolDefaults.MinProtocolVersion))
             {
                 PluginLog.Info(this + ": no common protocol version with " + hello.Name + " (tablet " + hello.EffectiveMinProtocol + "-" + hello.Protocol + ")");
-                Send(new ErrorMessage
+                CloseWithError(new ErrorMessage
                 {
                     Code = ErrorCodes.UnsupportedProtocol,
                     Message = "plugin speaks " + ProtocolDefaults.MinProtocolVersion + "-" + ProtocolDefaults.ProtocolVersion
@@ -282,7 +340,6 @@ namespace RigPlayPlugin.Net
                     MinProtocol = ProtocolDefaults.MinProtocolVersion,
                     MaxProtocol = ProtocolDefaults.ProtocolVersion,
                 });
-                Close(ErrorCodes.UnsupportedProtocol);
                 return;
             }
 
@@ -366,6 +423,20 @@ namespace RigPlayPlugin.Net
             server.OnPairedMessage(this, message);
         }
 
+        /// <summary>
+        /// After a refusal that leaves no PIN pending (tokenInvalid, denied, pinExpired, tooManyAttempts) the session
+        /// is back to waiting for the user: the 10 s pairRequest timeout starts again (spec §9).
+        /// </summary>
+        internal void RestartPairRequestTimer()
+        {
+            lock (stateLock)
+            {
+                if (State != SessionState.Unpaired) return;
+                pairRequestSeen = false;
+                welcomeAt = clock.NowMs;
+            }
+        }
+
         /// <summary>Called by the server when pairing succeeded, after the pairResult went out.</summary>
         internal void MarkPaired()
         {
@@ -391,10 +462,17 @@ namespace RigPlayPlugin.Net
 
         private void Tick()
         {
-            if (!IsOpen) return;
+            if (!IsAlive) return;
             try
             {
                 var now = clock.NowMs;
+                if (Volatile.Read(ref closing) != 0)
+                {
+                    long deadline;
+                    lock (stateLock) deadline = closeDeadline;
+                    if (now >= deadline) Close(PendingCloseReason);
+                    return;
+                }
                 var state = State;
                 if (state == SessionState.AwaitingHello)
                 {

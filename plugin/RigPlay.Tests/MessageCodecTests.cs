@@ -53,6 +53,7 @@ namespace RigPlayPlugin.Tests
         [InlineData("{\"type\":\"status\",\"phoneConnected\":false,\"screen\":\"off\",\"nowPlaying\":null}", true)]
         [InlineData("{\"type\":\"state\",\"audio\":{\"enabled\":true,\"port\":1,\"formats\":[]}}", false)]
         [InlineData("{\"type\":\"state\",\"dashboardUrl\":\"ftp://x/y\",\"audio\":{\"enabled\":true,\"port\":1,\"formats\":[]}}", false)]
+        [InlineData("{\"type\":\"state\",\"dashboardUrl\":\"https:\\/\\/pc\\/dashboard\\/A\",\"audio\":{\"enabled\":true,\"port\":1,\"formats\":[]}}", true)]
         [InlineData("{\"type\":\"error\",\"code\":\"unsupportedProtocol\"}", false)]
         [InlineData("{\"type\":\"error\",\"code\":\"somethingNew\",\"fatal\":true}", true)]
         [InlineData("{\"type\":\"audioStart\",\"stream\":\"alt\",\"format\":\"pcm_s16le\",\"sampleRate\":7900,\"channels\":1}", false)]
