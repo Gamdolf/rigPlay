@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // AudioSender: streams audio to the rigPlay plugin's audio port the way the tablet does (docs/protocol.md §10):
 // 12-byte big-endian header, s16 little-endian payload, 5 ms datagrams by default, the start flag on the first
-// one, seq and timestamp from 0. There is no control channel here: the plugin accepts audio only from the IP of a
-// paired tablet that sent audioStart for the stream, so pair a (fake) tablet from the same address and send
+// one, seq and timestamp from 0; or, with --opus, one 20 ms Opus packet per datagram (§10.4), encoded with
+// Concentus. There is no control channel here: the plugin accepts audio only from the IP of a paired tablet that
+// sent audioStart for the stream (in the same format), so pair a (fake) tablet from the same address and send
 // audioStart on its control connection first; otherwise the datagrams are counted as rejected.
 //
 //   dotnet run -- <host> <port> <file.wav> [options]
@@ -10,6 +11,8 @@
 //
 // Options:
 //   --tone <hz>          send a sine tone instead of a file
+//   --opus [kbps]        send Opus packets (20 ms each) instead of PCM, at kbps (default 96 stereo, 48 mono);
+//                        the source must be at 8, 12, 16, 24 or 48 kHz
 //   --loss <percent>     drop this share of datagrams at random (seq and timestamp still advance)
 //   --stream <name>      media (default), alt or telephony
 //   --rate <hz>          tone sample rate (default 48000; a multiple of 100 from 8000 to 48000)
@@ -27,6 +30,8 @@ using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Threading;
+using Concentus;
+using Concentus.Enums;
 using RigPlayPlugin.Audio;
 
 namespace RigPlayPlugin.Tools.AudioSender
@@ -44,7 +49,7 @@ namespace RigPlayPlugin.Tools.AudioSender
             {
                 Console.Error.WriteLine("error: " + ex.Message);
                 Console.Error.WriteLine();
-                Console.Error.WriteLine("usage: AudioSender <host> <port> (<file.wav> | --tone <hz>) [--loss <percent>] [--stream media|alt|telephony]");
+                Console.Error.WriteLine("usage: AudioSender <host> <port> (<file.wav> | --tone <hz>) [--opus [kbps]] [--loss <percent>] [--stream media|alt|telephony]");
                 Console.Error.WriteLine("                   [--rate <hz>] [--channels 1|2] [--ms <n>] [--seconds <n>] [--loop] [--volume <0..1>] [--seed <n>]");
                 return 2;
             }
@@ -98,13 +103,29 @@ namespace RigPlayPlugin.Tools.AudioSender
         {
             var rate = source.SampleRate;
             var channels = source.Channels;
-            var frames = Math.Max(1, rate * o.Ms / 1000);
+            var opus = o.Opus;
+            if (opus && !AudioHeader.IsOpusSampleRate(rate))
+            {
+                Console.Error.WriteLine("error: --opus needs a source at 8, 12, 16, 24 or 48 kHz, not " + rate + " Hz (use --rate for a tone, or resample the file)");
+                return 2;
+            }
+            var frames = opus ? rate / 50 : Math.Max(1, rate * o.Ms / 1000);
             var samples = new short[frames * channels];
             var random = o.Seed.HasValue ? new Random(o.Seed.Value) : new Random();
             var maxFrames = o.Seconds > 0 ? (long)(o.Seconds * rate) : long.MaxValue;
+            IOpusEncoder encoder = null;
+            var packet = new byte[AudioHeader.MaxOpusPacketBytes];
+            var kbps = o.OpusKbps > 0 ? o.OpusKbps : channels == 2 ? 96 : 48;
+            if (opus)
+            {
+                encoder = OpusCodecFactory.CreateEncoder(rate, channels, OpusApplication.OPUS_APPLICATION_AUDIO);
+                encoder.Bitrate = kbps * 1000;
+                encoder.Complexity = 5;
+            }
+            var format = opus ? AudioFormat.Opus : AudioFormat.PcmS16le;
 
-            Console.WriteLine("Sending " + AudioHeader.StreamName(o.Stream) + " " + rate + " Hz x" + channels + " pcm_s16le to " + target
-                + ": " + frames + " frames (" + (frames * channels * 2) + " B) per datagram"
+            Console.WriteLine("Sending " + AudioHeader.StreamName(o.Stream) + " " + rate + " Hz x" + channels + " " + AudioHeader.FormatName(format) + " to " + target
+                + ": " + frames + " frames (" + (opus ? "about " + (kbps * 1000 / 50 / 8) + " B, " + kbps + " kbit/s" : (frames * channels * 2) + " B") + ") per datagram"
                 + (o.LossPercent > 0 ? ", " + o.LossPercent.ToString("0.#", CultureInfo.InvariantCulture) + " % simulated loss" : "")
                 + (o.ToneHz > 0 ? ", tone " + o.ToneHz + " Hz" : ", " + o.File) + ". Ctrl+C stops.");
 
@@ -119,14 +140,28 @@ namespace RigPlayPlugin.Tools.AudioSender
                 {
                     var n = source.Read(samples, frames);
                     if (n == 0) break;
-                    var header = AudioHeader.Create(seq, o.Stream, seq == 0 && framesSent == 0, timestamp, rate, channels);
+                    if (opus && n < frames)
+                    {
+                        // The encoder takes whole frames: pad the file's tail with silence.
+                        Array.Clear(samples, n * channels, (frames - n) * channels);
+                        n = frames;
+                    }
+                    var header = AudioHeader.Create(seq, o.Stream, seq == 0 && framesSent == 0, timestamp, rate, channels, format);
+                    byte[] datagram = null;
+                    if (opus)
+                    {
+                        var size = encoder.Encode(samples, frames, packet, packet.Length);
+                        datagram = new byte[AudioHeader.Size + size];
+                        header.Write(datagram, 0);
+                        Array.Copy(packet, 0, datagram, AudioHeader.Size, size);
+                    }
                     if (o.LossPercent > 0 && random.NextDouble() * 100.0 < o.LossPercent)
                     {
                         dropped++;
                     }
                     else
                     {
-                        var datagram = header.Encode(samples, 0, n * channels);
+                        if (datagram == null) datagram = header.Encode(samples, 0, n * channels);
                         try
                         {
                             udp.Send(datagram, datagram.Length, target);
@@ -189,6 +224,8 @@ namespace RigPlayPlugin.Tools.AudioSender
         public bool Loop;
         public double Volume = 0.3;
         public int? Seed;
+        public bool Opus;
+        public int OpusKbps;
 
         public static Options Parse(string[] args)
         {
@@ -205,6 +242,10 @@ namespace RigPlayPlugin.Tools.AudioSender
                 switch (a)
                 {
                     case "--tone": o.ToneHz = Int(Next(), a, 1, 20000); break;
+                    case "--opus":
+                        o.Opus = true;
+                        if (i + 1 < args.Length && int.TryParse(args[i + 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var kbps)) o.OpusKbps = Int(Next(), a, 6, 510);
+                        break;
                     case "--loss": o.LossPercent = Dbl(Next(), a, 0, 100); break;
                     case "--stream":
                         if (!AudioHeader.TryParseStreamName(Next(), out o.Stream)) throw new ArgumentException("--stream must be media, alt or telephony");
@@ -232,6 +273,7 @@ namespace RigPlayPlugin.Tools.AudioSender
             if (o.ToneHz == 0 && o.File == null) throw new ArgumentException("give a WAV file or --tone <hz>");
             if (o.ToneHz > 0 && o.File != null) throw new ArgumentException("give either a WAV file or --tone, not both");
             if (!AudioHeader.IsValidSampleRate(o.Rate)) throw new ArgumentException("--rate must be a multiple of 100 from 8000 to 48000");
+            if (o.Opus && o.ToneHz > 0 && !AudioHeader.IsOpusSampleRate(o.Rate)) throw new ArgumentException("--opus takes --rate 8000, 12000, 16000, 24000 or 48000");
             var datagramBytes = o.Rate * o.Ms / 1000 * o.Channels * 2;
             if (datagramBytes > AudioHeader.MaxPayloadBytes) throw new ArgumentException("--ms too large: " + datagramBytes + " B payload exceeds " + AudioHeader.MaxPayloadBytes);
             return o;

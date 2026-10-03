@@ -121,6 +121,45 @@ namespace RigPlayPlugin.Tests
             return ((JArray)AudioVectors["invalid"]).Select(v => new object[] { (string)v["name"] });
         }
 
+        public static IEnumerable<object[]> OpusAudioVectors()
+        {
+            return ((JArray)AudioVectors["opus"]).Select(v => new object[] { (string)v["name"] });
+        }
+
+        [Theory]
+        [MemberData(nameof(OpusAudioVectors))]
+        public void AnOpusVectorEncodesValidatesAndPlacesByItsToc(string name)
+        {
+            var v = ((JArray)AudioVectors["opus"]).Single(x => (string)x["name"] == name);
+            var h = v["header"];
+            var header = new AudioHeader
+            {
+                Seq = (ushort)(int)h["seq"],
+                StreamType = (byte)(int)h["streamType"],
+                Flags = (byte)(int)h["flags"],
+                Timestamp = (uint)(long)h["timestamp"],
+                SampleRateField = (ushort)(int)h["sampleRateField"],
+                Channels = (byte)(int)h["channels"],
+                Format = AudioHeader.FormatOpus,
+            };
+            Assert.Equal((int)h["format"], header.Format);
+            var payload = Unhex((string)v["payloadHex"]);
+            var datagram = new byte[AudioHeader.Size + payload.Length];
+            AudioDatagram.WriteHeader(header, datagram, 0);
+            Array.Copy(payload, 0, datagram, AudioHeader.Size, payload.Length);
+            Assert.Equal((string)v["datagramHex"], Hex(datagram));
+            Assert.Equal((string)v["headerHex"], Hex(datagram.Take(AudioHeader.Size).ToArray()));
+
+            AudioHeader decoded;
+            var bytes = Unhex((string)v["datagramHex"]);
+            Assert.Null(AudioDatagram.Validate(bytes, 0, bytes.Length, out decoded));
+            Assert.Equal(header, decoded);
+            Assert.True(decoded.IsOpus);
+            Assert.Equal((int)v["frames"], AudioDatagram.Frames(bytes, 0, bytes.Length, decoded));
+            // Decode gives PCM samples, which an opus datagram does not carry.
+            Assert.Throws<ProtocolException>(() => AudioDatagram.Decode(bytes, out decoded));
+        }
+
         [Theory]
         [MemberData(nameof(ValidAudioVectors))]
         public void AnAudioVectorEncodesAndDecodesByteForByte(string name)

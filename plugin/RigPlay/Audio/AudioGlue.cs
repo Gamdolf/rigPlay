@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // AudioGlue.cs: connects the audio receiver (#24) to the control server's sessions (#20), spec §6.6 and §10.1.
 // - state.audio: enabled while the receiver's UDP port is bound, even when no output device could be opened (the
-//   tablet then streams and the page shows "received, not played"); port and formats come from the receiver.
+//   tablet then streams and the page shows "received, not played"); port and formats come from the receiver
+//   (opus first while its Opus setting is on and Concentus is present, §10.4).
 // - audioStart / audioStop of a Paired session start and stop that tablet's stream; datagrams are accepted only
 //   from the IP of a Paired session (SourceFilter), and a stream only from the tablet that started it.
 // - A Paired session closing stops the streams of that tablet. When it was the last Paired session, every stream
@@ -28,7 +29,7 @@ namespace RigPlayPlugin.Audio
             receiver.SourceFilter = host.IsPairedAddress;
             host.AudioEnabled = () => receiver.Listening;
             host.AudioPort = () => receiver.Listening ? receiver.BoundPort : (int?)null;
-            host.AudioFormats = AudioReceiver.SupportedFormats;
+            host.AudioFormats = receiver.SupportedFormats;
             host.AudioStart += OnAudioStart;
             host.AudioStop += OnAudioStop;
             host.SessionLost += OnSessionLost;
@@ -36,7 +37,7 @@ namespace RigPlayPlugin.Audio
             host.PushState();
         }
 
-        /// <summary>The receiver was rebound (audio port changed): tablets get the new state.audio.</summary>
+        /// <summary>The receiver was rebound (audio port changed) or its formats changed (Opus setting): tablets get the new state.audio.</summary>
         public void ListenerChanged()
         {
             if (attached) host.PushState();

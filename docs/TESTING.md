@@ -96,11 +96,14 @@ Without a tablet:
 
 - **Audio:** `plugin/tools/AudioSender` streams a WAV file or a tone as spec datagrams to the plugin's
   audio port. Check that it is heard on the chosen output, that 5 % loss stays listenable, and that
-  stopping the sender silences the output within 1 s.
+  stopping the sender silences the output within 1 s. With `--opus` it sends 20 ms Opus packets; the
+  plugin plays them only while **Opus compression** is on (and `Concentus.dll` is installed), and the
+  Audio section shows the stream as `opus` at about 50 pkt/s.
 
   ```sh
   dotnet run --project plugin/tools/AudioSender -- <pc-ip> 23712 music.wav --loss 5
   dotnet run --project plugin/tools/AudioSender -- <pc-ip> 23712 --tone 440 --seconds 10
+  dotnet run --project plugin/tools/AudioSender -- <pc-ip> 23712 music.wav --opus 96 --loss 5
   ```
 
 - **Control channel:** connect to the control port and type a `hello` line; the plugin answers with

@@ -27,6 +27,7 @@ namespace RigPlayPlugin.Tests
             Assert.Equal("", settings.AudioDeviceId);
             Assert.Equal(RigPlaySettings.DefaultVolume, settings.Volume);
             Assert.False(settings.Muted);
+            Assert.False(settings.AudioOpus); // PCM is the default; Opus is opt-in (spec §10.4)
             Assert.Empty(settings.PairedTablets);
             Assert.Equal(RigPlaySettings.CurrentSchemaVersion, settings.SchemaVersion);
 

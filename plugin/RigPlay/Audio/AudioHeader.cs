@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // AudioHeader.cs: the 12-byte header of an audio datagram (docs/protocol.md §10.2), its codec and its
-// validation. Header fields are big-endian, the PCM payload little-endian. Tested byte for byte against
-// protocol/fixtures/audio-header.json. Pure: no SimHub, WPF or NAudio types (compiled into RigPlay.Tests and
-// into plugin/tools/AudioSender).
+// validation. Header fields are big-endian, the PCM payload little-endian; an Opus payload (§10.4) is one Opus
+// packet, checked by its TOC byte (OpusToc) without a decoder. Tested byte for byte against
+// protocol/fixtures/audio-header.json. Pure: no SimHub, WPF, NAudio or Concentus types (compiled into
+// RigPlay.Tests and into plugin/tools/AudioSender).
 using System;
 
 namespace RigPlayPlugin.Audio
@@ -24,7 +25,7 @@ namespace RigPlayPlugin.Audio
     public enum AudioFormat : byte
     {
         PcmS16le = 1,
-        /// <summary>Reserved in protocol 1.</summary>
+        /// <summary>One Opus packet per datagram (§10.4); sent only when the plugin listed it in state.audio.formats.</summary>
         Opus = 2,
     }
 
@@ -40,8 +41,6 @@ namespace RigPlayPlugin.Audio
         ReservedStreamType,
         /// <summary>format 0 or 3-255.</summary>
         InvalidFormat,
-        /// <summary>format 2 (Opus), reserved in protocol 1.</summary>
-        ReservedFormat,
         /// <summary>channels other than 1 or 2.</summary>
         InvalidChannels,
         /// <summary>sampleRate field outside 80-480.</summary>
@@ -50,6 +49,8 @@ namespace RigPlayPlugin.Audio
         NoPayload,
         /// <summary>Payload length not a positive multiple of 2 x channels (includes less than one frame).</summary>
         PartialFrame,
+        /// <summary>An opus payload that is not one Opus packet: longer than 1275 bytes or with a TOC that describes no frame.</summary>
+        BadOpusPacket,
     }
 
     public struct AudioHeader
@@ -64,6 +65,9 @@ namespace RigPlayPlugin.Audio
 
         /// <summary>Receivers must accept payloads up to this size (§10.2).</summary>
         public const int MaxPayloadBytes = 8192;
+
+        /// <summary>The longest Opus packet a datagram may carry (§10.4; RFC 6716's limit for one frame).</summary>
+        public const int MaxOpusPacketBytes = 1275;
 
         public ushort Seq;
         public AudioStreamType StreamType;
@@ -91,6 +95,16 @@ namespace RigPlayPlugin.Audio
             get { return 2 * Channels; }
         }
 
+        /// <summary>
+        /// Sample frames a valid payload of <paramref name="payloadBytes"/> bytes stands for: whole frames for pcm_s16le,
+        /// what the packet's TOC says for opus (the packet itself must then be read to get them).
+        /// </summary>
+        public int PayloadFrames(byte[] data, int payloadOffset, int payloadBytes)
+        {
+            if (Format == AudioFormat.Opus) return OpusToc.Frames(data, payloadOffset, payloadBytes, SampleRate);
+            return payloadBytes / BlockAlign;
+        }
+
         public static AudioHeader Create(ushort seq, AudioStreamType streamType, bool start, uint timestamp, int sampleRateHz, int channels, AudioFormat format = AudioFormat.PcmS16le)
         {
             return new AudioHeader
@@ -107,7 +121,8 @@ namespace RigPlayPlugin.Audio
 
         /// <summary>
         /// Decodes and validates a datagram. On <see cref="AudioHeaderError.Ok"/> the payload is
-        /// <c>data[offset + Size .. offset + length)</c>, a positive whole number of frames.
+        /// <c>data[offset + Size .. offset + length)</c>: a positive whole number of frames for pcm_s16le, one Opus
+        /// packet for opus.
         /// Reserved flag bits are ignored, as §10.2 requires. The fields are filled in even when the result is an
         /// error, as far as the datagram is long enough, so that the error can be logged with them.
         /// </summary>
@@ -128,13 +143,17 @@ namespace RigPlayPlugin.Audio
             if (type == (byte)AudioStreamType.Mic) return AudioHeaderError.ReservedStreamType;
             if (type < 1 || type > 3) return AudioHeaderError.InvalidStreamType;
             var format = data[offset + 11];
-            if (format == (byte)AudioFormat.Opus) return AudioHeaderError.ReservedFormat;
-            if (format != (byte)AudioFormat.PcmS16le) return AudioHeaderError.InvalidFormat;
+            if (format != (byte)AudioFormat.PcmS16le && format != (byte)AudioFormat.Opus) return AudioHeaderError.InvalidFormat;
             if (header.Channels != 1 && header.Channels != 2) return AudioHeaderError.InvalidChannels;
             if (header.SampleRateField < MinSampleRateField || header.SampleRateField > MaxSampleRateField) return AudioHeaderError.InvalidSampleRate;
 
             var payload = length - Size;
             if (payload <= 0) return AudioHeaderError.NoPayload;
+            if (header.Format == AudioFormat.Opus)
+            {
+                if (payload > MaxOpusPacketBytes || OpusToc.Frames(data, offset + Size, payload, header.SampleRate) <= 0) return AudioHeaderError.BadOpusPacket;
+                return AudioHeaderError.Ok;
+            }
             if (payload % header.BlockAlign != 0) return AudioHeaderError.PartialFrame;
             return AudioHeaderError.Ok;
         }
@@ -232,16 +251,15 @@ namespace RigPlayPlugin.Audio
             }
         }
 
-        /// <summary>Parses the <c>format</c> member of audioStart. Protocol 1 accepts pcm_s16le only.</summary>
+        /// <summary>Parses the <c>format</c> member of audioStart: pcm_s16le or opus.</summary>
         public static bool TryParseFormatName(string name, out AudioFormat format)
         {
-            if (name == "pcm_s16le")
+            switch (name)
             {
-                format = AudioFormat.PcmS16le;
-                return true;
+                case "pcm_s16le": format = AudioFormat.PcmS16le; return true;
+                case "opus": format = AudioFormat.Opus; return true;
+                default: format = 0; return false;
             }
-            format = 0;
-            return false;
         }
 
         /// <summary>True for a sample rate audioStart may announce: a multiple of 100 Hz from 8000 to 48000.</summary>
@@ -250,9 +268,72 @@ namespace RigPlayPlugin.Audio
             return hz % 100 == 0 && hz / 100 >= MinSampleRateField && hz / 100 <= MaxSampleRateField;
         }
 
+        /// <summary>True for a rate an Opus stream may use (§10.4): 8, 12, 16, 24 or 48 kHz.</summary>
+        public static bool IsOpusSampleRate(int hz)
+        {
+            return hz == 8000 || hz == 12000 || hz == 16000 || hz == 24000 || hz == 48000;
+        }
+
         public override string ToString()
         {
             return StreamName(StreamType) + " seq " + Seq + " ts " + Timestamp + " " + SampleRate + " Hz x" + Channels + " " + FormatName(Format) + (IsStart ? " start" : "");
+        }
+    }
+
+    /// <summary>
+    /// Reads what an Opus packet's first byte (the TOC, RFC 6716 §3.1) says about it, so a datagram can be checked
+    /// and placed on the sample clock without decoding it.
+    /// </summary>
+    public static class OpusToc
+    {
+        /// <summary>Frame duration in microseconds for each of the 32 TOC configurations.</summary>
+        private static readonly int[] FrameMicros =
+        {
+            10000, 20000, 40000, 60000, // 0-3   SILK NB
+            10000, 20000, 40000, 60000, // 4-7   SILK MB
+            10000, 20000, 40000, 60000, // 8-11  SILK WB
+            10000, 20000,               // 12-13 hybrid SWB
+            10000, 20000,               // 14-15 hybrid FB
+            2500, 5000, 10000, 20000,   // 16-19 CELT NB
+            2500, 5000, 10000, 20000,   // 20-23 CELT WB
+            2500, 5000, 10000, 20000,   // 24-27 CELT SWB
+            2500, 5000, 10000, 20000,   // 28-31 CELT FB
+        };
+
+        /// <summary>Frames in one Opus frame of the packet at <paramref name="sampleRate"/>; 0 for an empty packet.</summary>
+        public static int SamplesPerFrame(byte[] packet, int offset, int length, int sampleRate)
+        {
+            if (packet == null || length < 1) return 0;
+            var config = (packet[offset] >> 3) & 0x1f;
+            return (int)((long)FrameMicros[config] * sampleRate / 1000000);
+        }
+
+        /// <summary>Opus frames in the packet (1, 2 or the count byte of a code 3 packet); 0 when the packet is malformed.</summary>
+        public static int FrameCount(byte[] packet, int offset, int length)
+        {
+            if (packet == null || length < 1) return 0;
+            switch (packet[offset] & 0x03)
+            {
+                case 0: return 1;
+                case 1:
+                case 2: return 2;
+                default:
+                    if (length < 2) return 0;
+                    return packet[offset + 1] & 0x3f;
+            }
+        }
+
+        /// <summary>
+        /// Sample frames the packet decodes to at <paramref name="sampleRate"/>, or 0 when it is malformed (no TOC, a
+        /// code 3 packet without its count byte or with a count of 0, or more than 120 ms of audio).
+        /// </summary>
+        public static int Frames(byte[] packet, int offset, int length, int sampleRate)
+        {
+            var count = FrameCount(packet, offset, length);
+            if (count <= 0) return 0;
+            var config = (packet[offset] >> 3) & 0x1f;
+            if ((long)FrameMicros[config] * count > 120000) return 0;
+            return SamplesPerFrame(packet, offset, length, sampleRate) * count;
         }
     }
 }

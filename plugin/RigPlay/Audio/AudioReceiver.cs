@@ -6,6 +6,8 @@
 // that source's audioStop or session loss stops it. Without a control channel (tests, AutoStartOnFirstFlag) a
 // datagram with the start flag starts its stream on its own, with no owner. A stream joins the output mix
 // (IAudioSink) when its datagrams arrive and leaves it on audioStop, link loss or 2 s without datagrams. Every 500 ms the receiver publishes an AudioStats snapshot.
+// An opus stream (§10.4) carries an OpusStreamDecoder: each packet is decoded on the receive thread and the PCM goes
+// into the same jitter buffer; opus is accepted only while OpusEnabled is on and Concentus is present.
 // No NAudio, SimHub or WPF types here (compiled into RigPlay.Tests); AudioOutput.cs is the NAudio side.
 using System;
 using System.Collections.Generic;
@@ -45,6 +47,12 @@ namespace RigPlayPlugin.Audio
             Format = format;
             AutoStarted = autoStarted;
             Buffer = new JitterBuffer(sampleRate, channels, targetMs, maxMs);
+            if (format == AudioFormat.Opus)
+            {
+                // Throws when Concentus is missing or the rate is not an Opus rate; OnAudioStart checks both first.
+                Decoder = OpusStreamDecoder.Create(sampleRate, channels);
+                DecodedPcm = new byte[Decoder.MaxPcmBytes];
+            }
         }
 
         public AudioStreamType Type { get; }
@@ -56,6 +64,15 @@ namespace RigPlayPlugin.Audio
 
         /// <summary>The tablet IP whose audioStart started this stream; null for a stream started by its first datagram.</summary>
         public IPAddress Source { get; }
+
+        /// <summary>The stream's Opus decoder; null for pcm_s16le.</summary>
+        public OpusStreamDecoder Decoder { get; }
+
+        /// <summary>Scratch for one decoded Opus packet (receive thread only).</summary>
+        internal readonly byte[] DecodedPcm;
+
+        /// <summary>Opus packets the decoder refused (counted as invalid datagrams too).</summary>
+        internal long DecodeFailures;
 
         /// <summary>In the output mix.</summary>
         public bool Active { get; internal set; }
@@ -99,6 +116,7 @@ namespace RigPlayPlugin.Audio
         private Timer timer;
         private volatile bool running;
         private int ticking;
+        private volatile bool opusEnabled;
 
         private long datagrams;
         private long invalid;
@@ -146,6 +164,23 @@ namespace RigPlayPlugin.Audio
 
         /// <summary>Supplies the output line of the stats (device and state); set by AudioPipeline.</summary>
         public Func<string> OutputStatus { get; set; }
+
+        /// <summary>
+        /// The Opus setting (§10.4): while true, and Concentus is present, opus is listed first in
+        /// <see cref="SupportedFormats"/> and audioStart may name it. Off by default: PCM is the protocol's default. Turning
+        /// it off does not stop an opus stream that is already playing; the tablet restarts it in PCM after the next state.
+        /// </summary>
+        public bool OpusEnabled
+        {
+            get { return opusEnabled; }
+            set { opusEnabled = value; }
+        }
+
+        /// <summary>True while this receiver takes an opus audioStart: the setting is on and the decoder loads.</summary>
+        public bool OpusAccepted
+        {
+            get { return opusEnabled && OpusSupport.Available; }
+        }
 
         /// <summary>The latest snapshot, refreshed every 500 ms.</summary>
         public AudioStats Stats
@@ -197,19 +232,41 @@ namespace RigPlayPlugin.Audio
                 AudioLog.Warn("audioStart ignored: stream " + AudioHeader.StreamName(stream) + " cannot be received");
                 return false;
             }
-            if (!AudioHeader.IsValidSampleRate(sampleRate) || (channels != 1 && channels != 2) || format != AudioFormat.PcmS16le)
+            if (!AudioHeader.IsValidSampleRate(sampleRate) || (channels != 1 && channels != 2) || (format != AudioFormat.PcmS16le && format != AudioFormat.Opus))
             {
-                AudioLog.Warn("audioStart ignored: " + AudioHeader.StreamName(stream) + " " + sampleRate + " Hz x" + channels + " " + AudioHeader.FormatName(format) + " is not a valid protocol 1 format");
+                AudioLog.Warn("audioStart ignored: " + AudioHeader.StreamName(stream) + " " + sampleRate + " Hz x" + channels + " " + AudioHeader.FormatName(format) + " is not a valid format");
                 return false;
+            }
+            if (format == AudioFormat.Opus)
+            {
+                if (!OpusAccepted)
+                {
+                    AudioLog.Warn("audioStart ignored: " + AudioHeader.StreamName(stream) + " in opus, which this receiver did not offer ("
+                        + (opusEnabled ? OpusSupport.UnavailableReason : "the Opus setting is off") + ")");
+                    return false;
+                }
+                if (!AudioHeader.IsOpusSampleRate(sampleRate))
+                {
+                    AudioLog.Warn("audioStart ignored: " + AudioHeader.StreamName(stream) + " opus at " + sampleRate + " Hz; Opus takes 8, 12, 16, 24 or 48 kHz");
+                    return false;
+                }
             }
             lock (gate)
             {
-                StartLocked(stream, sampleRate, channels, format, false, Normalize(source));
+                try
+                {
+                    StartLocked(stream, sampleRate, channels, format, false, Normalize(source));
+                }
+                catch (Exception ex)
+                {
+                    AudioLog.Warn("audioStart " + AudioHeader.StreamName(stream) + " " + AudioHeader.FormatName(format) + " failed: " + ex.Message);
+                    return false;
+                }
             }
             return true;
         }
 
-        /// <summary>audioStart with the JSON member values: stream "media"/"alt"/"telephony", format "pcm_s16le".</summary>
+        /// <summary>audioStart with the JSON member values: stream "media"/"alt"/"telephony", format "pcm_s16le" or "opus".</summary>
         public bool OnAudioStart(string stream, string format, int sampleRate, int channels)
         {
             return OnAudioStart(stream, format, sampleRate, channels, null);
@@ -333,7 +390,7 @@ namespace RigPlayPlugin.Audio
                 streams.TryGetValue(header.StreamType, out stream);
                 if (stream == null || (!stream.Matches(header) && header.IsStart && stream.AutoStarted))
                 {
-                    if (!header.IsStart || !AutoStartOnFirstFlag)
+                    if (!header.IsStart || !AutoStartOnFirstFlag || (header.Format == AudioFormat.Opus && (!OpusAccepted || !AudioHeader.IsOpusSampleRate(header.SampleRate))))
                     {
                         Interlocked.Increment(ref rejected);
                         LogOnce("notstarted:" + header.StreamType, "Dropped " + AudioHeader.StreamName(header.StreamType) + " audio: the stream was not started (no audioStart)");
@@ -355,7 +412,22 @@ namespace RigPlayPlugin.Audio
                     return;
                 }
 
-                stream.Buffer.Push(header.Seq, header.Timestamp, header.IsStart, data, AudioHeader.Size, length - AudioHeader.Size);
+                if (stream.Decoder != null)
+                {
+                    var frames = stream.Decoder.Decode(data, AudioHeader.Size, length - AudioHeader.Size, stream.DecodedPcm);
+                    if (frames <= 0)
+                    {
+                        Interlocked.Increment(ref invalid);
+                        stream.DecodeFailures++;
+                        LogOnce("opus:" + header.StreamType, "Dropped an " + AudioHeader.StreamName(header.StreamType) + " datagram the Opus decoder could not decode (" + (length - AudioHeader.Size) + " bytes); further ones are counted silently");
+                        return;
+                    }
+                    stream.Buffer.Push(header.Seq, header.Timestamp, header.IsStart, stream.DecodedPcm, 0, frames * stream.Buffer.BlockAlign);
+                }
+                else
+                {
+                    stream.Buffer.Push(header.Seq, header.Timestamp, header.IsStart, data, AudioHeader.Size, length - AudioHeader.Size);
+                }
                 stream.LastPacketMs = now;
                 if (!stream.Active)
                 {
@@ -420,6 +492,7 @@ namespace RigPlayPlugin.Audio
                             Late = c.Late,
                             Underruns = c.Underruns,
                             Skips = c.Overflows,
+                            DecodeFailures = stream.DecodeFailures,
                         });
                     }
                 }
@@ -469,6 +542,7 @@ namespace RigPlayPlugin.Audio
                 Deactivate(old);
                 streams.Remove(type);
                 learnedTargetMs[type] = old.Buffer.TargetMs;
+                StopLockedDispose(old);
             }
             var stream = new AudioStream(type, sampleRate, channels, format, auto, targetMs, maxMs, source);
             double learned;
@@ -486,6 +560,7 @@ namespace RigPlayPlugin.Audio
             streams.Remove(type);
             Deactivate(stream);
             learnedTargetMs[type] = stream.Buffer.TargetMs;
+            StopLockedDispose(stream);
             AudioLog.Info("Audio stream " + stream + " stopped (" + reason + ")");
         }
 
@@ -497,6 +572,11 @@ namespace RigPlayPlugin.Audio
                 try { sink?.StreamDeactivated(stream); } catch (Exception ex) { AudioLog.Warn("The audio output failed to remove a stream: " + ex.Message); }
             }
             stream.Buffer.Reset();
+        }
+
+        private void StopLockedDispose(AudioStream stream)
+        {
+            try { stream.Decoder?.Dispose(); } catch { }
         }
 
         private void NotifyActivated(AudioStream stream)
@@ -618,10 +698,16 @@ namespace RigPlayPlugin.Audio
             AudioLog.Warn(message);
         }
 
-        /// <summary>The formats this receiver plays, most preferred first (state.audio.formats, spec §6.6).</summary>
-        public static List<string> SupportedFormats()
+        /// <summary>
+        /// The formats this receiver plays, most preferred first (state.audio.formats, spec §6.6): opus then pcm_s16le
+        /// while <see cref="OpusAccepted"/>, otherwise pcm_s16le alone.
+        /// </summary>
+        public List<string> SupportedFormats()
         {
-            return new List<string> { AudioHeader.FormatName(AudioFormat.PcmS16le) };
+            var formats = new List<string>();
+            if (OpusAccepted) formats.Add(AudioHeader.FormatName(AudioFormat.Opus));
+            formats.Add(AudioHeader.FormatName(AudioFormat.PcmS16le));
+            return formats;
         }
 
         private static IPAddress Normalize(IPAddress address)

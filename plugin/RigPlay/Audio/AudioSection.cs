@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // AudioSection.cs: the Audio section of the rigPlay page (#24), built in code with the Ui helpers like the other
 // sections: the output device picker (friendly names, refresh), the volume slider, mute, and the receiver's
+// Opus toggle (off by default: offers tablets Opus before PCM, docs/protocol.md §10.4), and the receiver's
 // live stats (port, output state, packets/s, loss, buffer depth and format per stream, last error), refreshed
 // every 500 ms while the page is visible. Changes apply to the playing audio at once; the volume is saved
 // shortly after the slider stops moving so dragging does not rewrite the settings file on every step.
@@ -19,6 +20,7 @@ namespace RigPlayPlugin.Audio
         private readonly ComboBox devices = new ComboBox { MinWidth = 320, MaxWidth = 420 };
         private readonly TextBlock volumeText = Ui.Text("");
         private readonly TextBlock portText = Ui.Text("");
+        private readonly TextBlock opusText = Ui.Text("");
         private readonly TextBlock outputText = Ui.Text("");
         private readonly TextBlock mediaText = Ui.Text("");
         private readonly TextBlock altText = Ui.Text("");
@@ -99,6 +101,16 @@ namespace RigPlayPlugin.Audio
                 Log.Info("Audio " + (on ? "muted" : "unmuted") + " from the settings page");
             });
 
+            var opus = Ui.Toggle(Settings.AudioOpus, on =>
+            {
+                Settings.AudioOpus = on;
+                plugin.SaveSettings();
+                Log.Info("Opus " + (on ? "enabled" : "disabled") + " from the settings page; tablets get the new format list");
+                plugin.Audio?.ApplyOpus(); // pushes the new state.audio.formats to paired tablets
+                RefreshOpusText();
+            });
+            RefreshOpusText();
+
             var port = PageKit.CommitTextBox(Settings.AudioPort.ToString(), 90, box =>
             {
                 int value;
@@ -123,12 +135,25 @@ namespace RigPlayPlugin.Audio
                 Ui.Row("Volume", Ui.HStack(12, slider, volumeText)),
                 Ui.Row("Mute", mute),
                 Ui.Row("Audio port (UDP)", Ui.HStack(12, port, portText)),
+                Ui.Row("Opus compression", Ui.HStack(12, opus, opusText)),
                 Ui.Row("Output", outputText),
                 Ui.Row("Music and media", mediaText),
                 Ui.Row("Siri", altText),
                 Ui.Row("Calls", telephonyText),
                 Ui.Row("Datagrams", totalsText),
                 Ui.Row("Last error", errorText));
+        }
+
+        private void RefreshOpusText()
+        {
+            if (!Settings.AudioOpus)
+            {
+                opusText.Text = "Off: tablets send uncompressed PCM (about 1.5 Mbit/s). Turn on for a tablet on weak or shared Wi-Fi.";
+                return;
+            }
+            opusText.Text = OpusSupport.Available
+                ? "On: tablets send Opus (about 0.1 Mbit/s); the tablet falls back to PCM if it cannot encode."
+                : "On, but unavailable: " + OpusSupport.UnavailableReason + ". Tablets send PCM.";
         }
 
         private void PopulateDevices()

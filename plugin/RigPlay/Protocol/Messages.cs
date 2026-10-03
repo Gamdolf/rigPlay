@@ -117,9 +117,11 @@ namespace RigPlayPlugin.Protocol
         public const string Alt = "alt";
         public const string Telephony = "telephony";
         public const string PcmS16Le = "pcm_s16le";
+        public const string Opus = "opus";
 
         public static readonly HashSet<string> All = new HashSet<string>(StringComparer.Ordinal) { Media, Alt, Telephony };
-        public static readonly HashSet<string> Formats = new HashSet<string>(StringComparer.Ordinal) { PcmS16Le };
+        /// <summary>The audioStart formats (§6.11, §10.4); the receiver decides separately whether it accepts opus.</summary>
+        public static readonly HashSet<string> Formats = new HashSet<string>(StringComparer.Ordinal) { PcmS16Le, Opus };
     }
 
     /// <summary>Base of every message. <see cref="Type"/> is the wire <c>type</c>.</summary>
@@ -787,7 +789,14 @@ namespace RigPlayPlugin.Protocol
                 Channels = (int)ReqInt(o, "channels", 1, 2),
             };
             if (m.SampleRate % 100 != 0) throw new ProtocolException("sampleRate must be a multiple of 100");
+            if (m.Format == AudioStreams.Opus && !IsOpusRate(m.SampleRate)) throw new ProtocolException("sampleRate for opus must be 8000, 12000, 16000, 24000 or 48000");
             return m;
+        }
+
+        /// <summary>The sample rates an Opus stream may announce (§10.4).</summary>
+        public static bool IsOpusRate(int hz)
+        {
+            return hz == 8000 || hz == 12000 || hz == 16000 || hz == 24000 || hz == 48000;
         }
 
         // Member readers. Each throws ProtocolException with the member name when the member breaks the rules.

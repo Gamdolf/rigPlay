@@ -29,12 +29,12 @@ either test. A change to a message in the spec changes its fixture in the same c
 | `pairRequest` | `pairRequest.json` (Start), `pairRequest.pin.json`, `pairRequest.token.json` |
 | `pairResult` | `pairResult.json` (ok), `pairResult.pinRequired.json`, `pairResult.wrongPin.json`, `pairResult.denied.json`, `pairResult.tokenInvalid.json` |
 | `heartbeat` | `heartbeat.json` |
-| `state` | `state.json`, `state.minimal.json` (required members only), `state.serverDown.json` |
+| `state` | `state.json`, `state.minimal.json` (required members only), `state.serverDown.json`, `state.opus.json` (Opus preferred) |
 | `status` | `status.json`, `status.idle.json` (no phone), `status.liveStream.json` (null duration) |
 | `command` | `command.json` (media next), `command.playPause.json`, `command.previous.json`, `command.siri.json`, `command.showDashboard.json`, `command.showCarPlay.json` |
 | `telemetry` | `telemetry.json` (every field), `telemetry.partial.json` (absent and null fields) |
 | `error` | `error.json` (unsupportedProtocol), `error.notPaired.json`, `error.shutdown.json` |
-| `audioStart` | `audioStart.json` (media 48 kHz stereo), `audioStart.telephony.json` (16 kHz mono) |
+| `audioStart` | `audioStart.json` (media 48 kHz stereo), `audioStart.telephony.json` (16 kHz mono), `audioStart.opus.json` (Opus) |
 | `audioStop` | `audioStop.json` |
 
 `micStart` and `micStop` are reserved and have no fixtures.
@@ -48,6 +48,11 @@ tests read it.
 - `valid[]`: each entry has the header fields, the PCM samples, and `headerHex`, `payloadHex` and
   `datagramHex` (lower-case hex, no separators). A test MUST encode the fields and samples to exactly
   `datagramHex`, and decode `datagramHex` back to the same fields and samples.
+- `opus[]`: Opus datagrams (format 2, §10.4). Each entry has the header fields, `payloadHex` (one Opus
+  packet as an encoder produced it), `frames` (what the packet decodes to at the header's sample rate,
+  from its TOC byte) and `headerHex` / `datagramHex`. A test MUST encode the header and payload to
+  exactly `datagramHex`, decode it back to the same fields and payload, and derive `frames` from the
+  packet without an Opus decoder.
 - `invalid[]`: each entry has a `datagramHex` and a `reason`. A test MUST reject each one.
 - Header fields are big-endian; the PCM payload is little-endian. `media-44k1-midstream` exists to
   catch a codec that gets the header byte order wrong.
