@@ -16,6 +16,15 @@
     <Compile Include="../RigPlay/Theme.cs" Link="Plugin/Theme.cs" />
   </ItemGroup>
 
+  <!-- The audio receiver's pure logic (#24); AudioOutput.cs and AudioSection.cs need NAudio/WASAPI and WPF and stay out. -->
+  <ItemGroup>
+    <Compile Include="../RigPlay/Audio/AudioHeader.cs" Link="Plugin/Audio/AudioHeader.cs" />
+    <Compile Include="../RigPlay/Audio/JitterBuffer.cs" Link="Plugin/Audio/JitterBuffer.cs" />
+    <Compile Include="../RigPlay/Audio/AudioMath.cs" Link="Plugin/Audio/AudioMath.cs" />
+    <Compile Include="../RigPlay/Audio/AudioStats.cs" Link="Plugin/Audio/AudioStats.cs" />
+    <Compile Include="../RigPlay/Audio/AudioReceiver.cs" Link="Plugin/Audio/AudioReceiver.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="xunit" Version="2.9.2" />

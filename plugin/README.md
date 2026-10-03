@@ -31,3 +31,29 @@ controls and styles at runtime. That keeps the build cross-platform. The files t
 Copy `RigPlay.dll` into SimHub's install folder (`C:\Program Files (x86)\SimHub\`), restart SimHub and accept
 the "new plugin found" prompt. **rigPlay** then appears in the left menu. Settings are stored in
 `PluginsData\Common\RigPlay.RigPlaySettings.json`; log lines are prefixed `[rigPlay]` in SimHub's log.
+
+## Audio receiver (#24)
+
+`RigPlay/Audio/` receives the tablet's audio datagrams (docs/protocol.md §10) on the audio UDP port and plays
+them through NAudio's `WasapiOut` (shared mode) on the device picked on the page:
+
+- `AudioHeader.cs` is the 12-byte header codec, tested against `protocol/fixtures/audio-header.json`.
+- `JitterBuffer.cs` holds one stream: placed by timestamp, 80 ms target, 200 ms maximum, silence for gaps and
+  underruns, late and duplicate datagrams dropped, reset on the start flag.
+- `AudioReceiver.cs` runs the socket and the stream lifecycle. The control server calls
+  `RigPlay.Audio.OnAudioStart(stream, format, sampleRate, channels)`, `OnAudioStop(stream)` and `OnLinkLost()`;
+  until it does, a datagram with the start flag starts its stream (fallback). A stream leaves the mix after
+  2 s without datagrams.
+- `AudioOutput.cs` mixes the streams at 48 kHz stereo float (resampling where needed), ducks media by 12 dB
+  while Siri or a call plays, applies volume and mute live, and follows device removal back to the Windows
+  default. Without any output device it keeps pulling the mix in real time so the stats stay live, and logs
+  that once.
+- `AudioMath.cs`, `AudioStats.cs` and the receiver are pure and unit-tested; `AudioOutput.cs` and
+  `AudioSection.cs` (the page section) need Windows and are not.
+
+`tools/AudioSender/` streams a WAV file or a tone as spec datagrams, for testing without a tablet:
+
+```bash
+dotnet run --project plugin/tools/AudioSender -- 127.0.0.1 23712 music.wav --loss 5
+dotnet run --project plugin/tools/AudioSender -- 127.0.0.1 23712 --tone 440 --seconds 10
+```

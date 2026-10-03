@@ -31,6 +31,9 @@ namespace RigPlayPlugin
         /// <summary>The live settings object; the page edits it and calls SaveSettings().</summary>
         public RigPlaySettings Settings { get; private set; } = new RigPlaySettings();
 
+        /// <summary>The audio receiver and output (#24); the control server forwards audioStart / audioStop to it.</summary>
+        public global::RigPlayPlugin.Audio.AudioPipeline Audio { get; private set; }
+
         public string LeftMenuTitle => "rigPlay";
 
         public ImageSource PictureIcon
@@ -74,10 +77,12 @@ namespace RigPlayPlugin
                 + ", audio port " + Settings.AudioPort + ", " + Settings.PairedTablets.Count + " paired tablet(s)");
             // Writes the normalised file back, so a repaired or first-run file is on disk from the start.
             SaveSettings();
+            Audio = new global::RigPlayPlugin.Audio.AudioPipeline(() => Settings);
         }
 
         public void End(PluginManager pluginManager)
         {
+            Audio?.Dispose();
             SaveSettings();
             Log.Info("rigPlay plugin stopped");
         }

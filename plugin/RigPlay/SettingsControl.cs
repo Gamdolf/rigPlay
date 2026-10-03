@@ -29,7 +29,7 @@ namespace RigPlayPlugin
                 BuildStatus(),
                 BuildPairing(),
                 BuildDashboards(),
-                BuildAudio(),
+                new global::RigPlayPlugin.Audio.AudioSection(plugin),
                 BuildData());
             page.Margin = new Thickness(Theme.PagePadding);
             page.MaxWidth = Theme.PageMaxWidth;
