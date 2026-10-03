@@ -246,12 +246,21 @@ enum class AudioStream(override val wire: String, val code: Int) : WireEnum {
     }
 }
 
-/** Audio formats (§6.11) and their datagram `format` codes (§10.2). Protocol 1: PCM only. */
+/**
+ * Audio formats (§6.11) and their datagram `format` codes (§10.2): PCM, the default, and Opus (§10.4), sent
+ * only when the plugin listed it first in `state.audio.formats`.
+ */
 enum class AudioFormat(override val wire: String, val code: Int) : WireEnum {
     PCM_S16LE("pcm_s16le", 1),
+    OPUS("opus", 2),
     ;
 
     companion object {
         fun fromCode(code: Int): AudioFormat? = values().firstOrNull { it.code == code }
+
+        /** The sample rates an Opus stream may use (§10.4). */
+        val OPUS_SAMPLE_RATES = listOf(8_000, 12_000, 16_000, 24_000, 48_000)
+
+        fun fromWire(wire: String): AudioFormat? = values().firstOrNull { it.wire == wire }
     }
 }

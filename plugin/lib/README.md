@@ -18,7 +18,10 @@ The plugin is compiled against these DLLs. They are copied unchanged from a **Si
 | `NAudio.WinMM.dll` | 2.2.1.0 | `WaveOutEvent`, the WinMM fallback output |
 
 Every reference is `Private=false` in `RigPlay.csproj`: SimHub already loads these assemblies into its own
-process, so `RigPlay.dll` is built against them but never ships them. Bundling a second copy could load a
+process, so `RigPlay.dll` is built against them but never ships them. The one exception is not in this folder:
+`Concentus.dll` (the Opus decoder, a NuGet package) ships next to `RigPlay.dll` because SimHub does not have it;
+its own dependencies `System.Memory` and `System.Numerics.Vectors` are SimHub's copies (SimHub 9.12.6 ships
+them with binding redirects), which is why the csproj pins those packages to SimHub's versions and copies none. Bundling a second copy could load a
 different version next to SimHub's and break type identity (a `Newtonsoft.Json` object from one copy is not
 the same type as from the other). Installing the plugin is therefore copying `RigPlay.dll` alone.
 

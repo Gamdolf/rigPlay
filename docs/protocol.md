@@ -369,7 +369,7 @@ Plugin → tablet. A complete snapshot, never a delta. Sent immediately after `p
 | `audio` | object | yes | Audio receiver settings. |
 | `audio.enabled` | boolean | yes | `true`: the plugin's audio receiver is listening on `audio.port` and takes audio from this session. It is `true` even when the PC has no usable output device: the plugin keeps receiving and the settings page says why nothing plays. `false` (the port could not be bound, or audio is off): the tablet MUST NOT send audio and plays it locally. |
 | `audio.port` | integer 1–65535 | yes | UDP port for audio datagrams, sent to the IP address of this TCP connection: the port the receiver is bound to, which is the configured audio port. A changed port is pushed in a new `state`. |
-| `audio.formats` | array of string | yes | Formats the receiver accepts, most preferred first. Protocol 1 defines `pcm_s16le` only. |
+| `audio.formats` | array of string | yes | Formats the receiver accepts, most preferred first: `pcm_s16le` (always listed) and, when the plugin's **Opus** setting is on, `opus` ([§10.4](#104-opus)). The tablet sends the first format it supports and ignores names it does not know. A changed list is pushed in a new `state`; the tablet then restarts its streams in the new format. |
 
 ### 6.7 `status`
 
@@ -524,8 +524,8 @@ Sent only while `state.audio.enabled` is `true`.
 |---|---|---|---|
 | `type` | string | yes | `"audioStart"` |
 | `stream` | string enum | yes | `media` (music and other media), `alt` (Siri and other alternate audio), `telephony` (calls). |
-| `format` | string enum | yes | One of `state.audio.formats`. Protocol 1: `pcm_s16le`. |
-| `sampleRate` | integer | yes | Hz. A multiple of 100 from 8000 to 48000, because the header carries it in units of 100 Hz. |
+| `format` | string enum | yes | `pcm_s16le` or `opus`, one of `state.audio.formats`. A tablet never sends `opus` to a plugin that did not list it, which is why the value needs no feature string ([§7.2](#72-what-needs-a-new-version)). |
+| `sampleRate` | integer | yes | Hz. A multiple of 100 from 8000 to 48000, because the header carries it in units of 100 Hz. For `opus`: 8000, 12000, 16000, 24000 or 48000, the rates an Opus encoder takes. |
 | `channels` | integer | yes | 1 or 2. |
 
 A new `audioStart` for a stream that is already started restarts it with the new parameters; this is
@@ -591,7 +591,9 @@ These do not need a new version:
 - adding a feature string.
 
 Adding a value to an existing enum needs a feature string, because receivers reject unknown enum
-values as `badMessage` (except in `telemetry`, where the field degrades to `null`).
+values as `badMessage` (except in `telemetry`, where the field degrades to `null`). The `audioStart`
+`format` value `opus` is the one exception: `state.audio.formats` already tells the tablet what the
+plugin accepts, so the list is its gate and a plugin that does not list `opus` is never sent it.
 
 ### 7.3 Features
 
@@ -666,8 +668,9 @@ Tablet reconnection:
 
 ## 10. Audio over UDP
 
-The tablet sends the PCM it decodes from the phone's AirPlay audio streams to the plugin, which plays
-it on the PC. Datagrams go to the IP address the tablet's TCP connection is connected to and to port
+The tablet sends the audio it decodes from the phone's AirPlay audio streams to the plugin, which plays
+it on the PC: as PCM by default, or as Opus packets when the plugin asks for them ([§10.4](#104-opus)).
+Datagrams go to the IP address the tablet's TCP connection is connected to and to port
 `state.audio.port`.
 
 ### 10.1 Stream lifecycle
@@ -698,29 +701,30 @@ it on the PC. Datagrams go to the IP address the tablet's TCP connection is conn
 +-------------------------------+---------------+---------------+
 |        sampleRate / 100       |   channels    |    format     |  bytes 8-11
 +-------------------------------+---------------+---------------+
-|                     payload: PCM s16le ...                    |  bytes 12-
+|            payload: PCM s16le, or one Opus packet ...         |  bytes 12-
 +---------------------------------------------------------------+
 ```
 
 All multi-byte header fields are **big-endian** (network byte order). The PCM payload is
-**little-endian**. [`audio-header.json`](../protocol/fixtures/audio-header.json) gives byte-exact
-vectors; both codecs are tested against them.
+**little-endian**; an Opus payload is the packet as the encoder produced it.
+[`audio-header.json`](../protocol/fixtures/audio-header.json) gives byte-exact vectors; both codecs
+are tested against them.
 
 | Offset | Size | Field | Description |
 |---|---|---|---|
 | 0 | 2 | `seq` (u16) | Datagram counter per stream: 0 for the first datagram after `audioStart`, +1 per datagram, 65535 wraps to 0. Compared with serial-number arithmetic (RFC 1982). |
 | 2 | 1 | `streamType` (u8) | 1 = `media`, 2 = `alt`, 3 = `telephony`, 4 = reserved for `mic` (PC → tablet only; rejected from a tablet). 0 and 5–255 are invalid. |
 | 3 | 1 | `flags` (u8) | Bit 0 (0x01) `start`: first datagram after `audioStart`; the receiver resets that stream's jitter buffer. Bits 1–7 are reserved: senders set 0, receivers ignore them. |
-| 4 | 4 | `timestamp` (u32) | Sample clock: number of sample frames (one sample per channel) sent on this stream before the first frame of this datagram. 0 at `audioStart`; 4294967295 wraps to 0. A jump larger than the previous datagram's frame count means the sender skipped audio; the receiver plays silence for the gap. The sender MUST advance the clock over audio it did not send (lost before it, dropped from a queue, refused by its decoder): a stream that stays contiguous while short of real time drains the receiver's buffer into underruns. |
+| 4 | 4 | `timestamp` (u32) | Sample clock: number of sample frames (one sample per channel) sent on this stream before the first frame of this datagram, at the header's `sampleRate`; for `opus` a datagram covers the frames its packet decodes to. 0 at `audioStart`; 4294967295 wraps to 0. A jump larger than the previous datagram's frame count means the sender skipped audio; the receiver plays silence for the gap. The sender MUST advance the clock over audio it did not send (lost before it, dropped from a queue, refused by its decoder): a stream that stays contiguous while short of real time drains the receiver's buffer into underruns. |
 | 8 | 2 | `sampleRate` (u16) | Sample rate in units of 100 Hz: 48000 Hz → 480, 44100 Hz → 441, 24000 Hz → 240, 16000 Hz → 160. Valid values 80–480. Rates that are not a multiple of 100 Hz (11025, 22050) are resampled by the sender. |
 | 10 | 1 | `channels` (u8) | 1 or 2. |
-| 11 | 1 | `format` (u8) | 1 = `pcm_s16le`. 2 = reserved for Opus. 0 and other values are invalid. |
-| 12 | n | payload | For `pcm_s16le`: interleaved signed 16-bit little-endian samples (L, R, L, R, … for stereo). `n` MUST be a positive multiple of `2 × channels`. |
+| 11 | 1 | `format` (u8) | 1 = `pcm_s16le`, 2 = `opus`. 0 and 3–255 are invalid. |
+| 12 | n | payload | For `pcm_s16le`: interleaved signed 16-bit little-endian samples (L, R, L, R, … for stereo). `n` MUST be a positive multiple of `2 × channels`. For `opus`: exactly one Opus packet (RFC 6716 §3), 1 to 1275 bytes, whose TOC byte describes a packet of 1 to 48 frames; a code 3 packet with a frame count of 0 is invalid. |
 
 Limits:
 
 - A datagram without at least one complete frame after the header (shorter than `12 + 2 × channels`
-  bytes), or with an invalid header field, is dropped and counted.
+  bytes for `pcm_s16le`, no payload for `opus`), or with an invalid header field, is dropped and counted.
 - Senders SHOULD keep each datagram at or below 1472 bytes (payload ≤ 1460) so it is not
   IP-fragmented, since one lost fragment loses the whole datagram. At 48 kHz stereo that allows
   365 frames; the recommended size is 240 frames (5 ms, 960 bytes of payload). At 24 kHz mono and
@@ -729,7 +733,7 @@ Limits:
   (1920 bytes) still works.
 
 48 kHz stereo s16 is 1.536 Mbit/s of payload, about 1.56 Mbit/s with headers at 200 datagrams/s
-(plus UDP/IP overhead).
+(plus UDP/IP overhead). Opus at 96 kbit/s is about 0.1 Mbit/s at 50 datagrams/s.
 
 Senders SHOULD mark the datagrams DSCP EF (46, TOS byte 0xB8): Wi-Fi maps it to the voice access
 category, so the 5 ms cadence survives other traffic on the tablet's radio. A sender on Wi-Fi SHOULD
@@ -756,6 +760,28 @@ lock); power save and background scans hold datagrams back and release them in b
   the audio. A sender SHOULD log how long its sends block and how long the gaps between them get, so a
   stall can be placed on the radio or on the sender.
 - `alt` and `telephony` are mixed with `media`; the plugin ducks `media` while either is active.
+
+### 10.4 Opus
+
+Opus is optional and off by default on both sides: a plugin lists `opus` in `state.audio.formats` only
+while its **Opus** setting is on, and a tablet sends it only when the plugin listed it before
+`pcm_s16le`. PCM stays the default because on a home LAN the bandwidth is not the problem
+([ADR 0006](decisions/0006-opus-optional.md)); Opus is for a tablet on a weak or shared Wi-Fi link,
+where 50 small datagrams per second survive what 200 large ones do not.
+
+- `audioStart` names `format: "opus"` with a `sampleRate` of 8000, 12000, 16000, 24000 or 48000 and 1
+  or 2 channels. A source at another rate (44100) is resampled by the sender to 48000 first.
+- Each datagram carries one Opus packet. Senders SHOULD use 20 ms packets (the encoder's default;
+  960 frames at 48 kHz) and a constant or variable bitrate of about 96 kbit/s for stereo and 48 kbit/s
+  for mono; the header's `timestamp` advances by the frames the packet decodes to, so a receiver that
+  cannot decode a packet still knows how much audio it stood for.
+- The receiver creates one decoder per stream at `audioStart` and resets it with the stream. It decodes
+  each packet as it arrives and places the PCM by timestamp as for `pcm_s16le`; a lost packet plays as
+  silence. Opus packet loss concealment and in-band FEC are not used in this version.
+- A receiver that cannot decode a packet (corrupt or not a packet) drops and counts it as invalid.
+- When the plugin's setting changes it pushes a new `state`; the tablet sends `audioStart` again in the
+  format now preferred and the stream restarts. When the tablet cannot encode Opus (no encoder on the
+  device) it falls back to `pcm_s16le`, which the plugin always lists.
 
 ## 11. Dashboard URLs
 

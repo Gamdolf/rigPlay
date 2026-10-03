@@ -35,6 +35,7 @@
     <Compile Include="../RigPlay/Audio/AudioStats.cs" Link="Plugin/Audio/AudioStats.cs" />
     <Compile Include="../RigPlay/Audio/AudioReceiver.cs" Link="Plugin/Audio/AudioReceiver.cs" />
     <Compile Include="../RigPlay/Audio/AudioGlue.cs" Link="Plugin/Audio/AudioGlue.cs" />
+    <Compile Include="../RigPlay/Audio/OpusSupport.cs" Link="Plugin/Audio/OpusSupport.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -43,5 +44,7 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
     <!-- SimHub persists the settings with Newtonsoft.Json; the round-trip test uses the same serialiser, at the version SimHub 9.12.6 ships. -->
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <!-- The Opus codec the plugin decodes with (OpusSupport.cs); the tests also encode with it. -->
+    <PackageReference Include="Concentus" Version="2.2.2" />
   </ItemGroup>
 </Project>

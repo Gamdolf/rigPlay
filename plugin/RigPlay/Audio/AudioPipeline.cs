@@ -28,6 +28,8 @@ namespace RigPlayPlugin.Audio
                 Log.Info("Audio buffer: streams start with the " + s.LearnedAudioBufferMs + " ms learned on this network last time (minimum " + s.AudioBufferMs + " ms)");
             }
             Receiver.TargetLearned += OnTargetLearned;
+            Receiver.OpusEnabled = s?.AudioOpus ?? false;
+            if (Receiver.OpusEnabled && !OpusSupport.Available) Log.Warn("Opus is on in the settings but cannot be decoded: " + OpusSupport.UnavailableReason + ". Tablets are offered PCM only.");
             try
             {
                 output = CreateOutput(settings, Receiver);
@@ -131,6 +133,19 @@ namespace RigPlayPlugin.Audio
             if (s == null) return;
             Receiver.Rebind(s.AudioPort);
             try { PortChanged?.Invoke(); } catch (Exception ex) { Log.Warn("A port change listener failed: " + ex.Message); }
+        }
+
+        /// <summary>The receiver's formats changed (<see cref="ApplyOpus"/>); state.audio.formats must be pushed again.</summary>
+        public event Action FormatsChanged;
+
+        /// <summary>The Opus setting changed: the receiver offers (or stops offering) opus and raises <see cref="FormatsChanged"/>.</summary>
+        public void ApplyOpus()
+        {
+            var s = settings();
+            if (s == null) return;
+            Receiver.OpusEnabled = s.AudioOpus;
+            if (s.AudioOpus && !OpusSupport.Available) Log.Warn("Opus was turned on but cannot be decoded: " + OpusSupport.UnavailableReason + ". Tablets are offered PCM only.");
+            try { FormatsChanged?.Invoke(); } catch (Exception ex) { Log.Warn("A format change listener failed: " + ex.Message); }
         }
 
         public void Dispose()

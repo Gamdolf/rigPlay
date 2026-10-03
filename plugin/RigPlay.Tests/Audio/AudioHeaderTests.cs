@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // AudioHeaderTests.cs: the audio datagram codec against every vector in protocol/fixtures/audio-header.json
-// (docs/protocol.md §10.2): decode, re-encode byte for byte, and reject every invalid datagram.
+// (docs/protocol.md §10.2, §10.4): decode, re-encode byte for byte, place Opus packets by their TOC, and reject
+// every invalid datagram.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -48,6 +49,11 @@ namespace RigPlayPlugin.Tests.Audio
             return Fixture.Value["invalid"].Select(v => new object[] { (string)v["name"] });
         }
 
+        public static IEnumerable<object[]> OpusNames()
+        {
+            return Fixture.Value["opus"].Select(v => new object[] { (string)v["name"] });
+        }
+
         private static JToken Vector(string section, string name)
         {
             return Fixture.Value[section].Single(v => (string)v["name"] == name);
@@ -60,7 +66,8 @@ namespace RigPlayPlugin.Tests.Audio
             Assert.Equal("big-endian", (string)Fixture.Value["byteOrder"]["header"]);
             Assert.Equal("little-endian", (string)Fixture.Value["byteOrder"]["payload"]);
             Assert.Equal(4, Fixture.Value["valid"].Count());
-            Assert.Equal(10, Fixture.Value["invalid"].Count());
+            Assert.Equal(4, Fixture.Value["opus"].Count());
+            Assert.Equal(13, Fixture.Value["invalid"].Count());
         }
 
         [Theory]
@@ -86,8 +93,60 @@ namespace RigPlayPlugin.Tests.Audio
 
             var payloadLength = datagram.Length - AudioHeader.Size;
             Assert.Equal((int)v["frames"], payloadLength / header.BlockAlign);
+            Assert.Equal((int)v["frames"], header.PayloadFrames(datagram, AudioHeader.Size, payloadLength));
             var samples = AudioHeader.DecodeSamples(datagram, AudioHeader.Size, payloadLength);
             Assert.Equal(v["samples"].Select(s => (short)(int)s).ToArray(), samples);
+        }
+
+        [Theory]
+        [MemberData(nameof(OpusNames))]
+        public void OpusVectorEncodesDecodesAndPlacesByItsToc(string name)
+        {
+            var v = Vector("opus", name);
+            var h = v["header"];
+            var datagram = Hex((string)v["datagramHex"]);
+            var payload = Hex((string)v["payloadHex"]);
+
+            AudioHeader header;
+            Assert.Equal(AudioHeaderError.Ok, AudioHeader.TryParse(datagram, out header));
+            Assert.Equal(AudioFormat.Opus, header.Format);
+            Assert.Equal((int)h["seq"], header.Seq);
+            Assert.Equal((string)h["stream"], AudioHeader.StreamName(header.StreamType));
+            Assert.Equal((uint)h["timestamp"], header.Timestamp);
+            Assert.Equal((int)h["sampleRateHz"], header.SampleRate);
+            Assert.Equal((int)h["channels"], header.Channels);
+            Assert.Equal(((int)h["flags"] & 1) == 1, header.IsStart);
+            // The frames come from the TOC byte alone: no decoder is involved.
+            Assert.Equal((int)v["frames"], header.PayloadFrames(datagram, AudioHeader.Size, datagram.Length - AudioHeader.Size));
+            Assert.Equal((int)v["frames"], OpusToc.Frames(payload, 0, payload.Length, header.SampleRate));
+
+            var created = AudioHeader.Create((ushort)(int)h["seq"], (AudioStreamType)(int)h["streamType"], ((int)h["flags"] & 1) == 1,
+                (uint)h["timestamp"], (int)h["sampleRateHz"], (int)h["channels"], AudioFormat.Opus);
+            Assert.Equal((string)v["headerHex"], ToHex(created.ToBytes()));
+            Assert.Equal(datagram, created.ToBytes().Concat(payload).ToArray());
+        }
+
+        [Theory]
+        [InlineData(0xF8, 1, 48000, 960)]   // CELT FB 20 ms, code 0
+        [InlineData(0xF8, 1, 16000, 320)]
+        [InlineData(0xE0, 1, 48000, 120)]   // CELT FB 2.5 ms
+        [InlineData(0x18, 1, 48000, 2880)]  // SILK NB 60 ms
+        [InlineData(0x79, 1, 48000, 1920)]  // code 1: two 20 ms frames
+        [InlineData(0x7A, 1, 48000, 1920)]  // code 2
+        [InlineData(0x7B, 3, 48000, 2880)]  // code 3 with a count byte of 3
+        public void OpusTocGivesTheFramesOfAPacket(int toc, int countByte, int rate, int frames)
+        {
+            var packet = toc == 0x7B ? new[] { (byte)toc, (byte)countByte } : new[] { (byte)toc };
+            Assert.Equal(frames, OpusToc.Frames(packet, 0, packet.Length, rate));
+        }
+
+        [Fact]
+        public void OpusTocRejectsMalformedPackets()
+        {
+            Assert.Equal(0, OpusToc.Frames(new byte[0], 0, 0, 48000));
+            Assert.Equal(0, OpusToc.Frames(new byte[] { 0x7B }, 0, 1, 48000));        // code 3 without its count
+            Assert.Equal(0, OpusToc.Frames(new byte[] { 0x7B, 0x00 }, 0, 2, 48000));  // count 0
+            Assert.Equal(0, OpusToc.Frames(new byte[] { 0x1B, 0x03 }, 0, 2, 48000));  // 3 x 60 ms > 120 ms
         }
 
         [Theory]
@@ -137,11 +196,14 @@ namespace RigPlayPlugin.Tests.Audio
         [InlineData("streamType-zero", AudioHeaderError.InvalidStreamType)]
         [InlineData("streamType-mic-reserved", AudioHeaderError.ReservedStreamType)]
         [InlineData("format-zero", AudioHeaderError.InvalidFormat)]
-        [InlineData("format-opus-reserved", AudioHeaderError.ReservedFormat)]
+        [InlineData("format-three", AudioHeaderError.InvalidFormat)]
         [InlineData("channels-three", AudioHeaderError.InvalidChannels)]
         [InlineData("sampleRate-zero", AudioHeaderError.InvalidSampleRate)]
         [InlineData("sampleRate-above-48k", AudioHeaderError.InvalidSampleRate)]
         [InlineData("payload-partial-frame", AudioHeaderError.PartialFrame)]
+        [InlineData("opus-header-only", AudioHeaderError.NoPayload)]
+        [InlineData("opus-code3-zero-frames", AudioHeaderError.BadOpusPacket)]
+        [InlineData("opus-code3-truncated", AudioHeaderError.BadOpusPacket)]
         public void RejectsInvalidVectorForItsReason(string name, AudioHeaderError expected)
         {
             var datagram = Hex((string)Vector("invalid", name)["datagramHex"]);
@@ -203,8 +265,15 @@ namespace RigPlayPlugin.Tests.Audio
             AudioFormat format;
             Assert.False(AudioHeader.TryParseStreamName("mic", out type));
             Assert.False(AudioHeader.TryParseStreamName("Media", out type));
-            Assert.False(AudioHeader.TryParseFormatName("opus", out format));
+            Assert.False(AudioHeader.TryParseFormatName("flac", out format));
+            Assert.False(AudioHeader.TryParseFormatName("Opus", out format));
+            Assert.True(AudioHeader.TryParseFormatName("opus", out format));
+            Assert.Equal(AudioFormat.Opus, format);
             Assert.True(AudioHeader.TryParseFormatName("pcm_s16le", out format));
+            Assert.True(AudioHeader.IsOpusSampleRate(48000));
+            Assert.True(AudioHeader.IsOpusSampleRate(16000));
+            Assert.False(AudioHeader.IsOpusSampleRate(44100));
+            Assert.False(AudioHeader.IsOpusSampleRate(32000));
             Assert.True(AudioHeader.IsValidSampleRate(44100));
             Assert.True(AudioHeader.IsValidSampleRate(8000));
             Assert.True(AudioHeader.IsValidSampleRate(48000));

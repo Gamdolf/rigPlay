@@ -38,6 +38,8 @@ namespace RigPlayPlugin.Audio
         public double LongestStallMs;
         /// <summary>The buffer is playing slightly faster to trim depth above its target.</summary>
         public bool CatchingUp;
+        /// <summary>Opus packets the decoder could not decode (opus streams only).</summary>
+        public long DecodeFailures;
 
         public string FormatText
         {
@@ -63,7 +65,8 @@ namespace RigPlayPlugin.Audio
                 + " · underruns " + Underruns.ToString(inv)
                 + (Underruns > 0 ? " · longest stall " + LongestStallMs.ToString("0", inv) + " ms" : "")
                 + " · late " + Late.ToString(inv)
-                + " · skips " + Skips.ToString(inv);
+                + " · skips " + Skips.ToString(inv)
+                + (Format == AudioFormat.Opus ? " · undecodable " + DecodeFailures.ToString(inv) : "");
         }
     }
 

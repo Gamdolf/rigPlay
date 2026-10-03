@@ -95,12 +95,19 @@ prompt. **rigPlay** then appears in the left menu. Settings are stored in
 `RigPlay/Audio/` receives the tablet's audio datagrams (docs/protocol.md §10) on the audio UDP port and plays
 them through NAudio's `WasapiOut` (shared mode) on the device picked on the page:
 
-- `AudioHeader.cs` is the 12-byte header codec, tested against `protocol/fixtures/audio-header.json`.
+- `AudioHeader.cs` is the 12-byte header codec, tested against `protocol/fixtures/audio-header.json`; `OpusToc`
+  in it reads an Opus packet's TOC byte so an opus datagram is checked and placed without a decoder.
+- `OpusSupport.cs` decodes the optional Opus format (§10.4) with Concentus, the managed libopus, which ships as
+  `Concentus.dll` next to `RigPlay.dll` (the one assembly SimHub does not have). Everything that touches it is
+  behind `NoInlining`, so a plugin installed without the DLL still loads and offers PCM only.
 - `JitterBuffer.cs` holds one stream: placed by timestamp, 80 ms target, 200 ms maximum, silence for gaps and
   underruns, late and duplicate datagrams dropped, reset on the start flag.
 - `AudioReceiver.cs` runs the socket and the stream lifecycle. A stream starts with the `audioStart` of a paired
   tablet and belongs to that tablet's IP; datagrams from any other source are dropped and counted as rejected.
   It stops on that tablet's `audioStop`, when its session closes, or (from the mix) after 2 s without datagrams.
+  `OpusEnabled` (the **Opus compression** setting, off by default) puts `opus` before `pcm_s16le` in
+  `state.audio.formats` and lets `audioStart` name it; an opus stream decodes each packet on the receive thread
+  into the same jitter buffer.
 - `AudioGlue.cs` connects the receiver to the control server: `audioStart`/`audioStop`/session loss, the
   paired-IP source filter, and `state.audio` (`enabled` while the audio port is bound, even with no output
   device; the tablet then streams and the page shows that nothing plays). Changing the audio port on the page
@@ -112,11 +119,12 @@ them through NAudio's `WasapiOut` (shared mode) on the device picked on the page
 - `AudioMath.cs`, `AudioStats.cs`, the receiver and the glue are pure and unit-tested; `AudioOutput.cs` and
   `AudioSection.cs` (the page section) need Windows and are not.
 
-`tools/AudioSender/` streams a WAV file or a tone as spec datagrams, for testing without a tablet:
+`tools/AudioSender/` streams a WAV file or a tone as spec datagrams, PCM or Opus, for testing without a tablet:
 
 ```bash
 dotnet run --project plugin/tools/AudioSender -- 127.0.0.1 23712 music.wav --loss 5
 dotnet run --project plugin/tools/AudioSender -- 127.0.0.1 23712 --tone 440 --seconds 10
+dotnet run --project plugin/tools/AudioSender -- 127.0.0.1 23712 music.wav --opus 96
 ```
 
 The plugin plays these only after a tablet on the sender's address has paired and sent `audioStart` for the

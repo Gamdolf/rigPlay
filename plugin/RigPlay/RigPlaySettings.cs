@@ -79,6 +79,12 @@ namespace RigPlayPlugin
         /// </summary>
         public int LearnedAudioBufferMs { get; set; }
 
+        /// <summary>
+        /// Offer tablets Opus (spec §10.4) before PCM in state.audio.formats. Off by default: PCM is the protocol's default
+        /// and costs nothing on a home LAN; Opus is for a tablet on a weak or shared Wi-Fi link.
+        /// </summary>
+        public bool AudioOpus { get; set; }
+
         public List<PairedTablet> PairedTablets { get; set; } = new List<PairedTablet>();
 
         /// <summary>

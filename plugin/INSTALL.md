@@ -3,22 +3,24 @@
 The rigPlay plugin runs inside SimHub on the PC. It lets rigPlay tablets find and pair with the PC, tells
 them which SimHub dashboard to show, and plays their CarPlay audio on the PC.
 
-You need Windows with **SimHub 9.12.6 or later**. The release zip `rigPlay-plugin.zip` holds `RigPlay.dll`
-and this file. SimHub already ships everything else the plugin needs.
+You need Windows with **SimHub 9.12.6 or later**. The release zip `rigPlay-plugin.zip` holds `RigPlay.dll`,
+`Concentus.dll` (the Opus audio decoder, used only when you turn Opus on) and this file. SimHub already
+ships everything else the plugin needs.
 
 ## Install
 
 1. **Close SimHub**, including its tray icon (right-click the icon → Exit).
-2. **Copy `RigPlay.dll`** into the folder that holds `SimHubWPF.exe`. It is usually
-   `C:\Program Files (x86)\SimHub\`. Windows asks for administrator rights to write there.
-3. **Unblock the file.** Windows marks files from the internet as blocked, and SimHub then does not load
+2. **Copy `RigPlay.dll` and `Concentus.dll`** into the folder that holds `SimHubWPF.exe`. It is usually
+   `C:\Program Files (x86)\SimHub\`. Windows asks for administrator rights to write there. Without
+   `Concentus.dll` the plugin still works; only the **Opus compression** option is unavailable.
+3. **Unblock the files.** Windows marks files from the internet as blocked, and SimHub then does not load
    them and shows no error. Open PowerShell and run:
 
    ```powershell
-   Unblock-File "C:\Program Files (x86)\SimHub\RigPlay.dll"
+   Unblock-File "C:\Program Files (x86)\SimHub\RigPlay.dll", "C:\Program Files (x86)\SimHub\Concentus.dll"
    ```
 
-   You can also right-click the file → **Properties** → tick **Unblock** → **OK**.
+   You can also right-click each file → **Properties** → tick **Unblock** → **OK**.
 4. **Start SimHub.** It shows a "new plugin found" prompt for rigPlay. Accept it and enable the plugin.
 5. **rigPlay** now appears in SimHub's left menu. Click it to open the rigPlay page.
 
@@ -45,7 +47,8 @@ Click **rigPlay** in SimHub's left menu. The page has these sections:
   name tablets see, and the connected tablets.
 - **Pairing**: PIN requests from tablets and the list of paired tablets.
 - **Dashboards**: the dashboard tablets show, and whether SimHub's web dash server answers.
-- **Audio**: the output device, volume, mute, the audio port (UDP 23712) and live reception figures.
+- **Audio**: the output device, volume, mute, the audio port (UDP 23712), the **Opus compression** switch
+  (off by default; turn it on for a tablet on weak or shared Wi-Fi) and live reception figures.
 
 ## Pair a tablet
 

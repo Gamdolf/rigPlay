@@ -120,6 +120,41 @@ class SimHubLinkAudioTransportTest {
         assertNull(transport.audioTarget)
     }
 
+    @Test fun thePluginsFirstKnownFormatIsTheOneSent() {
+        assertEquals(AudioFormat.PCM_S16LE, SimHubLinkAudioTransport.preferredFormat(listOf("pcm_s16le")))
+        assertEquals(AudioFormat.OPUS, SimHubLinkAudioTransport.preferredFormat(listOf("opus", "pcm_s16le")))
+        assertEquals(AudioFormat.PCM_S16LE, SimHubLinkAudioTransport.preferredFormat(listOf("flac", "pcm_s16le", "opus")))
+        assertNull(SimHubLinkAudioTransport.preferredFormat(listOf("flac")))
+        assertNull(SimHubLinkAudioTransport.preferredFormat(emptyList()))
+    }
+
+    @Test fun opusFirstInTheStateMakesOpusTheFormatAndANewStateChangesIt() {
+        server.stateAfterPairing = server.stateAfterPairing.copy(
+            audio = AudioSettings(enabled = true, port = receiver.localPort, formats = listOf("opus", "pcm_s16le")),
+        )
+        val up = CountDownLatch(1)
+        pairedLink(up)
+        val transport = transport!!
+        assertTrue(up.await(3, TimeUnit.SECONDS))
+        awaitTarget(transport)
+        assertEquals(AudioFormat.OPUS, transport.audioFormat)
+        assertTrue(transport.audioStart(AudioStream.MEDIA, 48_000, 2, AudioFormat.OPUS))
+        assertEquals(SimHubMessage.AudioStart(AudioStream.MEDIA, AudioFormat.OPUS, 48_000, 2), server.await<SimHubMessage.AudioStart>())
+
+        server.send(server.stateAfterPairing.copy(audio = AudioSettings(enabled = true, port = receiver.localPort, formats = listOf("pcm_s16le"))))
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
+        while (transport.audioFormat != AudioFormat.PCM_S16LE && System.nanoTime() < deadline) Thread.sleep(10)
+        assertEquals(AudioFormat.PCM_S16LE, transport.audioFormat)
+        assertNotNull(transport.audioTarget)
+
+        // A list with nothing the tablet knows: no target, audio plays on the tablet.
+        server.send(server.stateAfterPairing.copy(audio = AudioSettings(enabled = true, port = receiver.localPort, formats = listOf("flac"))))
+        val deadline2 = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
+        while (transport.audioTarget != null && System.nanoTime() < deadline2) Thread.sleep(10)
+        assertNull(transport.audioTarget)
+        assertNull(transport.audioFormat)
+    }
+
     @Test fun aReconnectStartsANewEpoch() {
         val up = CountDownLatch(2)
         pairedLink(up)

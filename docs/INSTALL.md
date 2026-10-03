@@ -95,6 +95,9 @@ CarPlay audio (music, navigation, Siri and calls) is sent from the tablet to the
   another), the volume, and mute.
 - Siri and calls lower the music while they play.
 - On the tablet, **Settings → Audio output** chooses between the PC (default) and the tablet's own speaker.
+- **Opus compression** on the rigPlay page is off by default: the tablet sends uncompressed audio, which a
+  home network carries without trouble. Turn it on if the tablet is on a weak or shared Wi-Fi link and
+  audio cuts out while the Audio section shows underruns; the tablet then sends about a tenth of the data.
 - The microphone for Siri and calls is the tablet's in v1.
 
 ## 8. Wheel buttons and dashboard data

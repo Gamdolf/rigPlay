@@ -29,7 +29,8 @@ fills gaps with silence, mixes the streams and plays them through WASAPI on the 
 Details are in [`docs/protocol.md`](../protocol.md), section 10.
 
 The header has a `format` field, and value 2 is reserved for Opus, so compression can be added
-without a new protocol version once the plugin can decode it.
+without a new protocol version once the plugin can decode it. [ADR 0006](0006-opus-optional.md) adds
+it as an option the plugin turns on; PCM stays the default.
 
 ## Consequences
 

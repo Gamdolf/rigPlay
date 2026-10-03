@@ -293,6 +293,7 @@ class SimHubLink(
         format: AudioFormat = AudioFormat.PCM_S16LE,
     ): Boolean {
         require(sampleRate in 8_000..48_000 && sampleRate % 100 == 0) { "sampleRate must be a multiple of 100 in 8000..48000" }
+        require(format != AudioFormat.OPUS || sampleRate in AudioFormat.OPUS_SAMPLE_RATES) { "opus takes 8, 12, 16, 24 or 48 kHz" }
         require(channels == 1 || channels == 2) { "channels must be 1 or 2" }
         if (!state.audioEnabled) return false
         return sendPaired(SimHubMessage.AudioStart(stream, format, sampleRate, channels))

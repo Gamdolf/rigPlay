@@ -16,6 +16,13 @@
 Second pre-release, for testing on a rig. Android versionCode 2, so it installs over 0.1.0-rc.1 when
 both are signed with the same key.
 
+- Opus audio compression as an option, off by default (protocol §10.4). **Opus compression** on the
+  rigPlay page's Audio section makes the plugin offer `opus` before `pcm_s16le`; the tablet then
+  encodes with Android's Opus encoder (20 ms packets, 96 kbit/s stereo or 48 kbit/s mono, about
+  0.1 Mbit/s instead of 1.5) and falls back to PCM on a device without an encoder. The plugin decodes
+  with Concentus, so `rigPlay-plugin.zip` now holds `Concentus.dll` next to `RigPlay.dll`; without it
+  the plugin still loads and offers PCM only. The page shows the format of each stream and the packets
+  that did not decode.
 - Audio to the PC no longer cuts in and out on a tablet on Wi-Fi. The tablet holds a low-latency Wi-Fi
   lock and marks the audio datagrams for the Wi-Fi voice queue while it streams, decodes on an
   audio-priority thread, waits for a busy decoder instead of dropping its packets, and advances the

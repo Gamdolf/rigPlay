@@ -45,12 +45,19 @@ the resolved artifacts are in [licenses/dependencies/](licenses/dependencies/).
 
 ## SimHub plugin runtime dependencies
 
-The plugin uses these libraries at runtime. It does not ship them: they are loaded from SimHub's own
-install, and `RigPlay.dll` is the only file the plugin installs.
+The plugin uses these libraries at runtime. Except for Concentus it does not ship them: they are loaded
+from SimHub's own install.
 
 - NAudio 2.2.1 (`NAudio`, `NAudio.Core`, `NAudio.Wasapi`, `NAudio.WinMM`) — Mark Heath and contributors;
   MIT licence.
 - Newtonsoft.Json 13.0.4 — James Newton-King; MIT licence.
+- Concentus 2.2.2 (`Concentus.dll`, shipped in `rigPlay-plugin.zip` next to `RigPlay.dll`) — Logan Stromberg's
+  managed port of the Opus reference library, copyright Xiph.Org Foundation, Skype Limited, CSIRO, Microsoft
+  Corporation, Jean-Marc Valin, Gregory Maxwell, Mark Borgerding, Timothy B. Terriberry, Logan Stromberg and
+  others; BSD 3-clause licence (the Opus licence), in
+  [licenses/dependencies/Concentus-LICENSE.txt](licenses/dependencies/Concentus-LICENSE.txt). It decodes the
+  optional Opus audio format (protocol §10.4). It uses SimHub's own copies of `System.Memory` and
+  `System.Numerics.Vectors`.
 
 `plugin/lib/` holds unmodified copies of these and the other SimHub 9.12.6 assemblies the plugin compiles
 against (SimHub's own assemblies, log4net, MahApps.Metro), so the plugin builds without a SimHub install.

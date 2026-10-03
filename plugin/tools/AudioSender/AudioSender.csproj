@@ -14,4 +14,9 @@
   <ItemGroup>
     <Compile Include="../../RigPlay/Audio/AudioHeader.cs" Link="Shared/AudioHeader.cs" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- Encodes the Opus stream (the opus option, docs/protocol.md §10.4) with the same codec the plugin decodes with. -->
+    <PackageReference Include="Concentus" Version="2.2.2" />
+  </ItemGroup>
 </Project>

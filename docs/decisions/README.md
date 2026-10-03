@@ -15,6 +15,7 @@ contract and the record explains why it is that way.
 | 0003 | [Plain TCP and JSON lines](0003-protocol-plain-tcp-json.md) | `TcpListener` and newline-delimited JSON, UDP beacon, no `HttpListener`, no TLS in protocol 1 |
 | 0004 | [Dashboards through the web dash server](0004-dashboard-via-web-dash-server.md) | The tablet loads SimHub's own dashboard pages; the plugin only sends the URL |
 | 0005 | [Audio as PCM over UDP](0005-audio-pcm-over-udp.md) | s16le PCM with a 12-byte header, jitter buffer on the PC, Opus later |
+| 0006 | [Opus is optional, not the default](0006-opus-optional.md) | The plugin's setting offers Opus before PCM; Concentus decodes, Android's encoder encodes; PCM stays the baseline |
 
 ## Writing one
 

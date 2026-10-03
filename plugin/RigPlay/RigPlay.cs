@@ -108,6 +108,7 @@ namespace RigPlayPlugin
                 }
                 audioGlue = new global::RigPlayPlugin.Audio.AudioGlue(host, Audio.Receiver);
                 Audio.PortChanged += audioGlue.ListenerChanged;
+                Audio.FormatsChanged += audioGlue.ListenerChanged;
                 Log.Info("Audio receiver wired to the tablet server: " + (Audio.Receiver.Listening ? "UDP " + Audio.Receiver.BoundPort + ", paired tablets only" : "not listening, tablets play locally"));
             }
             catch (Exception ex)
