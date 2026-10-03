@@ -42,6 +42,7 @@ import com.shilapi.xcertplay.network.WirelessHotspotInfo
 import com.shilapi.xcertplay.network.WirelessHotspotBackend
 import com.shilapi.xcertplay.network.WirelessHotspotManager
 import com.shilapi.xcertplay.network.WirelessInterfaceDiagnostics
+import com.shilapi.xcertplay.network.WirelessReceiveDiagnostics
 import com.shilapi.xcertplay.network.WirelessStartupDiagnostics
 import com.shilapi.xcertplay.network.ExistingNetworkHotspotManager
 import com.shilapi.xcertplay.network.wirelessStartupContext
@@ -660,6 +661,7 @@ class CarPlayController(
                     "frequency=${hotspotInfo.frequencyMHz?.toString() ?: "unknown"}MHz",
             )
             var startedBonjour: CarPlayBonjour? = null
+            val receiveDiagnostics = WirelessReceiveDiagnostics(hotspotInfo.interfaceName)
             val diagnostics = WirelessStartupDiagnostics(
                 context = wirelessStartupContext(
                     WirelessModeRequirements.effectiveMode(config.wirelessHotspotMode, Build.VERSION.SDK_INT),
@@ -668,7 +670,8 @@ class CarPlayController(
                 sample = {
                     "${WirelessInterfaceDiagnostics.snapshot(hotspotInfo.interfaceName)} " +
                         "${startedHotspot?.connectionDiagnosticSnapshot() ?: "association=unknown"} " +
-                        (startedBonjour?.diagnosticSnapshot() ?: "bonjour=not_started")
+                        (startedBonjour?.diagnosticSnapshot() ?: "bonjour=not_started") + "\n" +
+                        receiveDiagnostics.snapshot()
                 },
                 log = { message -> if (!isStaleWirelessRun(generation)) debugLog(message) },
             )
