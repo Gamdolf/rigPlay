@@ -37,11 +37,17 @@ namespace RigPlayPlugin
 
         public int AudioPort { get; set; } = ProtocolDefaults.AudioPort;
 
-        /// <summary>The SimHub dashboard pushed to tablets while a game is running; empty for none.</summary>
+        /// <summary>
+        /// The dashboard (folder name under DashTemplates) the tablet shows for the SimHub button in CarPlay
+        /// (state.dashboardUrl); empty for none.
+        /// </summary>
         public string SelectedDashboard { get; set; } = "";
 
-        /// <summary>The dashboard shown while no game is running; empty to keep the selected one.</summary>
+        /// <summary>The dashboard shown while no iPhone is connected (state.idleDashboardUrl); empty for the tablet's home screen.</summary>
         public string IdleDashboard { get; set; } = "";
+
+        /// <summary>SimHub's web dash server port; 0 to use SimHub's own setting (8888 unless changed there).</summary>
+        public int WebDashPort { get; set; }
 
         /// <summary>The output device the tablet's audio plays on; empty for the Windows default device.</summary>
         public string AudioDeviceId { get; set; } = "";
@@ -73,6 +79,8 @@ namespace RigPlayPlugin
                 ControlPort = ProtocolDefaults.ControlPort;
                 AudioPort = ProtocolDefaults.AudioPort;
             }
+
+            if (WebDashPort < 0 || WebDashPort > ProtocolDefaults.MaxPort) WebDashPort = 0;
 
             SelectedDashboard = Clean(SelectedDashboard);
             IdleDashboard = Clean(IdleDashboard);

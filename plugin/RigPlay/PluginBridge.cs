@@ -40,6 +40,12 @@ namespace RigPlayPlugin
                 SimHubVersion = DetectSimHubVersion(),
                 MachineName = Environment.MachineName,
                 SaveSettings = plugin.SaveSettings,
+                SimHubDir = Dashboards.DashboardCatalog.FindSimHubDir(new[]
+                {
+                    AppDomain.CurrentDomain.BaseDirectory,
+                    SafeDirectoryOf(typeof(PluginManager).Assembly),
+                }),
+                SimHubWebPort = DetectSimHubWebPort(),
             };
             Host = new RigPlayHost(plugin.Settings, env);
             Host.Start();
@@ -74,6 +80,47 @@ namespace RigPlayPlugin
                 case LogLevel.Warn: Log.Warn(message); break;
                 default: Log.Error(message); break;
             }
+        }
+
+        private static string SafeDirectoryOf(Assembly assembly)
+        {
+            try { return System.IO.Path.GetDirectoryName(assembly.Location); } catch (Exception) { return null; }
+        }
+
+        /// <summary>
+        /// SimHub keeps its web server port in its application settings (SimHubWPF.exe.config: SimHubWebPort). Read it
+        /// from the loaded settings class by reflection; null when that fails (the page then uses 8888 or its override).
+        /// </summary>
+        private static int? DetectSimHubWebPort()
+        {
+            try
+            {
+                foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+                {
+                    var name = assembly.GetName().Name ?? "";
+                    if (!name.StartsWith("SimHubWPF", StringComparison.OrdinalIgnoreCase)) continue;
+                    Type[] types;
+                    try { types = assembly.GetTypes(); } catch (ReflectionTypeLoadException ex) { types = ex.Types; }
+                    foreach (var type in types)
+                    {
+                        if (type == null || type.Name != "Settings" || type.Namespace == null || !type.Namespace.EndsWith(".Properties")) continue;
+                        var port = type.GetProperty("SimHubWebPort", BindingFlags.Public | BindingFlags.Instance);
+                        var instance = type.GetProperty("Default", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+                        if (port == null || instance == null) continue;
+                        var value = Convert.ToInt32(port.GetValue(instance));
+                        if (value > 0 && value <= 65535)
+                        {
+                            Log.Info("SimHub web dash server port from SimHub's settings: " + value);
+                            return value;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("Could not read SimHub's web server port: " + ex.Message);
+            }
+            return null;
         }
 
         /// <summary>SimHub's version as "9.12.6", from the SimHub executable; null when unknown.</summary>

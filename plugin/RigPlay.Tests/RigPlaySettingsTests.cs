@@ -65,6 +65,16 @@ namespace RigPlayPlugin.Tests
             Assert.Equal(20002, settings.AudioPort);
         }
 
+        [Theory]
+        [InlineData(0, 0)]
+        [InlineData(8888, 8888)]
+        [InlineData(-5, 0)]
+        [InlineData(70000, 0)]
+        public void TheWebDashPortIsZeroForAutomaticOrAValidPort(int port, int expected)
+        {
+            Assert.Equal(expected, new RigPlaySettings { WebDashPort = port }.Normalize().WebDashPort);
+        }
+
         [Fact]
         public void TheDiscoveryPortIsFixedByTheProtocol()
         {

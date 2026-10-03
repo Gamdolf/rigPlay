@@ -65,10 +65,7 @@ namespace RigPlayPlugin
 
         private FrameworkElement BuildDashboards()
         {
-            return Ui.Section("Dashboards",
-                "The SimHub dashboard each tablet shows, while driving and while idle.",
-                Ui.Row("While driving", Display(Settings.SelectedDashboard, "None selected")),
-                Ui.Row("While idle", Display(Settings.IdleDashboard, "Same as while driving")));
+            return new DashboardSection(plugin).Build();
         }
 
         private FrameworkElement BuildAudio()

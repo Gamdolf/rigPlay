@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using RigPlayPlugin.Dashboards;
 using RigPlayPlugin.Net;
 using RigPlayPlugin.Pairing;
 using RigPlayPlugin.Protocol;
@@ -18,6 +19,12 @@ namespace RigPlayPlugin
         public string PluginVersion { get; set; } = "0.0.0";
         public string SimHubVersion { get; set; }
         public string MachineName { get; set; } = Environment.MachineName;
+
+        /// <summary>SimHub's install folder, which holds DashTemplates; null when unknown.</summary>
+        public string SimHubDir { get; set; }
+
+        /// <summary>The web dash server port from SimHub's own settings, when it could be read.</summary>
+        public int? SimHubWebPort { get; set; }
 
         /// <summary>Persists the settings object (SimHub's SaveCommonSettings).</summary>
         public Action SaveSettings { get; set; } = () => { };
@@ -38,7 +45,16 @@ namespace RigPlayPlugin
             Timings = timings ?? SessionTimings.Default;
             Pairing = new PairingService(settings, () => this.env.SaveSettings(), this.clock);
             Pairing.Changed += RaiseChanged;
+            Probe = new WebDashProbe(() => EffectiveWebDashPort);
+            Probe.Changed += () =>
+            {
+                PushState();
+                RaiseChanged();
+            };
         }
+
+        /// <summary>Tests turn the periodic web dash probe off.</summary>
+        public bool ProbeEnabled { get; set; } = true;
 
         /// <summary>PINs, tokens and the paired-tablet list (spec §8).</summary>
         public PairingService Pairing { get; }
@@ -86,6 +102,9 @@ namespace RigPlayPlugin
             StartServer();
             Beacon = new DiscoveryBeacon(BuildBeacon);
             if (BeaconEnabled) Beacon.Start();
+            RefreshDashboards();
+            PluginLog.Info(Dashboards.Count + " dashboard(s) in " + (env.SimHubDir ?? "(SimHub folder not found)") + ", web dash port " + EffectiveWebDashPort);
+            if (ProbeEnabled) Probe.Start();
             RaiseChanged();
         }
 
@@ -96,6 +115,7 @@ namespace RigPlayPlugin
                 if (!started) return;
                 started = false;
             }
+            try { Probe.Stop(); } catch (Exception ex) { PluginLog.Error("Stopping the web dash probe failed", ex); }
             try { Beacon?.Stop(); } catch (Exception ex) { PluginLog.Error("Stopping the beacon failed", ex); }
             try { Server?.Stop(); } catch (Exception ex) { PluginLog.Error("Stopping the control server failed", ex); }
             RaiseChanged();
@@ -151,11 +171,46 @@ namespace RigPlayPlugin
         {
             bool audio;
             try { audio = AudioEnabled != null && AudioEnabled(); } catch (Exception) { audio = false; }
+            var port = EffectiveWebDashPort;
+            var local = session.Local?.Address;
             return new StateMessage
             {
-                DashboardUrl = null,
+                // Sent even when the probe fails, so the tablet can explain the problem (spec §11).
+                DashboardUrl = DashboardUrls.Build(local, port, Settings.SelectedDashboard),
+                IdleDashboardUrl = session.HasFeature(Features.IdleDashboard) ? DashboardUrls.Build(local, port, Settings.IdleDashboard) : null,
+                DashboardServer = Probe.Current,
                 Audio = new AudioInfo { Enabled = audio, Port = Settings.AudioPort, Formats = new List<string> { AudioStreams.PcmS16Le } },
             };
+        }
+
+        // Dashboards (spec §11)
+
+        /// <summary>SimHub's install folder (holds DashTemplates), or null when unknown.</summary>
+        public string SimHubDir => env.SimHubDir;
+
+        /// <summary>The web dash server port: the page's override, else SimHub's setting, else 8888.</summary>
+        public int EffectiveWebDashPort => Settings.WebDashPort > 0 ? Settings.WebDashPort : env.SimHubWebPort ?? ProtocolDefaults.WebDashPort;
+
+        /// <summary>Probes the web dash server every 10 s.</summary>
+        public WebDashProbe Probe { get; }
+
+        /// <summary>The installed dashboards, as of the last <see cref="RefreshDashboards"/>.</summary>
+        public List<DashboardInfo> Dashboards { get; private set; } = new List<DashboardInfo>();
+
+        public List<DashboardInfo> RefreshDashboards()
+        {
+            var dir = string.IsNullOrEmpty(env.SimHubDir) ? null : System.IO.Path.Combine(env.SimHubDir, DashboardCatalog.DashTemplatesFolder);
+            Dashboards = DashboardCatalog.Enumerate(dir);
+            return Dashboards;
+        }
+
+        /// <summary>The page changed the dashboard selection or the port: save, re-probe and push state.</summary>
+        public void DashboardSettingsChanged()
+        {
+            env.SaveSettings();
+            PushState();
+            System.Threading.Tasks.Task.Run(() => Probe.ProbeNow());
+            RaiseChanged();
         }
 
         /// <summary>Deny on the page: discards the pending PIN and tells the tablet `denied` (spec §8 step 4).</summary>
