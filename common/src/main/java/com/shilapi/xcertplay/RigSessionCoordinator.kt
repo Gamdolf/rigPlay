@@ -7,6 +7,7 @@ import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import android.content.Intent
+import com.shilapi.xcertplay.glance.CarPlayGlance
 import com.shilapi.xcertplay.simhub.DiscoveredHost
 import com.shilapi.xcertplay.simhub.NowPlaying
 import com.shilapi.xcertplay.simhub.SimHubCommand
@@ -14,15 +15,19 @@ import com.shilapi.xcertplay.simhub.SimHubDiscovery
 import com.shilapi.xcertplay.simhub.SimHubEndpoints
 import com.shilapi.xcertplay.simhub.SimHubLink
 import com.shilapi.xcertplay.simhub.SimHubLinkAudioTransport
+import com.shilapi.xcertplay.simhub.SimHubLinkMicTransport
 import com.shilapi.xcertplay.simhub.SimHubMediaBridge
 import com.shilapi.xcertplay.simhub.SimHubMessage
+import com.shilapi.xcertplay.simhub.SimHubNav
+import com.shilapi.xcertplay.simhub.SimHubProtocol
 import com.shilapi.xcertplay.simhub.SimHubState
 import com.shilapi.xcertplay.simhub.SimHubStatusSink
 import com.shilapi.xcertplay.host.R
 
 /**
  * Process-wide owner of the SimHub link (#26) and discovery, created by [RigPlayApplication]; runs
- * onboarding (#27) and couples the phone session to the PC through [RigSessionLifecycle] (#29).
+ * onboarding (#27) and couples the phone session to the PC through [RigSessionLifecycle] (#29), which
+ * also picks CarPlay, the idle dashboard or the rigPlay idle screen while nothing else was asked for (#39).
  *
  * Everything here runs on the main thread: link and discovery callbacks are posted to it, and the
  * UI methods must be called from it. Observers ([addObserver]) are told about any change of
@@ -30,6 +35,7 @@ import com.shilapi.xcertplay.host.R
  *
  * API for other features (callable from any thread):
  * - [updateNowPlaying]: the iPhone's now-playing changed (#32); sent in the next `status`.
+ * - `status.nav` (#47) follows [CarPlayGlance] on its own (see followRouteGuidance).
  * - [sendStatus]: re-send the current `status` snapshot (phone, screen, now playing).
  * - [mediaCommandHandler]: receives `command media` from SimHub wheel buttons (#32), on the main thread;
  *   by default [SimHubEndpoints.mediaBridge].
@@ -41,6 +47,10 @@ import com.shilapi.xcertplay.host.R
  */
 object RigSessionCoordinator {
     private const val TAG = "rigplay-coordinator"
+    private const val NAV_EXPIRY_CHECK_MS = 2_000L
+
+    /** `hello.features` (§7.3): `telemetry` feeds [SimHubEndpoints.telemetry] (#41). */
+    private val LINK_FEATURES = setOf(SimHubProtocol.FEATURE_IDLE_DASHBOARD, SimHubProtocol.FEATURE_TELEMETRY, SimHubProtocol.FEATURE_MIC)
 
     private val main = Handler(Looper.getMainLooper())
     private val observers = LinkedHashSet<() -> Unit>()
@@ -106,16 +116,17 @@ object RigSessionCoordinator {
         if (appContext != null) return
         val app = context.applicationContext ?: context
         appContext = app
-        link = SimHubLink(identity(app), LinkListener)
+        link = SimHubLink(identity(app), LinkListener, features = LINK_FEATURES)
         linkPort = EpochLinkPort(SimHubLinkPort.of(link))
         flow = SimHubPairingFlow(linkPort) { notifyObservers() }
-        lifecycle = RigSessionLifecycle(linkPort, RigPhoneSession(app), AppScreens(app)) { Log.i(TAG, it) }
+        lifecycle = RigSessionLifecycle(linkPort, RigPhoneSession(app), AppScreens(app), AppIdleInputs(app)) { Log.i(TAG, it) }
         lifecycle.mediaCommandHandler = pendingMediaHandler
         // CarPlay audio to the PC (#31): the link exists from here on.
         attachAudioTransport()
         // One owner of `status` (§6.7): RigSessionLifecycle.publishStatus. The bridge only feeds it now
         // playing; see NowPlayingToLifecycle.
         SimHubEndpoints.statusSink = NowPlayingToLifecycle
+        followRouteGuidance()
         CarPlayBackgroundSession.onChanged = { main.post(::onPhoneSessionChanged) }
         pairing = AirPlayPersistence.loadSimHubPairing(app)
         pairing?.let(::startPaired)
@@ -142,8 +153,25 @@ object RigSessionCoordinator {
      */
     fun onManualConnect(): Boolean = initialized && lifecycle.onManualConnect(paired = isPaired)
 
-    /** The SimHub button, CarPlay's OEM icon and `command showDashboard` (#30). Any thread. */
+    /** The SimHub button, CarPlay's OEM icon and `command showDashboard` (#30): the main dashboard. Any thread. */
     fun showDashboard(context: Context) = DashboardActivity.open(context.applicationContext ?: context)
+
+    // --- idle mode (#39) ------------------------------------------------------------------------
+
+    /** What the tablet would show by itself now (see [RigSessionLifecycle.policyScreen]); `null`: no policy. */
+    fun policyScreen(): RigSessionLifecycle.PolicyScreen? = if (initialized) lifecycle.policyScreen() else null
+
+    /**
+     * Shows CarPlay or the idle screen the policy wants; call it from a foreground activity. False
+     * when there is none (no PC paired, no phone).
+     */
+    fun showPolicyScreen(): Boolean = initialized && lifecycle.showPolicyScreen()
+
+    /** Settings → "When no iPhone is connected" changed. */
+    fun onIdleSettingsChanged() {
+        if (initialized) lifecycle.onIdleInputsChanged()
+        notifyObservers()
+    }
 
     /** Which rigPlay screen is in the foreground; from [RigPlayApplication]'s activity callbacks. */
     fun onForegroundChanged(foreground: RigSessionLifecycle.Foreground) {
@@ -182,6 +210,24 @@ object RigSessionCoordinator {
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
             )
         }
+
+        override fun showIdleDashboard() = DashboardActivity.openIdle(context)
+
+        override fun showOfflineIdle() = OfflineIdleActivity.open(context)
+
+        override fun showHome() {
+            context.startActivity(
+                Intent(context, RigPlayActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+            )
+        }
+    }
+
+    /** The idle policy's view of the pairing, the settings and the latest `state` (#39). Main thread. */
+    private class AppIdleInputs(private val context: Context) : RigSessionLifecycle.IdleInputs {
+        override fun paired(): Boolean = pairing != null
+        override fun mode(): IdleMode = AirPlayPersistence.loadIdleMode(context)
+        override fun idleDashboardAvailable(): Boolean = DashboardContent.idleDashboardAvailable(state, pairing != null)
     }
 
     // --- onboarding (#27) -----------------------------------------------------------------------
@@ -252,6 +298,11 @@ object RigSessionCoordinator {
     /** Plugs the PC audio path into the link, unless it is already there. Main thread. */
     private fun attachAudioTransport() {
         if (!initialized || SimHubEndpoints.audioTransport != null) return
+        // The PC microphone (#34), when the user chose it: MicrophoneUplink asks for it each time the phone listens.
+        val app = appContext
+        SimHubEndpoints.microphone = SimHubLinkMicTransport(link) {
+            app != null && AirPlayPersistence.loadMicrophoneSource(app) == com.shilapi.xcertplay.media.MicrophoneSource.PC
+        }
         SimHubEndpoints.audioTransport = try {
             SimHubLinkAudioTransport(link)
         } catch (error: java.io.IOException) {
@@ -263,6 +314,7 @@ object RigSessionCoordinator {
 
     /** The link stopped on purpose (Forget, a new PC): audio falls back to the tablet. */
     private fun detachAudioTransport() {
+        SimHubEndpoints.microphone = null
         val transport = SimHubEndpoints.audioTransport
         SimHubEndpoints.audioTransport = null
         (transport as? java.io.Closeable)?.let { runCatching { it.close() } }
@@ -278,6 +330,27 @@ object RigSessionCoordinator {
     private object NowPlayingToLifecycle : SimHubStatusSink {
         override fun updateNowPlaying(nowPlaying: NowPlaying?) = this@RigSessionCoordinator.updateNowPlaying(nowPlaying)
         override fun updatePhone(connected: Boolean, phoneName: String?) = Unit
+    }
+
+    // --- route guidance (#47) -------------------------------------------------------------------
+
+    /** Route state expires without a new frame: while a maneuver is shown, re-read it so `nav` clears. */
+    private val navExpiryCheck = object : Runnable {
+        override fun run() {
+            main.removeCallbacks(this)
+            if (SimHubNav.of(CarPlayGlance.snapshot()) != null) main.postDelayed(this, NAV_EXPIRY_CHECK_MS)
+        }
+    }
+
+    private fun followRouteGuidance() {
+        CarPlayGlance.addListener { glance ->
+            val nav = SimHubNav.of(glance)
+            onMain {
+                main.removeCallbacks(navExpiryCheck)
+                if (nav != null) main.postDelayed(navExpiryCheck, NAV_EXPIRY_CHECK_MS)
+                lifecycle.updateNav(nav)
+            }
+        }
     }
 
     // --- internals ------------------------------------------------------------------------------
@@ -337,6 +410,8 @@ object RigSessionCoordinator {
         }
         updateDiscovery()
         appContext?.let(RigPlaySessionService::refresh)
+        // A new `state` may bring or take away the idle dashboard (#39).
+        lifecycle.onIdleInputsChanged()
         notifyObservers()
     }
 
@@ -424,6 +499,8 @@ object RigSessionCoordinator {
         override fun onLinkUp(state: SimHubState) = fromLink {
             // A stop() may have cleared the PC audio path; the link is up again.
             attachAudioTransport()
+            // The plugin keeps no artwork across sessions (#47).
+            SimHubArtworkPublisher.resend()
             // Only the stored PC drives the phone; onPaired ran just before and stored it.
             if (pairing != null) lifecycle.onLinkUp()
             notifyObservers()
@@ -436,6 +513,8 @@ object RigSessionCoordinator {
         // Media commands reach SimHubEndpoints.mediaBridge through mediaCommandHandler (see
         // routeMediaToBridge); showDashboard/showCarPlay stay in RigSessionLifecycle.
         override fun onCommand(command: SimHubCommand) = fromLink { lifecycle.onCommand(command) }
+        // Up to 10 Hz: straight into the thread-safe store on the link thread, not via the main thread.
+        override fun onTelemetry(telemetry: SimHubMessage.Telemetry) = SimHubEndpoints.telemetry.update(telemetry)
     }
 
     private object DiscoveryListener : SimHubDiscovery.Listener {

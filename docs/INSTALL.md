@@ -80,6 +80,14 @@ without reconnecting the phone.
    any Wi-Fi network by hand. Keep Wi-Fi and Bluetooth on, on both devices. The tablet's home Wi-Fi stays
    connected.
 
+**Choosing the wireless mode** (**Settings → Open connection setup → 1 · Choose your connection**):
+**Wi-Fi Direct** and **Tablet hotspot** have the tablet create a network for the phone while it stays on
+the home Wi-Fi, which only works if its Wi-Fi chip can do both at once. **Existing Wi-Fi network
+(experimental)** creates nothing: the iPhone joins the home Wi-Fi the tablet is already on. Enter that
+network's name and password when you pick it; the iPhone must be able to join the same network. It is
+untested with iOS, so use it only if the other two modes fail on your tablet, and report the result. See
+[Compatibility → Tablets](COMPATIBILITY.md#tablets).
+
 Allow CarPlay on the iPhone when it asks. Once paired, the phone connects whenever the PC is running SimHub
 and the phone is near the tablet.
 
@@ -95,7 +103,16 @@ CarPlay audio (music, navigation, Siri and calls) is sent from the tablet to the
   another), the volume, and mute.
 - Siri and calls lower the music while they play.
 - On the tablet, **Settings → Audio output** chooses between the PC (default) and the tablet's own speaker.
-- The microphone for Siri and calls is the tablet's in v1.
+- The microphone for Siri and calls is the tablet's unless you choose the PC's, below.
+
+**Using the PC's microphone.** To have Siri and callers hear the rig's microphone instead of the tablet's,
+set **Settings → Microphone** on the tablet to **PC via SimHub**, and on the rigPlay page, under
+**Microphone**, leave **Microphone to the phone** on and pick the **Input device** (the Windows default
+recording device unless you choose another; the **Level** meter moves while you speak during a Siri request
+or a call). The tablet falls back to its own microphone whenever the PC is not linked, the switch is off or
+the PC has no input device. There is no echo cancellation on the PC: with speakers, callers can hear
+themselves (and Siri may hear its own voice), so use headphones or a headset with the PC microphone, or keep
+the speaker volume low.
 
 ## 8. Wheel buttons and dashboard data
 

@@ -109,12 +109,35 @@ namespace RigPlayPlugin
         public NowPlaying NowPlaying { get; set; }
         public long StatusReceivedAtMs { get; set; }
 
+        /// <summary>status.nav of the primary tablet (spec §6.7); null when no route guidance is active.</summary>
+        public NavInfo Nav { get; set; }
+
+        /// <summary>The ETA as local "HH:mm", computed once per status so that reading the property does not allocate.</summary>
+        public string NavEta { get; set; } = "";
+
+        /// <summary>The artwork file of the primary tablet (spec §6.14); "" when there is none.</summary>
+        public string ArtworkPath { get; set; } = "";
+
         public string Title => NowPlaying?.Title ?? "";
         public string Artist => NowPlaying?.Artist ?? "";
         public string Album => NowPlaying?.Album ?? "";
         public string App => NowPlaying?.App ?? "";
         public bool Playing => NowPlaying != null && NowPlaying.Playing;
         public double Duration => NowPlaying?.Duration ?? 0;
+
+        public bool NavActive => Nav != null;
+        public string NavManeuver => Nav?.Maneuver ?? "";
+        public double NavDistance => Nav?.DistanceM ?? 0;
+        public string NavRoad => Nav?.Road ?? "";
+
+        /// <summary>An ETA (seconds since the epoch) as local "HH:mm"; "" when unknown or out of range.</summary>
+        public static string FormatEta(long? etaEpochS, TimeZoneInfo zone = null)
+        {
+            if (etaEpochS == null || etaEpochS < 0 || etaEpochS > 253402300799L) return "";
+            var utc = DateTimeOffset.FromUnixTimeSeconds(etaEpochS.Value);
+            var local = TimeZoneInfo.ConvertTime(utc, zone ?? TimeZoneInfo.Local);
+            return local.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+        }
 
         public double PositionAt(long nowMs)
         {

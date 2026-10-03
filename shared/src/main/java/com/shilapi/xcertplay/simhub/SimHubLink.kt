@@ -294,12 +294,40 @@ class SimHubLink(
     ): Boolean {
         require(sampleRate in 8_000..48_000 && sampleRate % 100 == 0) { "sampleRate must be a multiple of 100 in 8000..48000" }
         require(channels == 1 || channels == 2) { "channels must be 1 or 2" }
+        require(stream != AudioStream.MIC) { "mic is not an audioStart stream; use sendMicStart" }
         if (!state.audioEnabled) return false
         return sendPaired(SimHubMessage.AudioStart(stream, format, sampleRate, channels))
     }
 
     /** `audioStop` (§6.12). Returns false unless the link is up. */
     fun sendAudioStop(stream: AudioStream): Boolean = sendPaired(SimHubMessage.AudioStop(stream))
+
+    /**
+     * `micStart` (§6.13): asks the plugin for the PC microphone, mono [sampleRate] Hz, to UDP [port] on this tablet.
+     * Returns false unless [SimHubState.micAvailable] (link up, feature `mic`, `state.mic.enabled`).
+     */
+    fun sendMicStart(sampleRate: Int, port: Int = SimHubProtocol.MIC_PORT): Boolean {
+        require(sampleRate in 8_000..48_000 && sampleRate % 100 == 0) { "sampleRate must be a multiple of 100 in 8000..48000" }
+        require(port in 1..65_535) { "port must be 1..65535" }
+        if (!state.micAvailable) return false
+        return sendPaired(SimHubMessage.MicStart(sampleRate = sampleRate, port = port))
+    }
+
+    /** `micStop` (§6.13). Returns false unless the link is up with feature `mic`. */
+    fun sendMicStop(): Boolean {
+        if (!state.paired || !state.hasFeature(SimHubProtocol.FEATURE_MIC)) return false
+        return sendPaired(SimHubMessage.MicStop())
+    }
+
+    /**
+     * `artwork` (#47): the now-playing artwork as base64 [SimHubProtocol.MIME_JPEG] by default. Returns
+     * false unless the link is up, or when the line would exceed [SimHubProtocol.MAX_LINE_BYTES].
+     */
+    fun sendArtwork(base64: String, mime: String = SimHubProtocol.MIME_JPEG): Boolean {
+        val message = SimHubMessage.Artwork(mime, base64)
+        if (SimHubProtocol.encodeLine(message).size > SimHubProtocol.MAX_LINE_BYTES) return false
+        return sendPaired(message)
+    }
 
     /** Answers a [SimHubCommand] that cannot be carried out now with `commandUnavailable` (§6.8). */
     fun sendCommandUnavailable(message: String? = null): Boolean {
@@ -572,6 +600,7 @@ class SimHubLink(
                                 idleDashboardUrl = message.idleDashboardUrl,
                                 dashboardServer = message.dashboardServer,
                                 audio = message.audio,
+                                mic = message.mic,
                             ),
                         )
                     }
@@ -591,7 +620,10 @@ class SimHubLink(
                 is SimHubMessage.PairRequest,
                 is SimHubMessage.Status,
                 is SimHubMessage.AudioStart,
-                is SimHubMessage.AudioStop -> {
+                is SimHubMessage.AudioStop,
+                is SimHubMessage.MicStart,
+                is SimHubMessage.MicStop,
+                is SimHubMessage.Artwork -> {
                     sendErrorReply(SimHubProtocol.ERROR_UNEXPECTED_MESSAGE, "${message.type} is tablet to plugin", message.type)
                     null
                 }

@@ -44,7 +44,9 @@ class RigPlayApplication : Application() {
     companion object {
         fun foregroundOf(activity: Activity): RigSessionLifecycle.Foreground = when (activity) {
             is CarPlayHostActivity -> RigSessionLifecycle.Foreground.CARPLAY
-            is DashboardActivity -> RigSessionLifecycle.Foreground.DASHBOARD
+            is DashboardActivity ->
+                if (activity.idleMode) RigSessionLifecycle.Foreground.IDLE_DASHBOARD else RigSessionLifecycle.Foreground.DASHBOARD
+            is OfflineIdleActivity -> RigSessionLifecycle.Foreground.OFFLINE_IDLE
             else -> RigSessionLifecycle.Foreground.HOME
         }
     }
