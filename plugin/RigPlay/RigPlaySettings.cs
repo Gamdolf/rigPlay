@@ -12,7 +12,12 @@ namespace RigPlayPlugin
     public class RigPlaySettings
     {
         /// <summary>The shape of this file; bump it when a field changes meaning so Normalize can migrate.</summary>
-        public const int CurrentSchemaVersion = 1;
+        /// <remarks>2: protocol ports (23711/23712), host id, token hashes instead of tokens.</remarks>
+        public const int CurrentSchemaVersion = 2;
+
+        /// <summary>Placeholder defaults of schema 1, migrated by Normalize.</summary>
+        internal const int LegacyControlPort = 18877;
+        internal const int LegacyAudioPort = 18879;
 
         public const int MinVolume = 0;
         public const int MaxVolume = 100;
@@ -65,6 +70,14 @@ namespace RigPlayPlugin
         /// </summary>
         public RigPlaySettings Normalize()
         {
+            if (SchemaVersion == 1)
+            {
+                // Schema 1 (plugin skeleton) used placeholder ports before docs/protocol.md fixed them: move files
+                // that still carry those defaults to the protocol's.
+                if (ControlPort == LegacyControlPort) ControlPort = ProtocolDefaults.ControlPort;
+                if (AudioPort == LegacyAudioPort) AudioPort = ProtocolDefaults.AudioPort;
+                SchemaVersion = CurrentSchemaVersion;
+            }
             if (SchemaVersion < 1 || SchemaVersion > CurrentSchemaVersion) SchemaVersion = CurrentSchemaVersion;
 
             if (!IsValidHostId(HostId)) HostId = NewHostId();

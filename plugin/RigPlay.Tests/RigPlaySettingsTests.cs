@@ -65,6 +65,23 @@ namespace RigPlayPlugin.Tests
             Assert.Equal(20002, settings.AudioPort);
         }
 
+        [Fact]
+        public void ASchema1FileMovesFromThePlaceholderPortsToTheProtocolPorts()
+        {
+            // The file the plugin skeleton wrote on the test VM.
+            var old = JsonConvert.DeserializeObject<RigPlaySettings>(
+                "{\"SchemaVersion\":1,\"ControlPort\":18877,\"DiscoveryPort\":18878,\"AudioPort\":18879,\"SelectedDashboard\":\"\",\"Volume\":90,\"PairedTablets\":[]}").Normalize();
+            Assert.Equal(RigPlaySettings.CurrentSchemaVersion, old.SchemaVersion);
+            Assert.Equal(23711, old.ControlPort);
+            Assert.Equal(23710, old.DiscoveryPort);
+            Assert.Equal(23712, old.AudioPort);
+            Assert.Equal(90, old.Volume);
+
+            var custom = new RigPlaySettings { SchemaVersion = 1, ControlPort = 20000, AudioPort = 20001 }.Normalize();
+            Assert.Equal(20000, custom.ControlPort);
+            Assert.Equal(20001, custom.AudioPort);
+        }
+
         [Theory]
         [InlineData(0, 0)]
         [InlineData(8888, 8888)]
