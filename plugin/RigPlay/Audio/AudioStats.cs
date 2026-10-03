@@ -25,17 +25,25 @@ namespace RigPlayPlugin.Audio
         public double PacketsPerSecond;
         public double LossPercent;
         public double BufferMs;
+        /// <summary>The jitter buffer's current target depth; it grows with every underrun.</summary>
+        public double TargetMs;
         public long Received;
         public long Lost;
         public long Late;
+        /// <summary>Times the buffer ran dry and play-out paused to refill: each one is a dropout.</summary>
         public long Underruns;
+        /// <summary>Times the buffer grew past its maximum and skipped ahead: each one is a jump.</summary>
+        public long Skips;
 
         public string FormatText
         {
             get { return AudioStats.DescribeFormat(SampleRate, Channels, Format); }
         }
 
-        /// <summary>E.g. "200 pkt/s · loss 5.0 % · buffer 82 ms · 48 kHz stereo pcm_s16le", or "stopped".</summary>
+        /// <summary>
+        /// E.g. "200 pkt/s · loss 5.0 % · buffer 82 ms (target 80) · 48 kHz stereo pcm_s16le · underruns 0 · late 0 · skips 0",
+        /// or "stopped". The last three are cumulative: a rising underrun count is audio cutting out.
+        /// </summary>
         public string ToDisplayString()
         {
             if (!Started) return "stopped";
@@ -44,9 +52,12 @@ namespace RigPlayPlugin.Audio
             return state
                 + PacketsPerSecond.ToString("0", inv) + " pkt/s · loss "
                 + LossPercent.ToString("0.0", inv) + " % · buffer "
-                + BufferMs.ToString("0", inv) + " ms · "
+                + BufferMs.ToString("0", inv) + " ms (target " + TargetMs.ToString("0", inv) + ") · "
                 + FormatText
-                + (AutoStarted ? " (auto-started)" : "");
+                + (AutoStarted ? " (auto-started)" : "")
+                + " · underruns " + Underruns.ToString(inv)
+                + " · late " + Late.ToString(inv)
+                + " · skips " + Skips.ToString(inv);
         }
     }
 

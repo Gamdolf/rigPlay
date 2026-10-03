@@ -35,8 +35,12 @@ namespace RigPlayPlugin.Audio
 
     public sealed class AudioOutput : IAudioSink, IDisposable
     {
-        /// <summary>WASAPI buffer latency in shared mode.</summary>
-        public const int DeviceLatencyMs = 60;
+        /// <summary>
+        /// WASAPI buffer latency in shared mode. The mix is pulled by NAudio's playback thread inside SimHub's
+        /// process; this is how long that thread may be held off (GC, a busy game reader) before the device runs
+        /// dry, which would be a dropout no counter on the page shows. 100 ms is still well under the jitter buffer.
+        /// </summary>
+        public const int DeviceLatencyMs = 100;
 
         private readonly Func<RigPlaySettings> settings;
         private readonly MixingSampleProvider mixer;

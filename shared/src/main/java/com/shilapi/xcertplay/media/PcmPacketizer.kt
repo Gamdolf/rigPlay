@@ -7,7 +7,9 @@ import com.shilapi.xcertplay.simhub.SimHubAudioCodec
 /**
  * Cuts one stream's s16le PCM into audio datagrams (`docs/protocol.md` §10.2): [framesPerDatagram]
  * frames each, `seq` from 0 and +1 per datagram, `timestamp` = frames sent before the datagram, and
- * the `start` flag on the first one. A new packetizer belongs to each `audioStart`.
+ * the `start` flag on the first one. Audio that was lost before it got here is declared with [skip], which
+ * moves the timestamp on so the PC plays silence there instead of closing the gap. A new packetizer belongs
+ * to each `audioStart`.
  */
 class PcmPacketizer(
     val stream: AudioStream,
@@ -64,6 +66,18 @@ class PcmPacketizer(
         pending -= pending % frameBytes
         if (pending > 0) emitPending(emit)
         pending = 0
+    }
+
+    /**
+     * [frames] of audio are missing between what was pushed so far and what comes next (lost upstream or
+     * dropped here). The buffered frames go out as a short datagram and the timestamp jumps, which the PC
+     * plays as silence of that length (§10.2) while its buffer depth stays what it was. Before the first
+     * datagram there is nothing to place the gap after, so it is ignored: the stream still starts at 0.
+     */
+    fun skip(frames: Long, emit: (ByteArray, Int) -> Unit) {
+        if (frames <= 0 || (datagrams == 0L && pending < frameBytes)) return
+        flush(emit)
+        timestamp = (timestamp + frames) and 0xFFFF_FFFFL
     }
 
     private fun emitPending(emit: (ByteArray, Int) -> Unit) {

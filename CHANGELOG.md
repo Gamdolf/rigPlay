@@ -1,6 +1,12 @@
 # rigPlay 0.1.0 — unreleased
 
-- Nothing yet since 0.1.0-rc.1. Changes for the final 0.1.0 go here.
+- Audio to the PC no longer cuts in and out on a tablet on Wi-Fi. The tablet holds a low-latency Wi-Fi
+  lock and marks the audio datagrams for the Wi-Fi voice queue while it streams, decodes on an
+  audio-priority thread, waits for a busy decoder instead of dropping its packets, and advances the
+  datagram clock over audio that never reached it so the PC plays silence there instead of running its
+  buffer dry. The plugin's jitter buffer starts at 80 ms, grows on every underrun (up to 250 ms, kept
+  across a stream restart) and only skips ahead above 500 ms instead of 200 ms; its WASAPI buffer is
+  100 ms. The rigPlay page shows the buffer target, underruns, late datagrams and skips per stream.
 
 # rigPlay 0.1.0-rc.1 — 2026-10-03
 

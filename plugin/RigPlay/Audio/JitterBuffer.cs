@@ -4,7 +4,10 @@
 // placed by its timestamp (sample clock), so reordering within the buffer depth is free, a gap plays as
 // silence, and a datagram that arrives after its play-out time is dropped. After a reset (start flag,
 // audioStart, underrun) the buffer holds back play-out until it has the target depth; above the maximum depth it
-// skips ahead to the target. Pure: no SimHub, WPF or NAudio types (compiled into RigPlay.Tests). Thread-safe.
+// skips ahead to the target. The target adapts: every underrun raises it by half (capped at half the maximum),
+// because an underrun means the network stalled for longer than the depth we held, and a Wi-Fi link that stalled
+// once will stall again. Nothing lowers it: a stream lives minutes, and the depth itself only shrinks through
+// the skip-ahead above the maximum. Pure: no SimHub, WPF or NAudio types (compiled into RigPlay.Tests). Thread-safe.
 using System;
 using System.Collections.Generic;
 
@@ -12,8 +15,15 @@ namespace RigPlayPlugin.Audio
 {
     public sealed class JitterBuffer
     {
+        /// <summary>Initial depth to fill before play-out starts (§10.3: 60–120 ms is enough on a quiet LAN).</summary>
         public const int DefaultTargetMs = 80;
-        public const int DefaultMaxMs = 200;
+
+        /// <summary>
+        /// Depth above which the buffer skips ahead. A stall longer than the target leaves the buffer this much
+        /// deeper once the delayed datagrams arrive in a burst; keeping that depth is what protects the next stall,
+        /// so the ceiling is generous: dropping audio to recover latency is itself audible.
+        /// </summary>
+        public const int DefaultMaxMs = 500;
 
         private sealed class Packet
         {
@@ -56,6 +66,7 @@ namespace RigPlayPlugin.Audio
         private long silenceFrames;
         private long underruns;
         private long overflowFrames;
+        private long overflows;
         private long resets;
         private long expected;
 
@@ -69,6 +80,7 @@ namespace RigPlayPlugin.Audio
             BlockAlign = 2 * channels;
             TargetFrames = (int)((long)sampleRate * targetMs / 1000);
             MaxFrames = (int)((long)sampleRate * maxMs / 1000);
+            MaxTargetFrames = Math.Max(TargetFrames, MaxFrames / 2);
             for (var i = 0; i < seen.Length; i++) seen[i] = long.MinValue;
         }
 
@@ -78,8 +90,16 @@ namespace RigPlayPlugin.Audio
         /// <summary>Bytes per frame (s16, interleaved).</summary>
         public int BlockAlign { get; }
 
-        /// <summary>Depth the buffer fills to before play-out starts.</summary>
-        public int TargetFrames { get; }
+        /// <summary>Depth the buffer fills to before play-out starts. Grows on every underrun (see <see cref="MaxTargetFrames"/>).</summary>
+        public int TargetFrames { get; private set; }
+
+        public double TargetMs
+        {
+            get { return TargetFrames * 1000.0 / SampleRate; }
+        }
+
+        /// <summary>The most the target grows to: half the maximum depth, so a skip-ahead still leaves headroom.</summary>
+        public int MaxTargetFrames { get; }
 
         /// <summary>Depth above which the buffer skips ahead to <see cref="TargetFrames"/>.</summary>
         public int MaxFrames { get; }
@@ -190,9 +210,11 @@ namespace RigPlayPlugin.Audio
                 }
                 else if (BufferedFramesLocked() > MaxFrames)
                 {
-                    // Too deep (sender clock faster than ours, or a burst): skip ahead to the target depth.
+                    // Too deep (sender clock faster than ours, or a stall far longer than the maximum): skip ahead
+                    // to the target depth.
                     var newPos = MaxEndLocked() - TargetFrames;
                     overflowFrames += newPos - readPos;
+                    overflows++;
                     readPos = newPos;
                     DropBeforeLocked(readPos);
                 }
@@ -224,13 +246,15 @@ namespace RigPlayPlugin.Audio
                     var dst = offset + written * BlockAlign;
                     if (packets.Count == 0)
                     {
-                        // Underrun: nothing left. Play silence and refill to the target before resuming.
+                        // Underrun: nothing left. Play silence and refill to the target before resuming. The depth we
+                        // held was not enough for this stall: hold more next time.
                         Array.Clear(buffer, dst, need * BlockAlign);
                         silenceFrames += need;
                         underruns++;
                         playing = false;
                         floor = readPos;
                         written = frames;
+                        GrowTargetLocked();
                         break;
                     }
                     var packet = packets.Values[0];
@@ -256,10 +280,29 @@ namespace RigPlayPlugin.Audio
             return count;
         }
 
-        /// <summary>Discards everything buffered and waits for the target depth again. Counters are kept.</summary>
+        /// <summary>Discards everything buffered and waits for the target depth again. Counters and the learned target are kept.</summary>
         public void Reset()
         {
             lock (gate) ResetLocked();
+        }
+
+        /// <summary>
+        /// Starts from a target another buffer learned (the same stream type restarted: the network has not changed).
+        /// A value below the current target changes nothing; one above <see cref="MaxTargetFrames"/> is clamped.
+        /// </summary>
+        public void InheritTarget(double targetMs)
+        {
+            var frames = (int)(SampleRate * targetMs / 1000.0);
+            lock (gate)
+            {
+                if (frames > TargetFrames) TargetFrames = Math.Min(MaxTargetFrames, frames);
+            }
+        }
+
+        private void GrowTargetLocked()
+        {
+            if (TargetFrames >= MaxTargetFrames) return;
+            TargetFrames = Math.Min(MaxTargetFrames, TargetFrames + Math.Max(1, TargetFrames / 2));
         }
 
         public JitterBufferCounters Counters
@@ -278,8 +321,10 @@ namespace RigPlayPlugin.Audio
                         SilenceFrames = silenceFrames,
                         Underruns = underruns,
                         OverflowFrames = overflowFrames,
+                        Overflows = overflows,
                         Resets = resets,
                         BufferedFrames = BufferedFramesLocked(),
+                        TargetFrames = TargetFrames,
                         Playing = playing,
                     };
                 }
@@ -379,8 +424,12 @@ namespace RigPlayPlugin.Audio
         public long Underruns;
         /// <summary>Frames skipped because the buffer exceeded its maximum depth.</summary>
         public long OverflowFrames;
+        /// <summary>Skip-ahead events (each one is an audible jump).</summary>
+        public long Overflows;
         public long Resets;
         public int BufferedFrames;
+        /// <summary>The current (adaptive) target depth.</summary>
+        public int TargetFrames;
         public bool Playing;
     }
 }

@@ -85,6 +85,8 @@ namespace RigPlayPlugin.Audio
 
         private readonly object gate = new object();
         private readonly Dictionary<AudioStreamType, AudioStream> streams = new Dictionary<AudioStreamType, AudioStream>();
+        // The jitter buffer target (ms) a stopped stream of each type had grown to: a restart on the same network starts there.
+        private readonly Dictionary<AudioStreamType, double> learnedTargetMs = new Dictionary<AudioStreamType, double>();
         private readonly IAudioSink sink;
         private readonly Func<long> clockMs;
         private readonly int targetMs;
@@ -412,10 +414,12 @@ namespace RigPlayPlugin.Audio
                             PacketsPerSecond = stream.Meter.PacketsPerSecond,
                             LossPercent = stream.Meter.LossPercent,
                             BufferMs = c.BufferedFrames * 1000.0 / stream.SampleRate,
+                            TargetMs = c.TargetFrames * 1000.0 / stream.SampleRate,
                             Received = c.Received,
                             Lost = c.Lost,
                             Late = c.Late,
                             Underruns = c.Underruns,
+                            Skips = c.Overflows,
                         });
                     }
                 }
@@ -464,8 +468,11 @@ namespace RigPlayPlugin.Audio
             {
                 Deactivate(old);
                 streams.Remove(type);
+                learnedTargetMs[type] = old.Buffer.TargetMs;
             }
             var stream = new AudioStream(type, sampleRate, channels, format, auto, targetMs, maxMs, source);
+            double learned;
+            if (learnedTargetMs.TryGetValue(type, out learned)) stream.Buffer.InheritTarget(learned);
             stream.Meter.Add(clockMs() / 1000.0, 0, 0); // so the first snapshot already has a rate
             streams[type] = stream;
             AudioLog.Info("Audio stream " + stream + (old == null ? "" : " (restarted)") + " started" + (auto ? " by its first datagram (no control channel)" : source != null ? " by " + source : ""));
@@ -478,6 +485,7 @@ namespace RigPlayPlugin.Audio
             if (!streams.TryGetValue(type, out stream)) return;
             streams.Remove(type);
             Deactivate(stream);
+            learnedTargetMs[type] = stream.Buffer.TargetMs;
             AudioLog.Info("Audio stream " + stream + " stopped (" + reason + ")");
         }
 

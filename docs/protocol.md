@@ -711,7 +711,7 @@ vectors; both codecs are tested against them.
 | 0 | 2 | `seq` (u16) | Datagram counter per stream: 0 for the first datagram after `audioStart`, +1 per datagram, 65535 wraps to 0. Compared with serial-number arithmetic (RFC 1982). |
 | 2 | 1 | `streamType` (u8) | 1 = `media`, 2 = `alt`, 3 = `telephony`, 4 = reserved for `mic` (PC → tablet only; rejected from a tablet). 0 and 5–255 are invalid. |
 | 3 | 1 | `flags` (u8) | Bit 0 (0x01) `start`: first datagram after `audioStart`; the receiver resets that stream's jitter buffer. Bits 1–7 are reserved: senders set 0, receivers ignore them. |
-| 4 | 4 | `timestamp` (u32) | Sample clock: number of sample frames (one sample per channel) sent on this stream before the first frame of this datagram. 0 at `audioStart`; 4294967295 wraps to 0. A jump larger than the previous datagram's frame count means the sender skipped audio; the receiver plays silence for the gap. |
+| 4 | 4 | `timestamp` (u32) | Sample clock: number of sample frames (one sample per channel) sent on this stream before the first frame of this datagram. 0 at `audioStart`; 4294967295 wraps to 0. A jump larger than the previous datagram's frame count means the sender skipped audio; the receiver plays silence for the gap. The sender MUST advance the clock over audio it did not send (lost before it, dropped from a queue, refused by its decoder): a stream that stays contiguous while short of real time drains the receiver's buffer into underruns. |
 | 8 | 2 | `sampleRate` (u16) | Sample rate in units of 100 Hz: 48000 Hz → 480, 44100 Hz → 441, 24000 Hz → 240, 16000 Hz → 160. Valid values 80–480. Rates that are not a multiple of 100 Hz (11025, 22050) are resampled by the sender. |
 | 10 | 1 | `channels` (u8) | 1 or 2. |
 | 11 | 1 | `format` (u8) | 1 = `pcm_s16le`. 2 = reserved for Opus. 0 and other values are invalid. |
@@ -731,11 +731,22 @@ Limits:
 48 kHz stereo s16 is 1.536 Mbit/s of payload, about 1.56 Mbit/s with headers at 200 datagrams/s
 (plus UDP/IP overhead).
 
+Senders SHOULD mark the datagrams DSCP EF (46, TOS byte 0xB8): Wi-Fi maps it to the voice access
+category, so the 5 ms cadence survives other traffic on the tablet's radio. A sender on Wi-Fi SHOULD
+also keep the radio out of power save while a stream is started (Android: a `WIFI_MODE_FULL_LOW_LATENCY`
+lock); power save and background scans hold datagrams back and release them in bursts of 100–300 ms.
+
 ### 10.3 Receiver guidance (informative)
 
 - Reorder by `seq` within a small window, drop datagrams that arrive after their play-out time, fill
   gaps with silence, and count losses per stream for the settings page.
-- A jitter buffer of 60–120 ms is enough on a home LAN over Wi-Fi.
+- Start with a jitter buffer of 60–120 ms, which is enough on a quiet LAN, and let it grow: an underrun
+  means the link stalled for longer than the depth held, and a link that stalled once stalls again. The
+  plugin starts at 80 ms, raises the target by half on every underrun up to 250 ms, and only skips ahead
+  (dropping audio) above 500 ms. After a stall the buffer is naturally as deep as the stall was, which is
+  the protection for the next one; skipping that depth away to recover latency trades a silent gap for
+  an audible jump and the next dropout.
+- Show underruns and skips, not only loss: a Wi-Fi stall loses nothing and still cuts the audio.
 - `alt` and `telephony` are mixed with `media`; the plugin ducks `media` while either is active.
 
 ## 11. Dashboard URLs

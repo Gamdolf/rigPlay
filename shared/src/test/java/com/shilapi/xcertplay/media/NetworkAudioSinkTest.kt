@@ -5,11 +5,14 @@ import com.shilapi.xcertplay.airplay.AudioFormat
 import com.shilapi.xcertplay.airplay.AudioStreamId
 import com.shilapi.xcertplay.media.FakeAudioTransport.Event
 import com.shilapi.xcertplay.simhub.AudioStream
+import com.shilapi.xcertplay.simhub.SimHubDiscovery
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -176,19 +179,104 @@ class NetworkAudioSinkTest {
         assertEquals(listOf(Event.Stop(AudioStream.ALT), Event.Start(AudioStream.ALT, 16_000, 1)), events)
     }
 
-    /** Echoes each packet's payload as s16le PCM in the [next] format; the first decode waits for [gate]. */
+    @Test fun aGapInTheSourceClockBecomesATimestampJumpNotShorterAudio() {
+        sink.onAudioStarted(music, musicFormat, 0)
+        sink.onAudioRtp(music, musicFormat, rtp(352, 2), 0)
+        // The packet at sample 352 never arrived (lost between phone and tablet, or dropped from a full queue).
+        sink.onAudioRtp(music, musicFormat, rtp(352, 2, first = 1408), 704)
+        sink.onAudioStopped(music)
+
+        val datagrams = transport.drain().filterIsInstance<Event.Datagram>().map { it.datagram }
+        // The 112-frame tail of the first packet goes out before the gap; the second packet starts at 704.
+        assertEquals(listOf(240, 112, 240, 112), datagrams.map { it.frames })
+        assertEquals(listOf(0L, 240L, 704L, 944L), datagrams.map { it.header.timestamp })
+        assertEquals(listOf(0, 1, 2, 3), datagrams.map { it.header.seq })
+        assertEquals(1L, sink.stats.timestampSkips)
+    }
+
+    @Test fun reorderedAndRepeatedPacketsAreNotGaps() {
+        sink.onAudioRtp(music, musicFormat, rtp(240, 2), 480)
+        sink.onAudioRtp(music, musicFormat, rtp(240, 2), 240) // late
+        sink.onAudioRtp(music, musicFormat, rtp(240, 2), 240) // duplicate
+        sink.onAudioRtp(music, musicFormat, rtp(240, 2), 480)
+        sink.onAudioStopped(music)
+        val datagrams = transport.drain().filterIsInstance<Event.Datagram>().map { it.datagram }
+        assertEquals(listOf(0L, 240L, 480L, 720L), datagrams.map { it.header.timestamp })
+        assertEquals(0L, sink.stats.timestampSkips)
+    }
+
+    @Test fun aPacketTheDecoderRefusesIsSentAsSilenceOnThePc() {
+        val decoder = ScriptedDecoder().apply { refuse = setOf(1) }
+        sink = NetworkAudioSink(transport = { transport }, decoderFactory = { decoder }, log = {})
+        val aac = AudioFormat(AudioCodecKind.AAC_LC, 48_000, 2, 96, "media")
+        // Three AAC packets of 1024 frames; the decoder refuses the second one.
+        for (index in 0 until 3) sink.onAudioRtp(music, aac, ByteArray(12 + 1024 * 4) { index.toByte() }, index * 1024)
+        sink.onAudioStopped(music)
+
+        val datagrams = transport.drain().filterIsInstance<Event.Datagram>().map { it.datagram }
+        assertEquals(listOf(0L, 240L, 480L, 720L, 960L, 2048L, 2288L, 2528L, 2768L, 3008L), datagrams.map { it.header.timestamp })
+        assertEquals(listOf(240, 240, 240, 240, 64, 240, 240, 240, 240, 64), datagrams.map { it.frames })
+        assertEquals(1L, sink.stats.decoderDrops)
+        assertEquals(1L, sink.stats.timestampSkips)
+    }
+
+    @Test fun theWifiLockIsHeldWhileAStreamIsAnnounced() {
+        val events = CopyOnWriteArrayList<String>()
+        val lock = object : SimHubDiscovery.NetworkLock {
+            override fun acquire() { events += "acquire" }
+            override fun release() { events += "release" }
+        }
+        sink = NetworkAudioSink(transport = { transport }, wifiLock = lock, log = {})
+        sink.onAudioStarted(music, musicFormat, 0)
+        assertEquals(emptyList<String>(), events) // nothing announced before the first PCM
+        sink.onAudioRtp(music, musicFormat, rtp(240, 2), 0)
+        transport.await<Event.Start>()
+        awaitUntil { events.size == 1 }
+        assertEquals(listOf("acquire"), events)
+        assertTrue(sink.streaming)
+
+        // A second stream shares the lock; it is released when the last one ends.
+        val siri = AudioStreamId(100, "speechrecognition")
+        sink.onAudioRtp(siri, AudioFormat(AudioCodecKind.LPCM, 16_000, 1, 100, "speechrecognition"), rtp(160, 1), 0)
+        transport.await<Event.Start> { it.stream == AudioStream.ALT }
+        sink.onAudioStopped(music)
+        transport.await<Event.Stop> { it.stream == AudioStream.MEDIA }
+        assertEquals(listOf("acquire"), events)
+        sink.onAudioStopped(siri)
+        transport.await<Event.Stop> { it.stream == AudioStream.ALT }
+        awaitUntil { events.size == 2 }
+        assertEquals(listOf("acquire", "release"), events)
+        assertFalse(sink.streaming)
+    }
+
+    private fun awaitUntil(timeoutMs: Long = 3_000, condition: () -> Boolean) {
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
+        while (!condition()) {
+            if (System.nanoTime() > deadline) throw AssertionError("condition not met within $timeoutMs ms")
+            Thread.sleep(5)
+        }
+    }
+
+    /**
+     * Echoes each packet's payload as s16le PCM in the [next] format; the first decode waits for [gate], and
+     * the packets whose index is in [refuse] are refused.
+     */
     private class ScriptedDecoder(private val gate: CountDownLatch? = null) : PcmDecoder {
         @Volatile var next = PcmChunkFormat(48_000, 2)
+        @Volatile var refuse = emptySet<Int>()
         val entered = CountDownLatch(1)
         private var first = true
+        private var index = 0
 
-        override fun decode(rtp: ByteArray, sample: Int, out: PcmSink) {
+        override fun decode(rtp: ByteArray, sample: Int, out: PcmSink): Boolean {
             if (first) {
                 first = false
                 entered.countDown()
                 gate?.await(5, TimeUnit.SECONDS)
             }
+            if (index++ in refuse) return false
             out.onPcm(rtp, 12, rtp.size - 12, next)
+            return true
         }
     }
 }

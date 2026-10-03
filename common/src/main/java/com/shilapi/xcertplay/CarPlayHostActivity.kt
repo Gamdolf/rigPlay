@@ -68,10 +68,12 @@ import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.location.AndroidCarPlayLocationProvider
 import com.shilapi.xcertplay.media.AndroidMediaSink
 import com.shilapi.xcertplay.media.AudioOutputTarget
+import com.shilapi.xcertplay.media.NetworkAudioSink
 import com.shilapi.xcertplay.media.SwitchingMediaSink
 import com.shilapi.xcertplay.media.CarPlayTouchMapper
 import com.shilapi.xcertplay.media.CarPlayVideoLayout
 import com.shilapi.xcertplay.network.CarPlayVpnService
+import com.shilapi.xcertplay.network.WifiLowLatencyLock
 import com.shilapi.xcertplay.orchestration.CarPlayController
 import com.shilapi.xcertplay.orchestration.CarPlayRuntimeConfig
 import com.shilapi.xcertplay.orchestration.CarPlayStatus
@@ -2810,7 +2812,12 @@ class CarPlayHostActivity : ComponentActivity() {
         sink = renderer
         currentSurface?.let(::attachSurface)
         val audioRouter = if (audioToPc) {
-            SwitchingMediaSink(renderer, onMediaAudioChanged = CarPlayMediaKeys::onMediaAudioChanged)
+            SwitchingMediaSink(
+                renderer,
+                // Wi-Fi power save turns 5 ms datagrams into 100-300 ms bursts: hold it off while streaming.
+                network = NetworkAudioSink(wifiLock = WifiLowLatencyLock.create(this)),
+                onMediaAudioChanged = CarPlayMediaKeys::onMediaAudioChanged,
+            )
         } else null
         CarPlayMediaKeys.audioFocusAllowed = audioRouter?.let { router -> { !router.routesToPc } } ?: { true }
         val media = createMediaEngine(audioRouter ?: renderer)
