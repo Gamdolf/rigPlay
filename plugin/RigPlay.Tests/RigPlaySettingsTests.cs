@@ -35,6 +35,20 @@ namespace RigPlayPlugin.Tests
             Assert.Equal(before, JsonConvert.SerializeObject(settings));
         }
 
+        [Theory]
+        [InlineData(0, 0, RigPlaySettings.MinAudioBufferMs, 0)]
+        [InlineData(80, 750, 80, 750)]
+        [InlineData(5000, 9000, RigPlaySettings.MaxAudioBufferMs, RigPlaySettings.MaxAudioBufferMs)]
+        [InlineData(-5, -1, RigPlaySettings.MinAudioBufferMs, 0)]
+        public void TheAudioBufferSettingsAreClamped(int minimum, int learned, int expectedMinimum, int expectedLearned)
+        {
+            var settings = new RigPlaySettings { AudioBufferMs = minimum, LearnedAudioBufferMs = learned }.Normalize();
+            Assert.Equal(expectedMinimum, settings.AudioBufferMs);
+            Assert.Equal(expectedLearned, settings.LearnedAudioBufferMs);
+            Assert.Equal(RigPlayPlugin.Audio.JitterBuffer.DefaultTargetMs, new RigPlaySettings().AudioBufferMs);
+            Assert.Equal(0, new RigPlaySettings().LearnedAudioBufferMs);
+        }
+
         [Fact]
         public void TheThreeDefaultPortsAreDistinctAndUnprivileged()
         {

@@ -85,6 +85,7 @@ namespace RigPlayPlugin
             // Writes the normalised file back, so a repaired or first-run file is on disk from the start.
             SaveSettings();
             Audio = new global::RigPlayPlugin.Audio.AudioPipeline(() => Settings);
+            Audio.LearnedBufferChanged += SaveSettings; // the depth learned from the network survives a restart
             AttachAudio();
         }
 

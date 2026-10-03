@@ -1,6 +1,15 @@
 # rigPlay 0.2.0 — unreleased
 
-- Nothing yet since 0.2.0-rc.1. Changes for the final 0.2.0 go here.
+- Audio to the PC: no more dropouts on a Wi-Fi link that stalls. The second rig test still cut out
+  (18 underruns and 10 skips in 100 s at 0 % loss): the buffer's target was capped at 250 ms and it threw
+  the depth away above 500 ms, so every stall of 300–650 ms was a dropout, often followed by a skip. The
+  jitter buffer now measures each stall when the held-back datagrams arrive and raises its target to a
+  quarter more than the stall (up to 2 s for music, 1.5 s for Siri, 1 s for calls), waits for that depth
+  before resuming, keeps the learned depth in the settings across SimHub restarts (the Audio section
+  shows it, with a Forget button and the minimum to start from), trims excess depth by playing 1.5 %
+  faster instead of skipping, and only skips a full second above the target. A pause on the phone no
+  longer counts as a stall. The page shows the longest stall per stream, and the tablet logs every 10 s
+  whether its Wi-Fi held the datagrams back or it produced them late.
 
 # rigPlay 0.2.0-rc.1 — 2026-10-03
 

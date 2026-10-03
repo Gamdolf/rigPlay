@@ -39,7 +39,10 @@ import java.util.concurrent.atomic.AtomicLong
  * gap is placed up to one packet (21 ms) early; close enough for what it is.
  *
  * While any stream is announced the optional [wifiLock] is held (see `WifiLowLatencyLock`): Wi-Fi power
- * save and background scans otherwise hold datagrams back in bursts the PC hears as dropouts.
+ * save and background scans otherwise hold datagrams back in bursts the PC hears as dropouts. A
+ * [SendStallMonitor] per stream times every `socket.send` and the gaps between them and logs, every 10 s in
+ * which something stalled, whether the radio held the datagrams back or the tablet produced them late: the
+ * line to read next to the plugin page's underruns.
  *
  * CarPlay streams map to the protocol's three streams by audio type: telephony → `telephony`, Siri
  * and alternate audio (guidance, alerts) → `alt`, music → `media`. A stream whose protocol stream is
@@ -187,6 +190,7 @@ class NetworkAudioSink(
         private var packetizer: PcmPacketizer? = null
         private var announced: Announcement? = null
         private var datagramsThisStream = 0L
+        private val stallMonitor = SendStallMonitor(stream.wire)
         private val pcmSink = PcmSink { pcm, offset, length, chunk -> onPcm(pcm, offset, length, chunk) }
 
         // The source clock (RTP timestamps, in frames at format.sampleRate), to find audio that went missing.
@@ -403,12 +407,17 @@ class NetworkAudioSink(
         }
 
         private fun deliver(link: SimHubAudioTransport, bytes: ByteArray, length: Int) {
-            if (link.sendDatagram(bytes, length)) {
+            stallMonitor.beforeSend(System.nanoTime())
+            val sent = link.sendDatagram(bytes, length)
+            val now = System.nanoTime()
+            stallMonitor.afterSend(now)
+            if (sent) {
                 datagramsSent.incrementAndGet()
                 datagramsThisStream++
             } else {
                 sendFailures.incrementAndGet()
             }
+            stallMonitor.report(now)?.let(log)
         }
 
         private fun endStream(reason: String) {
@@ -420,7 +429,7 @@ class NetworkAudioSink(
                     packetizer?.flush { bytes, length -> deliver(link, bytes, length) }
                 }
                 link.audioStop(stream)
-                log("PC audio: audioStop ${stream.wire} ($reason) datagrams=$datagramsThisStream drops=${queue.dropped}")
+                log("PC audio: audioStop ${stream.wire} ($reason) datagrams=$datagramsThisStream drops=${queue.dropped} ${stallMonitor.summary(System.nanoTime())}")
             }
             setAnnounced(null)
             packetizer = null

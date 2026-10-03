@@ -19,8 +19,15 @@ namespace RigPlayPlugin.Audio
             AudioLog.Info = Log.Info;
             AudioLog.Warn = Log.Warn;
 
-            var port = settings()?.AudioPort ?? ProtocolDefaults.AudioPort;
-            Receiver = new AudioReceiver(port, new SinkProxy(this));
+            var s = settings();
+            var port = s?.AudioPort ?? ProtocolDefaults.AudioPort;
+            Receiver = new AudioReceiver(port, new SinkProxy(this), s?.AudioBufferMs ?? JitterBuffer.DefaultTargetMs);
+            if (s != null && s.LearnedAudioBufferMs > 0)
+            {
+                Receiver.InheritLearnedTarget(s.LearnedAudioBufferMs);
+                Log.Info("Audio buffer: streams start with the " + s.LearnedAudioBufferMs + " ms learned on this network last time (minimum " + s.AudioBufferMs + " ms)");
+            }
+            Receiver.TargetLearned += OnTargetLearned;
             try
             {
                 output = CreateOutput(settings, Receiver);
@@ -84,6 +91,39 @@ namespace RigPlayPlugin.Audio
         /// <summary>The receiver was rebound by <see cref="ApplyPort"/>; state.audio may have changed.</summary>
         public event Action PortChanged;
 
+        /// <summary>
+        /// The learned buffer depth in the settings changed (a stream learned a deeper one, or the page forgot it);
+        /// the plugin saves the settings. Raised on the receiver's stats thread.
+        /// </summary>
+        public event Action LearnedBufferChanged;
+
+        /// <summary>The minimum buffer setting changed: streams started from now on begin there.</summary>
+        public void ApplyBufferSetting()
+        {
+            var s = settings();
+            if (s != null) Receiver.SetTargetMs(s.AudioBufferMs);
+        }
+
+        /// <summary>Forgets the learned depth: in the settings and in the receiver, so new streams start at the minimum again.</summary>
+        public void ForgetLearnedBuffer()
+        {
+            var s = settings();
+            if (s != null) s.LearnedAudioBufferMs = 0;
+            Receiver.ForgetLearnedTarget();
+            Log.Info("Audio buffer: the learned depth was forgotten; streams start at " + (s?.AudioBufferMs ?? JitterBuffer.DefaultTargetMs) + " ms again");
+            try { LearnedBufferChanged?.Invoke(); } catch (Exception ex) { Log.Warn("A buffer listener failed: " + ex.Message); }
+        }
+
+        private void OnTargetLearned(double ms)
+        {
+            var s = settings();
+            if (s == null) return;
+            var rounded = (int)Math.Ceiling(ms);
+            if (rounded <= s.LearnedAudioBufferMs) return;
+            s.LearnedAudioBufferMs = rounded;
+            try { LearnedBufferChanged?.Invoke(); } catch (Exception ex) { Log.Warn("A buffer listener failed: " + ex.Message); }
+        }
+
         /// <summary>The audio port setting changed: rebinds the receiver and raises <see cref="PortChanged"/>.</summary>
         public void ApplyPort()
         {
@@ -95,6 +135,7 @@ namespace RigPlayPlugin.Audio
 
         public void Dispose()
         {
+            Receiver.TargetLearned -= OnTargetLearned;
             try { Receiver.Dispose(); } catch (Exception ex) { Log.Warn("Stopping the audio receiver failed: " + ex.Message); }
             try { (output as IDisposable)?.Dispose(); } catch (Exception ex) { Log.Warn("Stopping the audio output failed: " + ex.Message); }
         }

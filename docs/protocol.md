@@ -740,13 +740,21 @@ lock); power save and background scans hold datagrams back and release them in b
 
 - Reorder by `seq` within a small window, drop datagrams that arrive after their play-out time, fill
   gaps with silence, and count losses per stream for the settings page.
-- Start with a jitter buffer of 60–120 ms, which is enough on a quiet LAN, and let it grow: an underrun
+- Start with a jitter buffer of 60–120 ms, which is enough on a quiet LAN, and let it learn: an underrun
   means the link stalled for longer than the depth held, and a link that stalled once stalls again. The
-  plugin starts at 80 ms, raises the target by half on every underrun up to 250 ms, and only skips ahead
-  (dropping audio) above 500 ms. After a stall the buffer is naturally as deep as the stall was, which is
-  the protection for the next one; skipping that depth away to recover latency trades a silent gap for
-  an audible jump and the next dropout.
-- Show underruns and skips, not only loss: a Wi-Fi stall loses nothing and still cuts the audio.
+  plugin starts at 80 ms and, when the held-back datagrams arrive after an underrun, measures the stall
+  (the depth that drained plus the silence played, less any gap the sender declared) and raises the target
+  to a quarter more than that, up to 2 s for `media` (1.5 s for `alt`, 1 s for `telephony`, where delay
+  hurts more than a dropout); play-out resumes once the new target is buffered, so the depth really is
+  that much. The learned depth is kept in the settings across restarts. An underrun whose datagrams come
+  back at their normal pace, or with the timestamp jumped over the silence, is the source pausing, not a
+  stall, and teaches nothing.
+- Trim excess quietly: depth above the target protects nothing, so the plugin plays 1.5 % faster while
+  the buffer is more than 100 ms above its target (a third of a semitone, unnoticed under engine noise)
+  and only skips ahead, audibly, a full second above the target.
+- Show underruns, the longest stall and skips, not only loss: a Wi-Fi stall loses nothing and still cuts
+  the audio. A sender SHOULD log how long its sends block and how long the gaps between them get, so a
+  stall can be placed on the radio or on the sender.
 - `alt` and `telephony` are mixed with `media`; the plugin ducks `media` while either is active.
 
 ## 11. Dashboard URLs

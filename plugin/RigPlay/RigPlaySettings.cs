@@ -22,6 +22,10 @@ namespace RigPlayPlugin
         public const int MinVolume = 0;
         public const int MaxVolume = 100;
         public const int DefaultVolume = 100;
+
+        /// <summary>Bounds of the audio buffer settings (ms).</summary>
+        public const int MinAudioBufferMs = 20;
+        public const int MaxAudioBufferMs = 2000;
         public const string DefaultTabletName = "Tablet";
 
         public int SchemaVersion { get; set; } = CurrentSchemaVersion;
@@ -62,6 +66,19 @@ namespace RigPlayPlugin
 
         public bool Muted { get; set; }
 
+        /// <summary>
+        /// The depth (ms) every audio stream starts with and never goes below: the latency on a quiet LAN. The buffer
+        /// learns deeper depths from the network's stalls on its own (<see cref="LearnedAudioBufferMs"/>).
+        /// </summary>
+        public int AudioBufferMs { get; set; } = Audio.JitterBuffer.DefaultTargetMs;
+
+        /// <summary>
+        /// The deepest buffer (ms) the streams learned they need on this network, kept across SimHub restarts so the
+        /// next session does not have to learn it again through dropouts. 0 when nothing was learned. The page's
+        /// "Forget" button clears it.
+        /// </summary>
+        public int LearnedAudioBufferMs { get; set; }
+
         public List<PairedTablet> PairedTablets { get; set; } = new List<PairedTablet>();
 
         /// <summary>
@@ -100,6 +117,8 @@ namespace RigPlayPlugin
             AudioDeviceId = Clean(AudioDeviceId);
 
             Volume = Math.Min(MaxVolume, Math.Max(MinVolume, Volume));
+            AudioBufferMs = Math.Min(MaxAudioBufferMs, Math.Max(MinAudioBufferMs, AudioBufferMs));
+            LearnedAudioBufferMs = LearnedAudioBufferMs <= 0 ? 0 : Math.Min(MaxAudioBufferMs, LearnedAudioBufferMs);
 
             PairedTablets = (PairedTablets ?? new List<PairedTablet>())
                 .Where(t => t != null && !string.IsNullOrWhiteSpace(t.Id))
