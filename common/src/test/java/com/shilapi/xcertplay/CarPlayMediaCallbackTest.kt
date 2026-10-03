@@ -35,7 +35,7 @@ class CarPlayMediaCallbackTest {
     fun hardwarePlayAndPauseKeysToggle() {
         press(KeyEvent.KEYCODE_MEDIA_PLAY)
         press(KeyEvent.KEYCODE_MEDIA_PAUSE)
-        press(CarPlayMediaButton.KEYCODE_BYD_AUTO_MEDIA_PLAY_PAUSE)
+        press(CarPlayMediaButton.KEYCODE_VENDOR_MEDIA_PLAY_PAUSE)
 
         assertEquals(List(3) { CarPlayMediaButton.PLAY_PAUSE }, sent)
     }

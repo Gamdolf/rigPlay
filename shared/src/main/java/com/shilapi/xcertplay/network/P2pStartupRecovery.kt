@@ -19,7 +19,7 @@ internal object P2pStartupRecovery {
         else -> null
     }
 
-    /** A band-only request still needs channel selection, which some BYD drivers cannot do. */
+    /** A band-only request still needs channel selection, which some vendor drivers cannot do. */
     fun plan(stationFrequency: Int?, preferred: P2pCreationRequest? = null): List<P2pCreationRequest> = buildList {
         val aligned24 = stationFrequency != null && stationFrequency in 2412..2462 &&
             (stationFrequency - 2412) % 5 == 0

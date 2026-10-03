@@ -1,50 +1,50 @@
-package com.shilapi.xcertplay.hud
+package com.shilapi.xcertplay.guidance
 
 import java.io.ByteArrayOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
-class BydHudRouteStateTest {
+class RouteGuidanceStateTest {
     @Test
     fun `combines maneuver and route updates`() {
-        val state = BydHudRouteState()
+        val state = RouteGuidanceState()
         state.accept(
-            BydHudRouteState.ROUTE_GUIDANCE_MANEUVER_UPDATE,
+            RouteGuidanceState.ROUTE_GUIDANCE_MANEUVER_UPDATE,
             tlvs(tlv(0x01, 0, 7), tlv(0x03, 1), tlv(0x08, 0)),
         )
 
         val change = state.accept(
-            BydHudRouteState.ROUTE_GUIDANCE_UPDATE,
+            RouteGuidanceState.ROUTE_GUIDANCE_UPDATE,
             tlvs(tlv(0x01, 1), tlv(0x0a, 0, 0, 0, 150), tlv(0x0d, 0, 7)),
         )
 
-        assertEquals(BydHudRouteChange.GUIDANCE, change)
-        assertEquals(BydHudGuidance(distanceMeters = 150, maneuver = 1, gaode = 1), state.current())
+        assertEquals(RouteGuidanceChange.GUIDANCE, change)
+        assertEquals(RouteManeuver(distanceMeters = 150, type = 1, drivingSide = 0), state.current())
     }
 
     @Test
-    fun `maps right-hand u-turn`() {
-        val state = BydHudRouteState()
+    fun `keeps maneuver type and driving side`() {
+        val state = RouteGuidanceState()
         state.accept(
-            BydHudRouteState.ROUTE_GUIDANCE_MANEUVER_UPDATE,
+            RouteGuidanceState.ROUTE_GUIDANCE_MANEUVER_UPDATE,
             tlvs(tlv(0x01, 0, 3), tlv(0x03, 4), tlv(0x08, 1)),
         )
         state.accept(
-            BydHudRouteState.ROUTE_GUIDANCE_UPDATE,
+            RouteGuidanceState.ROUTE_GUIDANCE_UPDATE,
             tlvs(tlv(0x01, 1), tlv(0x0a, 0, 0, 0, 50), tlv(0x0d, 0, 3)),
         )
 
-        assertEquals(BydHudGuidance(distanceMeters = 50, maneuver = 8, gaode = 10), state.current())
+        assertEquals(RouteManeuver(distanceMeters = 50, type = 4, drivingSide = 1), state.current())
     }
 
     @Test
     fun `route end clears guidance`() {
         val state = populatedState()
 
-        val change = state.accept(BydHudRouteState.ROUTE_GUIDANCE_UPDATE, tlvs(tlv(0x01, 2)))
+        val change = state.accept(RouteGuidanceState.ROUTE_GUIDANCE_UPDATE, tlvs(tlv(0x01, 2)))
 
-        assertEquals(BydHudRouteChange.CLEAR, change)
+        assertEquals(RouteGuidanceChange.CLEAR, change)
         assertNull(state.current())
     }
 
@@ -54,24 +54,24 @@ class BydHudRouteStateTest {
         val before = state.current()
 
         val change = state.accept(
-            BydHudRouteState.ROUTE_GUIDANCE_UPDATE,
+            RouteGuidanceState.ROUTE_GUIDANCE_UPDATE,
             byteArrayOf(0, 8, 0, 1, 1),
         )
 
-        assertEquals(BydHudRouteChange.NONE, change)
+        assertEquals(RouteGuidanceChange.NONE, change)
         assertEquals(before, state.current())
     }
 
 
     @Test
     fun `carries after-maneuver road and arrival time`() {
-        val state = BydHudRouteState()
+        val state = RouteGuidanceState()
         state.accept(
-            BydHudRouteState.ROUTE_GUIDANCE_MANEUVER_UPDATE,
+            RouteGuidanceState.ROUTE_GUIDANCE_MANEUVER_UPDATE,
             tlvs(tlv(0x01, 0, 2), tlv(0x03, 2), tlv(0x04, *utf8z("Am Wehr")), tlv(0x08, 0)),
         )
         state.accept(
-            BydHudRouteState.ROUTE_GUIDANCE_UPDATE,
+            RouteGuidanceState.ROUTE_GUIDANCE_UPDATE,
             tlvs(
                 tlv(0x01, 1), tlv(0x03, *utf8z("Hauptstraße")), tlv(0x05, 0, 0, 0, 0, 0x68, 0xd5, 0x2a, 0x40),
                 tlv(0x0a, 0, 0, 1, 44), tlv(0x0d, 0, 2),
@@ -89,40 +89,30 @@ class BydHudRouteStateTest {
         var now = 0L
         val state = populatedState { now }
 
-        assertEquals(BydHudRouteChange.NONE, state.accept(BydHudRouteState.ROUTE_GUIDANCE_UPDATE, tlvs(tlv(0x01, 5), tlv(0x0d))))
+        assertEquals(RouteGuidanceChange.NONE, state.accept(RouteGuidanceState.ROUTE_GUIDANCE_UPDATE, tlvs(tlv(0x01, 5), tlv(0x0d))))
         now = 2_000_000_000L
-        assertEquals(2, state.current()!!.maneuver) // a blip does not blank the outputs
+        assertEquals(2, state.current()!!.type) // a blip does not blank the guidance
         now = 3_100_000_000L
         assertNull(state.current())
 
         // The iPhone lists the same maneuver again without resending its 0x5202 details.
         val resumed = state.accept(
-            BydHudRouteState.ROUTE_GUIDANCE_UPDATE,
+            RouteGuidanceState.ROUTE_GUIDANCE_UPDATE,
             tlvs(tlv(0x01, 1), tlv(0x0a, 0, 0, 0, 20), tlv(0x0d, 0, 1)),
         )
-        assertEquals(BydHudRouteChange.GUIDANCE, resumed)
-        assertEquals(2, state.current()!!.maneuver)
+        assertEquals(RouteGuidanceChange.GUIDANCE, resumed)
+        assertEquals(2, state.current()!!.type)
     }
 
     @Test
     fun `falls back to current road`() {
-        val state = BydHudRouteState()
-        state.accept(BydHudRouteState.ROUTE_GUIDANCE_MANEUVER_UPDATE, tlvs(tlv(0x01, 0, 0), tlv(0x03, 1)))
+        val state = RouteGuidanceState()
+        state.accept(RouteGuidanceState.ROUTE_GUIDANCE_MANEUVER_UPDATE, tlvs(tlv(0x01, 0, 0), tlv(0x03, 1)))
         state.accept(
-            BydHudRouteState.ROUTE_GUIDANCE_UPDATE,
+            RouteGuidanceState.ROUTE_GUIDANCE_UPDATE,
             tlvs(tlv(0x01, 1), tlv(0x03, *utf8z("Hauptstraße")), tlv(0x0d, 0, 0)),
         )
         assertEquals("Hauptstraße", state.current()!!.road)
-    }
-
-    @Test
-    fun `roundabout exit has blank arrow and exit icon`() {
-        val state = BydHudRouteState()
-        state.accept(BydHudRouteState.ROUTE_GUIDANCE_MANEUVER_UPDATE, tlvs(tlv(0x01, 0, 0), tlv(0x03, 29)))
-        state.accept(BydHudRouteState.ROUTE_GUIDANCE_UPDATE, tlvs(tlv(0x01, 1), tlv(0x0d, 0, 0)))
-        val guidance = state.current()!!
-        assertEquals(99, guidance.maneuver)
-        assertEquals(26, guidance.gaode)
     }
 
     @Test
@@ -131,7 +121,7 @@ class BydHudRouteStateTest {
         val state = populatedState { now }
         now = 30_000_000_000L
         assertNull(state.current())
-        state.accept(BydHudRouteState.ROUTE_GUIDANCE_UPDATE, tlvs(tlv(0x0a, 0, 0, 0, 20)))
+        state.accept(RouteGuidanceState.ROUTE_GUIDANCE_UPDATE, tlvs(tlv(0x0a, 0, 0, 0, 20)))
         assertEquals(20, state.current()!!.distanceMeters)
     }
 
@@ -140,20 +130,19 @@ class BydHudRouteStateTest {
         val state = populatedState()
         state.clear()
         assertNull(state.current())
-        assertNull(state.currentApple())
     }
 
     private fun utf8z(value: String): IntArray =
         (value.toByteArray(Charsets.UTF_8).map { it.toInt() and 0xff } + 0).toIntArray()
 
-    private fun populatedState(nanoTime: () -> Long = System::nanoTime): BydHudRouteState =
-        BydHudRouteState(nanoTime).also { state ->
+    private fun populatedState(nanoTime: () -> Long = System::nanoTime): RouteGuidanceState =
+        RouteGuidanceState(nanoTime).also { state ->
         state.accept(
-            BydHudRouteState.ROUTE_GUIDANCE_MANEUVER_UPDATE,
+            RouteGuidanceState.ROUTE_GUIDANCE_MANEUVER_UPDATE,
             tlvs(tlv(0x01, 0, 1), tlv(0x03, 2), tlv(0x08, 0)),
         )
         state.accept(
-            BydHudRouteState.ROUTE_GUIDANCE_UPDATE,
+            RouteGuidanceState.ROUTE_GUIDANCE_UPDATE,
             tlvs(tlv(0x01, 1), tlv(0x0a, 0, 0, 0, 25), tlv(0x0d, 0, 1)),
         )
     }

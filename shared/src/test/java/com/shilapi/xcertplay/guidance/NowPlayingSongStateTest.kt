@@ -1,4 +1,4 @@
-package com.shilapi.xcertplay.hud
+package com.shilapi.xcertplay.guidance
 
 import com.shilapi.xcertplay.iap2.message.Iap2Messages
 import org.junit.Assert.assertEquals
@@ -6,28 +6,28 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class BydClusterSongTest {
+class NowPlayingSongStateTest {
     private fun update(block: com.shilapi.xcertplay.iap2.body.Iap2BodyBuilder.() -> Unit) =
-        Iap2Messages.buildRaw(ClusterSongState.NOW_PLAYING_UPDATE, block)
+        Iap2Messages.buildRaw(NowPlayingSongState.NOW_PLAYING_UPDATE, block)
 
     @Test
     fun followsTitleArtistAndPlaybackStatus() {
-        val state = ClusterSongState()
+        val state = NowPlayingSongState()
 
-        assertEquals(ClusterSong("Numb — Linkin Park", false),
+        assertEquals(NowPlayingSong("Numb — Linkin Park", false),
             state.accept(update { group(0) { string(1, "Numb"); string(12, "Linkin Park") } }))
-        assertEquals(ClusterSong("Numb — Linkin Park", true), state.accept(update { group(1) { u8(0, 1) } }))
-        // Elapsed time alone changes nothing on the card.
+        assertEquals(NowPlayingSong("Numb — Linkin Park", true), state.accept(update { group(1) { u8(0, 1) } }))
+        // Elapsed time alone changes nothing.
         assertNull(state.accept(update { group(1) { u32(1, 120_706L) } }))
-        assertEquals(ClusterSong("Numb — Linkin Park", false), state.accept(update { group(1) { u8(0, 2) } }))
+        assertEquals(NowPlayingSong("Numb — Linkin Park", false), state.accept(update { group(1) { u8(0, 2) } }))
         // A new title without an artist is a new item that has none.
-        assertEquals(ClusterSong("Podcast", false), state.accept(update { group(0) { string(1, "Podcast") } }))
-        assertEquals(ClusterSong("Podcast — Host", false), state.accept(update { group(0) { string(12, "Host") } }))
+        assertEquals(NowPlayingSong("Podcast", false), state.accept(update { group(0) { string(1, "Podcast") } }))
+        assertEquals(NowPlayingSong("Podcast — Host", false), state.accept(update { group(0) { string(12, "Host") } }))
     }
 
     @Test
     fun nothingWithoutATitleOrForOtherMessages() {
-        val state = ClusterSongState()
+        val state = NowPlayingSongState()
         assertNull(state.accept(update { group(1) { u8(0, 1) } }))
         assertNull(state.accept(Iap2Messages.buildRaw(0x5201) { group(0) { string(1, "Numb") } }))
         assertNull(state.current())
@@ -39,30 +39,30 @@ class BydClusterSongTest {
 
     @Test
     fun clearedTitlesForgetThePreviousSongUntilANewTitleArrives() {
-        val state = ClusterSongState()
+        val state = NowPlayingSongState()
         state.accept(update { group(0) { string(1, "Previous song"); string(12, "Artist") } })
         state.accept(update { group(0) { string(1, "") } })
         assertNull(state.current())
         state.accept(update { group(1) { u8(0, 1) } })
         assertNull(state.current())
-        assertEquals(ClusterSong("Next song", true),
+        assertEquals(NowPlayingSong("Next song", true),
             state.accept(update { group(0) { string(1, "Next song") } }))
         state.accept(update { group(0) { string(1, "  ") } })
         assertNull(state.current())
     }
 
     @Test
-    fun textFitsTheDashboard() {
-        assertNull(ClusterSongState.text("  ", "Artist"))
-        assertEquals("Title", ClusterSongState.text(" Title ", ""))
+    fun textIsShortenedSafely() {
+        assertNull(NowPlayingSongState.text("  ", "Artist"))
+        assertEquals("Title", NowPlayingSongState.text(" Title ", ""))
 
-        val long = ClusterSongState.text("Пісня".repeat(40), "Виконавець")!!
-        assertTrue(long.toByteArray(Charsets.UTF_16LE).size <= ClusterSongState.MAX_TEXT_BYTES)
+        val long = NowPlayingSongState.text("Пісня".repeat(40), "Виконавець")!!
+        assertTrue(long.toByteArray(Charsets.UTF_16LE).size <= NowPlayingSongState.MAX_TEXT_BYTES)
         assertEquals(127, long.length)
 
         // An emoji is never cut in half.
-        val emoji = ClusterSongState.text("a" + "🎵".repeat(100), null)!!
-        assertTrue(emoji.toByteArray(Charsets.UTF_16LE).size <= ClusterSongState.MAX_TEXT_BYTES)
+        val emoji = NowPlayingSongState.text("a" + "🎵".repeat(100), null)!!
+        assertTrue(emoji.toByteArray(Charsets.UTF_16LE).size <= NowPlayingSongState.MAX_TEXT_BYTES)
         assertTrue(!Character.isHighSurrogate(emoji.last()))
     }
 }

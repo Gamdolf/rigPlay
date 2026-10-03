@@ -24,7 +24,7 @@ fun interface VehicleStatusProvider {
 
 /** The charging inlets the car declares, as iAP2 SupportedChargingConnectors values. */
 enum class EvChargingConnectors(internal vararg val wireValues: Int) {
-    CCS2_TYPE2(1, 4), // CCS2 (DC) and Mennekes / Type 2 (AC), as on European BYD models
+    CCS2_TYPE2(1, 4), // CCS2 (DC) and Mennekes / Type 2 (AC), as on most European EVs
     GB_T(5, 6), // GB/T DC and AC, as on Chinese-market models
     CCS1_J1772(0, 2), // CCS1 (DC) and J1772 (AC)
 }

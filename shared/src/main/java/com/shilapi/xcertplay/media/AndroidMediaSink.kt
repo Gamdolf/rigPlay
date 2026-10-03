@@ -993,7 +993,7 @@ private class AudioRenderer(
         streamOverride: Int,
     ): AudioAttributes {
         if (streamOverride in AudioManager.STREAM_SYSTEM..AudioManager.STREAM_ACCESSIBILITY) {
-            // Android accepts only its defined legacy stream IDs here. BYD audio policy can
+            // Android accepts only its defined legacy stream IDs here. Vendor audio policy can
             // map these standard streams to vehicle outputs; arbitrary channel numbers are
             // not valid AudioAttributes legacy stream types.
             try {

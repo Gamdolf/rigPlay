@@ -26,9 +26,6 @@ dependencies {
     api(project(":shared"))
     implementation(libs.androidx.activity)
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.media3.exoplayer)
-    implementation(libs.androidx.media3.exoplayer.hls)
-    implementation(libs.androidx.media3.ui)
     testImplementation(libs.junit)
     testImplementation("org.robolectric:robolectric:4.17")
 }
