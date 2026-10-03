@@ -167,12 +167,16 @@ namespace RigPlayPlugin.Tests.Audio
                 PacketsPerSecond = 199.6,
                 LossPercent = 4.96,
                 BufferMs = 81.7,
+                TargetMs = 120,
+                Underruns = 3,
+                Late = 1,
+                Skips = 2,
             };
-            Assert.Equal("200 pkt/s · loss 5.0 % · buffer 82 ms · 48 kHz stereo pcm_s16le", s.ToDisplayString());
+            Assert.Equal("200 pkt/s · loss 5.0 % · buffer 82 ms (target 120) · 48 kHz stereo pcm_s16le · underruns 3 · late 1 · skips 2", s.ToDisplayString());
             s.Active = false;
             s.AutoStarted = true;
             Assert.StartsWith("idle · ", s.ToDisplayString());
-            Assert.EndsWith("(auto-started)", s.ToDisplayString());
+            Assert.Contains("pcm_s16le (auto-started) · underruns 3", s.ToDisplayString());
             Assert.Equal("stopped", new AudioStreamStats().ToDisplayString());
         }
     }

@@ -16,7 +16,11 @@ fun interface PcmSink {
 
 /** Turns the RTP packets of one CarPlay audio stream (12-byte header plus payload) into PCM. */
 interface PcmDecoder : Closeable {
-    fun decode(rtp: ByteArray, sample: Int, out: PcmSink)
+    /**
+     * Takes one packet; PCM comes out through [out], now or on a later call. Returns false when the packet's
+     * audio was dropped (the decoder would not take it), so the caller can account for the missing time.
+     */
+    fun decode(rtp: ByteArray, sample: Int, out: PcmSink): Boolean
 
     /** Delivers output that became ready after the last [decode]. */
     fun drain(out: PcmSink) {}
@@ -36,8 +40,9 @@ interface PcmDecoder : Closeable {
 class LpcmPcmDecoder(format: AudioFormat) : PcmDecoder {
     private val chunkFormat = PcmChunkFormat(format.sampleRate, format.channels, PcmEncoding.S16BE)
 
-    override fun decode(rtp: ByteArray, sample: Int, out: PcmSink) {
+    override fun decode(rtp: ByteArray, sample: Int, out: PcmSink): Boolean {
         if (rtp.size > RTP_HEADER_BYTES) out.onPcm(rtp, RTP_HEADER_BYTES, rtp.size - RTP_HEADER_BYTES, chunkFormat)
+        return true
     }
 }
 
@@ -61,21 +66,29 @@ class MediaCodecPcmDecoder(private val format: AudioFormat) : PcmDecoder {
         codec = created
     }
 
-    override fun decode(rtp: ByteArray, sample: Int, out: PcmSink) {
-        val accessUnit = CarPlayAudioCodecConfig.accessUnit(format, rtp) ?: return
-        val index = codec.dequeueInputBuffer(INPUT_TIMEOUT_US)
-        if (index >= 0) {
-            val input = codec.getInputBuffer(index)
-            if (input != null && accessUnit.size <= input.capacity()) {
-                input.clear()
-                input.put(accessUnit)
-                val presentationUs = (sample.toLong() and 0xffff_ffffL) * 1_000_000L / format.sampleRate
-                codec.queueInputBuffer(index, 0, accessUnit.size, presentationUs, 0)
-            } else {
-                codec.queueInputBuffer(index, 0, 0, 0, 0)
-            }
+    override fun decode(rtp: ByteArray, sample: Int, out: PcmSink): Boolean {
+        val accessUnit = CarPlayAudioCodecConfig.accessUnit(format, rtp) ?: return true
+        var index = codec.dequeueInputBuffer(INPUT_TIMEOUT_US)
+        var retries = 0
+        while (index < 0 && retries++ < INPUT_RETRIES) {
+            // The decoder is behind (a busy tablet): free its output so it can take more input, then ask again.
+            // Giving up here would silently shorten the audio by one frame, which the PC hears as a dropout later.
+            drain(out)
+            index = codec.dequeueInputBuffer(INPUT_TIMEOUT_US)
+        }
+        if (index < 0) return false
+        val input = codec.getInputBuffer(index)
+        val accepted = input != null && accessUnit.size <= input.capacity()
+        if (accepted) {
+            input!!.clear()
+            input.put(accessUnit)
+            val presentationUs = (sample.toLong() and 0xffff_ffffL) * 1_000_000L / format.sampleRate
+            codec.queueInputBuffer(index, 0, accessUnit.size, presentationUs, 0)
+        } else {
+            codec.queueInputBuffer(index, 0, 0, 0, 0)
         }
         drain(out)
+        return accepted
     }
 
     override fun drain(out: PcmSink) {
@@ -121,6 +134,9 @@ class MediaCodecPcmDecoder(private val format: AudioFormat) : PcmDecoder {
 
     private companion object {
         const val INPUT_TIMEOUT_US = 10_000L
+
+        /** With [INPUT_TIMEOUT_US], up to about 200 ms of waiting before a packet is given up; the queue holds over a second. */
+        const val INPUT_RETRIES = 20
     }
 }
 

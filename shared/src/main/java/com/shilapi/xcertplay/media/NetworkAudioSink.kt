@@ -1,17 +1,20 @@
 package com.shilapi.xcertplay.media
 
 import android.util.Log
+import com.shilapi.xcertplay.airplay.AudioCodecKind
 import com.shilapi.xcertplay.airplay.AudioFormat
 import com.shilapi.xcertplay.airplay.AudioStreamId
 import com.shilapi.xcertplay.airplay.MediaSink
 import com.shilapi.xcertplay.simhub.AudioStream as PcStream
 import com.shilapi.xcertplay.simhub.SimHubAudioTransport
+import com.shilapi.xcertplay.simhub.SimHubDiscovery
 import com.shilapi.xcertplay.simhub.SimHubEndpoints
 import java.io.Closeable
 import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -19,13 +22,24 @@ import java.util.concurrent.atomic.AtomicLong
  * (`docs/protocol.md` §10). Video, microphone and iAP2 callbacks are ignored: [SwitchingMediaSink]
  * sends those to the tablet's [AndroidMediaSink].
  *
- * Each CarPlay audio stream gets a sender with its own thread. The engine's receive thread only puts
- * RTP packets into the sender's [DropOldestQueue] (the oldest is dropped and counted when the PC side
- * falls behind). The sender decodes them ([PcmDecoder]), converts the PCM to s16le at a header-legal
+ * Each CarPlay audio stream gets a sender with its own audio-priority thread. The engine's receive thread
+ * only puts RTP packets into the sender's [DropOldestQueue] (the oldest is dropped and counted when the PC
+ * side falls behind). The sender decodes them ([PcmDecoder]), converts the PCM to s16le at a header-legal
  * rate ([PcmConversion], [LinearResampler] for 11025/22050), cuts it into 5 ms datagrams
  * ([PcmPacketizer]) and hands them to the [SimHubAudioTransport]. It sends `audioStart` before the
  * first datagram, again after a format change or a reconnect (§10.1), and `audioStop` when CarPlay
  * stops the stream or nothing arrived for [idleStopMillis].
+ *
+ * The datagram timestamp is the sample clock the PC plays by, so audio that never reaches the packetizer
+ * must still advance it (§10.2): the sender follows the RTP timestamps and declares every gap (a packet
+ * lost between phone and tablet, dropped from a full queue, or refused by the decoder) to the packetizer,
+ * which jumps the clock. The PC then plays that much silence where the audio was, and its buffer keeps its
+ * depth. Without this the stream arrives contiguous but short of real time, and the PC's buffer drains
+ * into an underrun every few seconds. For AAC the decoder emits a packet's PCM about one packet late, so a
+ * gap is placed up to one packet (21 ms) early; close enough for what it is.
+ *
+ * While any stream is announced the optional [wifiLock] is held (see `WifiLowLatencyLock`): Wi-Fi power
+ * save and background scans otherwise hold datagrams back in bursts the PC hears as dropouts.
  *
  * CarPlay streams map to the protocol's three streams by audio type: telephony → `telephony`, Siri
  * and alternate audio (guidance, alerts) → `alt`, music → `media`. A stream whose protocol stream is
@@ -38,6 +52,7 @@ class NetworkAudioSink(
     private val decoderFactory: (AudioFormat) -> PcmDecoder = PcmDecoder::forFormat,
     private val queueCapacity: Int = DEFAULT_QUEUE_PACKETS,
     private val idleStopMillis: Long = DEFAULT_IDLE_STOP_MILLIS,
+    private val wifiLock: SimHubDiscovery.NetworkLock? = null,
     private val log: (String) -> Unit = { Log.i(TAG, it) },
 ) : MediaSink, Closeable {
     /** Totals since the sink was created. */
@@ -48,6 +63,10 @@ class NetworkAudioSink(
         val noTargetDrops: Long,
         val decodeErrors: Long,
         val unassignedStreams: Long,
+        /** Packets the decoder refused after waiting; their time went out as a timestamp jump. */
+        val decoderDrops: Long = 0L,
+        /** Timestamp jumps declared to the PC (§10.2): each one is audio that never reached the packetizer. */
+        val timestampSkips: Long = 0L,
     )
 
     private val datagramsSent = AtomicLong()
@@ -56,6 +75,9 @@ class NetworkAudioSink(
     private val noTargetDrops = AtomicLong()
     private val decodeErrors = AtomicLong()
     private val unassignedStreams = AtomicLong()
+    private val decoderDrops = AtomicLong()
+    private val timestampSkips = AtomicLong()
+    private val announcedStreams = AtomicInteger()
 
     private val senders = ConcurrentHashMap<AudioStreamId, StreamSender>()
     private val assignmentLock = Any()
@@ -66,7 +88,21 @@ class NetworkAudioSink(
         get() = Stats(
             datagramsSent.get(), queueDrops.get(), sendFailures.get(),
             noTargetDrops.get(), decodeErrors.get(), unassignedStreams.get(),
+            decoderDrops.get(), timestampSkips.get(),
         )
+
+    /** True while at least one stream is announced to the PC (and the Wi-Fi lock, if any, is held). */
+    val streaming: Boolean get() = announcedStreams.get() > 0
+
+    private fun streamAnnounced() {
+        if (announcedStreams.incrementAndGet() != 1) return
+        wifiLock?.runCatching { acquire() }?.onFailure { log("PC audio: Wi-Fi lock not acquired: $it") }
+    }
+
+    private fun streamEnded() {
+        if (announcedStreams.decrementAndGet() != 0) return
+        wifiLock?.runCatching { release() }?.onFailure { log("PC audio: Wi-Fi lock not released: $it") }
+    }
 
     /** Protocol stream each live CarPlay stream is sent on. */
     val assignments: Map<AudioStreamId, PcStream>
@@ -153,6 +189,16 @@ class NetworkAudioSink(
         private var datagramsThisStream = 0L
         private val pcmSink = PcmSink { pcm, offset, length, chunk -> onPcm(pcm, offset, length, chunk) }
 
+        // The source clock (RTP timestamps, in frames at format.sampleRate), to find audio that went missing.
+        private var lastSample = -1L
+        /** Frames the last packet carried when the payload says so (LPCM); the nominal step otherwise. */
+        private var lastPacketFrames = 0L
+        /** Smallest forward step between packets seen on this stream: the frames per packet of a compressed codec. */
+        private var nominalStep = 0L
+        /** Source frames lost since the last datagram, to declare to the packetizer with the next PCM. */
+        private var missingSourceFrames = 0L
+        private var lastPacketNanos = 0L
+
         val finished: Boolean get() = done.count == 0L
 
         fun submit(rtp: ByteArray, sample: Int) {
@@ -187,14 +233,25 @@ class NetworkAudioSink(
         private fun run() {
             var ended = false
             try {
+                // The output clock is the PC's; this thread must not lose its turn to the video decoder or the UI.
+                runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO) }
                 if (!predecessorAwaited) {
                     // The previous holder's audioStop must reach the plugin before this stream's audioStart.
                     predecessor?.awaitFinished(PREDECESSOR_WAIT_MILLIS)
                     predecessorAwaited = true
                 }
+                lastPacketNanos = System.nanoTime()
                 while (true) {
-                    when (val item = queue.poll(idleStopMillis)) {
+                    // A decoder finishes a packet after decode() returned: poll briefly to send its PCM as soon as
+                    // it is ready instead of with the next packet (or never, for the last packet before a pause).
+                    val wait = if (decoder != null) DRAIN_POLL_MILLIS else idleStopMillis
+                    when (val item = queue.poll(wait)) {
                         null -> {
+                            val idleMillis = (System.nanoTime() - lastPacketNanos) / 1_000_000L
+                            if (decoder != null && idleMillis < idleStopMillis) {
+                                drainDecoder()
+                                continue
+                            }
                             endStream("idle")
                             break
                         }
@@ -203,7 +260,10 @@ class NetworkAudioSink(
                             ended = true
                             break
                         }
-                        is Item.Packet -> handle(item)
+                        is Item.Packet -> {
+                            lastPacketNanos = System.nanoTime()
+                            handle(item)
+                        }
                     }
                 }
             } catch (error: Throwable) {
@@ -219,20 +279,63 @@ class NetworkAudioSink(
         }
 
         private fun handle(packet: Item.Packet) {
+            noteSample(packet)
             val active = decoder ?: try {
                 decoderFactory(format).also { decoder = it }
             } catch (error: Exception) {
                 if (decodeErrors.getAndIncrement() == 0L) log("PC audio: no decoder for ${format.codec}: $error")
                 return
             }
-            try {
+            val accepted = try {
                 active.decode(packet.rtp, packet.sample, pcmSink)
+            } catch (error: Exception) {
+                decodeErrors.incrementAndGet()
+                runCatching { active.close() }
+                decoder = null
+                false
+            }
+            if (!accepted) {
+                // This packet's audio is gone: its time still has to pass on the PC.
+                if (decoderDrops.getAndIncrement() == 0L) log("PC audio: decoder refused a ${format.codec} packet; its time is sent as silence")
+                missingSourceFrames += lastPacketFrames
+            }
+        }
+
+        private fun drainDecoder() {
+            val active = decoder ?: return
+            try {
+                active.drain(pcmSink)
             } catch (error: Exception) {
                 decodeErrors.incrementAndGet()
                 runCatching { active.close() }
                 decoder = null
             }
         }
+
+        /**
+         * Follows the RTP timestamp. A forward step larger than the frames the previous packet carried is audio
+         * that never got here (lost upstream or dropped from the queue): it is declared to the packetizer with the
+         * next PCM. A step back or a repeat (reorder, duplicate, the phone restarting its clock) is not a gap.
+         * Steps beyond [MAX_GAP_SECONDS] are a new clock, not a pause: the PC would skip ahead anyway.
+         */
+        private fun noteSample(packet: Item.Packet) {
+            val sample = packet.sample.toLong() and 0xffff_ffffL
+            val carried = framesIn(packet.rtp)
+            if (lastSample >= 0) {
+                val step = (sample - lastSample) and 0xffff_ffffL
+                if (step in 1 until MAX_GAP_SECONDS * format.sampleRate) {
+                    if (carried == null && (nominalStep == 0L || step < nominalStep)) nominalStep = step
+                    val expected = if (lastPacketFrames > 0) lastPacketFrames else nominalStep
+                    if (expected > 0 && step > expected) missingSourceFrames += step - expected
+                }
+            }
+            lastSample = sample
+            lastPacketFrames = carried ?: nominalStep
+        }
+
+        /** Frames in a packet when the payload tells (LPCM); `null` for a compressed codec. */
+        private fun framesIn(rtp: ByteArray): Long? =
+            if (format.codec == AudioCodecKind.LPCM) ((rtp.size - RTP_HEADER_BYTES) / (2 * format.channels)).toLong().coerceAtLeast(0) else null
 
         private fun onPcm(pcm: ByteArray, offset: Int, length: Int, chunk: PcmChunkFormat) {
             if (chunk.channels < 1 || chunk.sampleRate <= 0) return
@@ -256,7 +359,7 @@ class NetworkAudioSink(
             val target = link?.audioTarget
             if (link == null || target == null) {
                 // The plugin forgets the stream with the link (§10.1); announce it again when it is back.
-                announced = null
+                setAnnounced(null)
                 packetizer = null
                 noTargetDrops.incrementAndGet()
                 return
@@ -270,17 +373,33 @@ class NetworkAudioSink(
                     current.flush { bytes, length -> deliver(link, bytes, length) }
                 }
                 if (!link.audioStart(stream, sampleRate, channels)) {
-                    announced = null
+                    setAnnounced(null)
                     packetizer = null
                     noTargetDrops.incrementAndGet()
                     return
                 }
                 log("PC audio: audioStart ${stream.wire} ${sampleRate}Hz x$channels for $id codec=${format.codec}")
-                announced = wanted
+                setAnnounced(wanted)
                 current = PcmPacketizer(stream, sampleRate, channels)
                 packetizer = current
+                missingSourceFrames = 0L // a fresh clock: nothing to place a gap after
+            }
+            if (missingSourceFrames > 0) {
+                val wireFrames = missingSourceFrames * sampleRate / format.sampleRate
+                missingSourceFrames = 0L
+                if (wireFrames > 0) {
+                    current.skip(wireFrames) { bytes, length -> deliver(link, bytes, length) }
+                    timestampSkips.incrementAndGet()
+                }
             }
             current.push(pcm) { bytes, length -> deliver(link, bytes, length) }
+        }
+
+        private fun setAnnounced(next: Announcement?) {
+            val previous = announced
+            announced = next
+            if (previous == null && next != null) streamAnnounced()
+            if (previous != null && next == null) streamEnded()
         }
 
         private fun deliver(link: SimHubAudioTransport, bytes: ByteArray, length: Int) {
@@ -296,14 +415,21 @@ class NetworkAudioSink(
             val started = announced
             val link = transport()
             if (started != null && link != null && link === started.transport && link.audioEpoch == started.epoch) {
-                if (link.audioTarget != null) packetizer?.flush { bytes, length -> deliver(link, bytes, length) }
+                if (link.audioTarget != null) {
+                    drainDecoder()
+                    packetizer?.flush { bytes, length -> deliver(link, bytes, length) }
+                }
                 link.audioStop(stream)
                 log("PC audio: audioStop ${stream.wire} ($reason) datagrams=$datagramsThisStream drops=${queue.dropped}")
             }
-            announced = null
+            setAnnounced(null)
             packetizer = null
             resampler = null
             datagramsThisStream = 0L
+            lastSample = -1L
+            lastPacketFrames = 0L
+            nominalStep = 0L
+            missingSourceFrames = 0L
             decoder?.let { runCatching { it.close() } }
             decoder = null
         }
@@ -319,6 +445,14 @@ class NetworkAudioSink(
         const val DEFAULT_IDLE_STOP_MILLIS = 3_000L
 
         private const val PREDECESSOR_WAIT_MILLIS = 500L
+
+        /** How often an idle sender asks its decoder for PCM that became ready after the last packet. */
+        private const val DRAIN_POLL_MILLIS = 20L
+
+        /** A source-clock step longer than this is a new clock, not missing audio. */
+        private const val MAX_GAP_SECONDS = 10L
+
+        private const val RTP_HEADER_BYTES = 12
 
         private val FALLBACK_ORDER = listOf(PcStream.ALT, PcStream.MEDIA, PcStream.TELEPHONY)
 

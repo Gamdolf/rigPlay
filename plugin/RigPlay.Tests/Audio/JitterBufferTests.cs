@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // JitterBufferTests.cs: the play-out buffer: fill to the target before playing, in-order and reordered
 // play-out, silence for gaps with loss counted, late and duplicate drops, reset on the start flag, skip-ahead
-// above the maximum depth, underrun refill, and sequence / timestamp wrap-around.
+// above the maximum depth, underrun refill with the target growing, the learned target surviving resets and
+// restarts, and sequence / timestamp wrap-around.
 using System;
 using System.Linq;
 using RigPlayPlugin.Audio;
@@ -190,13 +191,14 @@ namespace RigPlayPlugin.Tests.Audio
             Push(b, 6, 60, 6); // 70 frames > 60: skip to 30 frames before the end
             Assert.Equal(30, b.BufferedFrames);
             Assert.Equal(40, b.Counters.OverflowFrames);
+            Assert.Equal(1, b.Counters.Overflows);
             Assert.Equal(Enumerable.Range(4, 3).SelectMany(v => Enumerable.Repeat((short)v, 10)), Read(b, 30));
         }
 
         [Fact]
-        public void AnUnderrunPlaysSilenceAndRefillsBeforeResuming()
+        public void AnUnderrunPlaysSilenceAndRefillsToAGrownTargetBeforeResuming()
         {
-            var b = NewBuffer(targetMs: 20);
+            var b = NewBuffer(targetMs: 20, maxMs: 200);
             Push(b, 0, 0, 1, start: true);
             Push(b, 1, 10, 2);
             Assert.Equal(Enumerable.Repeat((short)1, 10).Concat(Enumerable.Repeat((short)2, 10)).Concat(Enumerable.Repeat((short)0, 5)), Read(b, 25));
@@ -204,14 +206,76 @@ namespace RigPlayPlugin.Tests.Audio
             Assert.Equal(1, c.Underruns);
             Assert.Equal(5, c.SilenceFrames);
             Assert.False(c.Playing);
+            // The 20 ms we held were not enough for that stall: hold half as much again next time.
+            Assert.Equal(30, b.TargetFrames);
+            Assert.Equal(30, c.TargetFrames);
 
-            // The next datagram arrives just after the underrun: nothing of it was due yet, so none of it is lost.
+            // The delayed datagrams arrive: nothing of them was due yet, so none is lost, and play-out resumes
+            // once the new target is buffered.
             Push(b, 2, 20, 3);
-            Assert.False(b.IsPlaying);
             Push(b, 3, 30, 4);
+            Assert.False(b.IsPlaying);
+            Push(b, 4, 40, 5);
             Assert.True(b.IsPlaying);
-            Assert.Equal(Enumerable.Repeat((short)3, 10).Concat(Enumerable.Repeat((short)4, 10)), Read(b, 20));
+            Assert.Equal(Enumerable.Repeat((short)3, 10).Concat(Enumerable.Repeat((short)4, 10)).Concat(Enumerable.Repeat((short)5, 10)), Read(b, 30));
             Assert.Equal(0, b.Counters.Late);
+        }
+
+        [Fact]
+        public void TheTargetGrowsByHalfPerUnderrunUpToHalfTheMaximum()
+        {
+            var b = NewBuffer(targetMs: 20, maxMs: 100);
+            Assert.Equal(50, b.MaxTargetFrames);
+            var expected = new[] { 30, 45, 50, 50 };
+            foreach (var target in expected)
+            {
+                Push(b, 0, 0, 1, start: true);
+                for (var i = 1; i < 10; i++) Push(b, i, i * Frames, 1);
+                Assert.True(b.IsPlaying);
+                Read(b, 200); // drains everything: underrun
+                Assert.Equal(target, b.TargetFrames);
+            }
+            Assert.Equal(4, b.Counters.Underruns);
+        }
+
+        [Fact]
+        public void TheMaximumTargetIsNeverBelowTheConfiguredOne()
+        {
+            var b = NewBuffer(targetMs: 30, maxMs: 40);
+            Assert.Equal(30, b.MaxTargetFrames);
+            Push(b, 0, 0, 1, start: true);
+            for (var i = 1; i < 3; i++) Push(b, i, i * Frames, 1);
+            Read(b, 100);
+            Assert.Equal(1, b.Counters.Underruns);
+            Assert.Equal(30, b.TargetFrames);
+        }
+
+        [Fact]
+        public void TheLearnedTargetSurvivesAResetAndTheStartFlag()
+        {
+            var b = NewBuffer(targetMs: 20, maxMs: 200);
+            for (var i = 0; i < 3; i++) Push(b, i, i * Frames, 1, start: i == 0);
+            Read(b, 100);
+            Assert.Equal(30, b.TargetFrames);
+            b.Reset();
+            Assert.Equal(30, b.TargetFrames);
+            Push(b, 0, 0, 2, start: true);
+            Push(b, 1, 10, 2);
+            Assert.False(b.IsPlaying); // 20 frames: the old target, not the learned one
+            Push(b, 2, 20, 2);
+            Assert.True(b.IsPlaying);
+        }
+
+        [Fact]
+        public void InheritTargetOnlyRaisesAndClampsToTheMaximumTarget()
+        {
+            var b = NewBuffer(targetMs: 20, maxMs: 100);
+            b.InheritTarget(10);
+            Assert.Equal(20, b.TargetFrames);
+            b.InheritTarget(35);
+            Assert.Equal(35, b.TargetFrames);
+            b.InheritTarget(500);
+            Assert.Equal(50, b.TargetFrames);
         }
 
         [Fact]
@@ -269,11 +333,12 @@ namespace RigPlayPlugin.Tests.Audio
         }
 
         [Fact]
-        public void TheDefaultsAreEightyAndTwoHundredMilliseconds()
+        public void TheDefaultsAreEightyAndFiveHundredMilliseconds()
         {
             var b = new JitterBuffer(48000, 2);
             Assert.Equal(3840, b.TargetFrames);
-            Assert.Equal(9600, b.MaxFrames);
+            Assert.Equal(24000, b.MaxFrames);
+            Assert.Equal(12000, b.MaxTargetFrames); // the target grows to at most 250 ms
             Assert.Equal(4, b.BlockAlign);
         }
 

@@ -47,6 +47,9 @@ interface SimHubAudioTransport {
 /**
  * [SimHubAudioTransport] over a [SimHubLink]: control messages go through the link, datagrams through
  * one unconnected [DatagramSocket] to the address of the link's current host and `state.audio.port`.
+ * The datagrams are marked Expedited Forwarding (DSCP 46), which Wi-Fi maps to its voice queue: on a
+ * tablet whose Wi-Fi also carries the dashboard and whatever else is on the network, that is the
+ * difference between 5 ms datagrams leaving on time and leaving in bursts.
  */
 class SimHubLinkAudioTransport(
     private val link: SimHubLink,
@@ -55,6 +58,11 @@ class SimHubLinkAudioTransport(
     private class Resolved(val host: String, val port: Int, val address: InetSocketAddress)
 
     @Volatile private var resolved: Resolved? = null
+
+    init {
+        // Best effort: a platform that refuses it still sends, in the default queue.
+        runCatching { socket.trafficClass = EXPEDITED_FORWARDING_TOS }
+    }
 
     override val audioTarget: InetSocketAddress?
         get() {
@@ -88,4 +96,9 @@ class SimHubLinkAudioTransport(
     }
 
     override fun close() = socket.close()
+
+    companion object {
+        /** IP TOS byte for DSCP EF (46 << 2): WMM access category voice. */
+        const val EXPEDITED_FORWARDING_TOS = 0xB8
+    }
 }

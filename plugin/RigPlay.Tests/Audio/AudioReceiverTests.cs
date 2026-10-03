@@ -219,9 +219,39 @@ namespace RigPlayPlugin.Tests.Audio
             Assert.Equal(5.0, media.LossPercent, 6);
             Assert.Equal(190, media.PacketsPerSecond, 6);
             Assert.True(media.BufferMs > 0);
+            Assert.Equal(20, media.TargetMs, 6);
+            Assert.Equal(0, media.Underruns);
+            Assert.True(media.Skips >= 1); // nothing pulled the 500 ms pushed: the buffer passed its 200 ms maximum
             Assert.Equal("48 kHz stereo pcm_s16le", media.FormatText);
             Assert.False(stats.Find(AudioStreamType.Alt).Started);
             Assert.Equal("stopped", stats.Find(AudioStreamType.Telephony).ToDisplayString());
+        }
+
+        [Fact]
+        public void ARestartedStreamStartsFromTheTargetTheLastOneLearned()
+        {
+            var r = NewReceiver(); // target 20 ms, max 200 ms
+            r.OnAudioStart("media", "pcm_s16le", 48000, 2);
+            for (var i = 0; i < 5; i++) Feed(r, Datagram(AudioStreamType.Media, i, i == 0));
+            var first = r.GetStream(AudioStreamType.Media).Buffer;
+            Assert.True(first.IsPlaying);
+            first.Read(new byte[48000 * 4], 0, 48000 * 4); // a second of play-out: underrun, the target grows to 30 ms
+            Assert.Equal(1, first.Counters.Underruns);
+            Assert.Equal(30, first.TargetMs, 6);
+
+            // The tablet stops the stream (a pause longer than its idle timeout) and starts it again, at another rate.
+            r.OnAudioStop("media");
+            r.OnAudioStart("media", "pcm_s16le", 44100, 2);
+            var second = r.GetStream(AudioStreamType.Media).Buffer;
+            Assert.NotSame(first, second);
+            Assert.Equal(30, second.TargetMs, 6);
+            Assert.Equal(0, second.Counters.Underruns);
+
+            // A restart with a new format (audioStart while started) keeps it as well; another type starts fresh.
+            r.OnAudioStart("media", "pcm_s16le", 48000, 1);
+            Assert.Equal(30, r.GetStream(AudioStreamType.Media).Buffer.TargetMs, 6);
+            r.OnAudioStart("alt", "pcm_s16le", 24000, 1);
+            Assert.Equal(20, r.GetStream(AudioStreamType.Alt).Buffer.TargetMs, 6);
         }
 
         [Fact]

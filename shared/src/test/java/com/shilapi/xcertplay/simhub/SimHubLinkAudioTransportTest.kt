@@ -90,6 +90,18 @@ class SimHubLinkAudioTransportTest {
         assertEquals(1L, link.pairedSessions)
     }
 
+    @Test fun datagramsAreMarkedExpeditedForwarding() {
+        val socket = DatagramSocket()
+        val link = SimHubLink(IDENTITY, object : SimHubLink.Listener {}, timing = FAST, random = Random(1), log = {})
+        val marked = SimHubLinkAudioTransport(link, socket)
+        try {
+            // DSCP 46 (EF) in the TOS byte: Wi-Fi puts these in its voice queue.
+            assertEquals(SimHubLinkAudioTransport.EXPEDITED_FORWARDING_TOS, socket.trafficClass)
+        } finally {
+            marked.close()
+        }
+    }
+
     @Test fun noTargetWhenAudioIsDisabledOrTheLinkIsDown() {
         val up = CountDownLatch(1)
         val link = pairedLink(up)

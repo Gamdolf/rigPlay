@@ -81,6 +81,32 @@ class PcmPacketizerTest {
         assertEquals(250L, packetizer.timestamp)
     }
 
+    @Test fun skipFlushesTheTailThenJumpsTheTimestamp() {
+        val packetizer = PcmPacketizer(AudioStream.MEDIA, 48_000, 2)
+        val datagrams = collect(packetizer) { p, emit ->
+            p.push(ramp(300, 2), emit = emit) // one datagram, 60 frames pending
+            p.skip(1000, emit)
+            p.push(ramp(240, 2), emit = emit)
+        }
+        assertEquals(listOf(240, 60, 240), datagrams.map { it.frames })
+        assertEquals(listOf(0L, 240L, 1300L), datagrams.map { it.header.timestamp })
+        assertEquals(listOf(0, 1, 2), datagrams.map { it.header.seq })
+        assertEquals(1540L, packetizer.timestamp)
+    }
+
+    @Test fun skipBeforeAnyAudioIsIgnoredSoTheStreamStartsAtZero() {
+        val packetizer = PcmPacketizer(AudioStream.MEDIA, 48_000, 2)
+        val datagrams = collect(packetizer) { p, emit ->
+            p.skip(1000, emit)
+            p.push(byteArrayOf(1, 2, 3), emit = emit) // less than a frame: still nothing to place a gap after
+            p.skip(1000, emit)
+            p.push(ramp(240, 2), emit = emit)
+        }
+        assertEquals(1, datagrams.size)
+        assertEquals(0L, datagrams[0].header.timestamp)
+        assertTrue(datagrams[0].header.start)
+    }
+
     @Test fun seqWrapsAfter65535() {
         val packetizer = PcmPacketizer(AudioStream.MEDIA, 8_000, 1, framesPerDatagram = 1)
         val frame = byteArrayOf(0, 0)
