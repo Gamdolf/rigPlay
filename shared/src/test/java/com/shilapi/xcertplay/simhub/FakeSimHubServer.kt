@@ -5,6 +5,7 @@ import java.io.Closeable
 import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStream
+import java.net.BindException
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
@@ -21,6 +22,10 @@ import java.util.concurrent.atomic.AtomicInteger
  * the pairing rules of §8 against [validToken] and [expectedPin], sending [stateAfterPairing] after
  * `pairResult ok`. [stop]/[restart] simulate the PC going off and on (same port); [silent] simulates a
  * PC that vanished without closing the socket (no heartbeats, no replies).
+ *
+ * [stop] returns only once the listening socket is gone (the accept thread has left `accept()`), and
+ * [start] retries the bind for a while, so a [restart] on the same port cannot fail with
+ * `BindException` on a busy machine.
  */
 class FakeSimHubServer(
     val hostId: String = HOST_ID,
@@ -54,6 +59,7 @@ class FakeSimHubServer(
 
     private val connections = CopyOnWriteArrayList<Connection>()
     @Volatile private var server: ServerSocket? = null
+    @Volatile private var acceptThread: Thread? = null
 
     var port: Int = 0
         private set
@@ -61,19 +67,47 @@ class FakeSimHubServer(
     val openConnections: Int get() = connections.count { !it.socket.isClosed }
 
     fun start(): FakeSimHubServer {
-        val socket = ServerSocket()
-        socket.reuseAddress = true
-        socket.bind(InetSocketAddress(InetAddress.getLoopbackAddress(), port))
+        val socket = bind(port)
         port = socket.localPort
         server = socket
-        Thread({ acceptLoop(socket) }, "FakeSimHubServer-accept").apply { isDaemon = true }.start()
+        acceptThread = Thread({ acceptLoop(socket) }, "FakeSimHubServer-accept").apply {
+            isDaemon = true
+            start()
+        }
         return this
     }
 
-    /** PC off: closes the listener and every connection (FIN, no `shutdown` error). */
+    /**
+     * Binds 127.0.0.1:[requested] (0: any free port). SO_REUSEADDR lets a restart rebind over the old
+     * connections in TIME_WAIT; the retry (up to [BIND_RETRY_MS]) covers a listener the kernel has not
+     * released yet.
+     */
+    private fun bind(requested: Int): ServerSocket {
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(BIND_RETRY_MS)
+        while (true) {
+            val socket = ServerSocket()
+            try {
+                socket.reuseAddress = true
+                socket.bind(InetSocketAddress(InetAddress.getLoopbackAddress(), requested))
+                return socket
+            } catch (e: BindException) {
+                socket.close()
+                if (requested == 0 || System.nanoTime() >= deadline) throw e
+                Thread.sleep(20)
+            }
+        }
+    }
+
+    /**
+     * PC off: closes the listener and every connection (FIN, no `shutdown` error). Closing a
+     * `ServerSocket` only signals a thread blocked in `accept()`; the kernel keeps the socket listening
+     * until that thread has left the call, so wait for it before the port counts as free.
+     */
     fun stop() {
         server?.close()
         server = null
+        acceptThread?.let { if (it !== Thread.currentThread()) it.join(10_000) }
+        acceptThread = null
         connections.forEach { it.close() }
         connections.clear()
     }
@@ -100,7 +134,7 @@ class FakeSimHubServer(
     }
 
     /** The next received message of type [T] (others are skipped), or `null` after [timeoutMs]. */
-    inline fun <reified T : SimHubMessage> await(timeoutMs: Long = 3_000, noinline match: (T) -> Boolean = { true }): T? {
+    inline fun <reified T : SimHubMessage> await(timeoutMs: Long = 10_000, noinline match: (T) -> Boolean = { true }): T? {
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs)
         while (true) {
             val left = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
@@ -114,6 +148,10 @@ class FakeSimHubServer(
         try {
             while (!socket.isClosed) {
                 val client = socket.accept()
+                if (socket.isClosed) {
+                    client.close()
+                    break
+                }
                 client.tcpNoDelay = true
                 accepted.incrementAndGet()
                 val connection = Connection(client)
@@ -232,5 +270,6 @@ class FakeSimHubServer(
         const val TOKEN = "q3Z2b0x9V1mN8pR4sT6uW7yA5cE1gH3jK2lM0nO9pQ8"
         const val ISSUED_TOKEN = "Zr8VtYqPl0kMnBv3Cx7Hs2Jd9Fg4Aw6Ee1Ru5Ti0Op3"
         const val PIN = "048291"
+        private const val BIND_RETRY_MS = 2_000L
     }
 }

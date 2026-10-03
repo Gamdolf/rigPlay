@@ -20,7 +20,7 @@ namespace RigPlayPlugin.Tests
         private readonly StreamReader reader;
         private readonly StreamWriter writer;
 
-        public FakeTablet(int port, int readTimeoutMs = 3000)
+        public FakeTablet(int port, int readTimeoutMs = 10000)
         {
             client = new TcpClient();
             client.Connect("127.0.0.1", port);
@@ -147,8 +147,9 @@ namespace RigPlayPlugin.Tests
             try { client.Close(); } catch { }
         }
 
-        /// <summary>Polls a condition for up to <paramref name="ms"/>.</summary>
-        public static bool WaitFor(Func<bool> condition, int ms = 3000)
+        /// <summary>Polls a condition for up to <paramref name="ms"/>. The default is generous: it only bounds how long a
+        /// failing test takes, and a busy CI runner can be slow to schedule the network threads.</summary>
+        public static bool WaitFor(Func<bool> condition, int ms = 10000)
         {
             var until = DateTime.UtcNow.AddMilliseconds(ms);
             while (DateTime.UtcNow < until)

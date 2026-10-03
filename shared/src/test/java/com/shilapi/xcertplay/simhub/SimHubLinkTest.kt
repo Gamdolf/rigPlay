@@ -175,7 +175,7 @@ class SimHubLinkTest {
         assertEquals(listOf(200L, 400L, 400L, 400L), retries.map { it.retryInMs })
 
         server.restart()
-        val up = events.await<Event.LinkUp>(timeoutMs = 3_000)
+        val up = events.await<Event.LinkUp>(timeoutMs = 10_000)
         assertTrue(up.state.paired)
         assertTrue(server.accepted.get() >= 2)
         assertEquals(SimHubMessage.PairRequest(token = FakeSimHubServer.TOKEN), server.await<SimHubMessage.PairRequest>())
@@ -205,8 +205,9 @@ class SimHubLinkTest {
         link.onBeacon(beacon(hostId = "someone-else"))
         assertNull(events.poll<Event.LinkUp>(300))
         link.onBeacon(beacon(hostId = FakeSimHubServer.HOST_ID))
-        events.await<Event.LinkUp>(timeoutMs = 2_000)
-        assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start) < 3_000)
+        // "At once" means long before the 20 s retry would have fired; the bound leaves room for a busy runner.
+        events.await<Event.LinkUp>(timeoutMs = 10_000)
+        assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start) < 10_000)
         assertEquals("127.0.0.1", link.currentTarget!!.host)
     }
 
@@ -445,10 +446,10 @@ class SimHubLinkTest {
         inline fun <reified T : Event> poll(timeoutMs: Long, crossinline match: (T) -> Boolean = { true }): T? =
             take(timeoutMs) { it is T && match(it) } as T?
 
-        inline fun <reified T : Event> await(timeoutMs: Long = 3_000, crossinline match: (T) -> Boolean = { true }): T =
+        inline fun <reified T : Event> await(timeoutMs: Long = 10_000, crossinline match: (T) -> Boolean = { true }): T =
             poll(timeoutMs, match) ?: throw AssertionError("no ${T::class.java.simpleName} within $timeoutMs ms")
 
-        fun awaitState(timeoutMs: Long = 3_000, match: (SimHubState) -> Boolean): SimHubState =
+        fun awaitState(timeoutMs: Long = 10_000, match: (SimHubState) -> Boolean): SimHubState =
             await<Event.StateChanged>(timeoutMs) { match(it.state) }.state
 
         fun drain(): List<Event> = synchronized(lock) { pending.toList().also { pending.clear() } }

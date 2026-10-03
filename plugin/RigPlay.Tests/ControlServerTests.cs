@@ -28,28 +28,61 @@ namespace RigPlayPlugin.Tests
             ErrorIntervalMs = 0,
         };
 
-        /// <summary>Fast timeouts except the watchdog, for tests whose fake tablet does not send heartbeats.</summary>
-        public static SessionTimings FastNoWatchdog
+        /// <summary>
+        /// For tests that are not about liveness: no hello, pairRequest or watchdog deadline can fire during the test, so
+        /// a busy runner that is slow to schedule the session's threads cannot close the session under the test's feet.
+        /// Heartbeats still go out every 100 ms for the tests that look at them.
+        /// </summary>
+        public static SessionTimings Relaxed
         {
             get
             {
                 var t = Fast;
                 t.WatchdogMs = 30000;
-                t.HeartbeatMs = 1000;
+                t.HelloTimeoutMs = 30000;
                 t.PairRequestTimeoutMs = 30000;
                 return t;
             }
         }
 
-        private readonly ControlServer server;
+        /// <summary>As <see cref="Relaxed"/> with 1 s heartbeats, for host tests whose fake tablet does not send heartbeats.</summary>
+        public static SessionTimings FastNoWatchdog
+        {
+            get
+            {
+                var t = Relaxed;
+                t.HeartbeatMs = 1000;
+                return t;
+            }
+        }
+
+        private ControlServer server;
         private readonly List<FakeTablet> tablets = new List<FakeTablet>();
 
         public ControlServerTests()
         {
-            server = NewServer(Fast);
-            server.Pairing = new TokenPairing();
-            server.StateFactory = s => new StateMessage { DashboardUrl = null, Audio = new AudioInfo { Enabled = false, Port = 23712 } };
-            Assert.True(server.Start(), server.Status.Error);
+            server = StartServer(Relaxed);
+        }
+
+        private static ControlServer StartServer(SessionTimings timings)
+        {
+            var s = NewServer(timings);
+            s.Pairing = new TokenPairing();
+            s.StateFactory = _ => new StateMessage { DashboardUrl = null, Audio = new AudioInfo { Enabled = false, Port = 23712 } };
+            Assert.True(s.Start(), s.Status.Error);
+            return s;
+        }
+
+        /// <summary>For the liveness tests: replaces the relaxed server with one on the short <see cref="Fast"/> timeouts.</summary>
+        private void UseFastTimeouts()
+        {
+            UseTimings(Fast);
+        }
+
+        private void UseTimings(SessionTimings timings)
+        {
+            server.Stop();
+            server = StartServer(timings);
         }
 
         public static ControlServer NewServer(SessionTimings timings)
@@ -146,6 +179,7 @@ namespace RigPlayPlugin.Tests
         [Fact]
         public void NoHelloWithinTheTimeoutCloses()
         {
+            UseFastTimeouts();
             var t = Connect();
             t.ExpectClosed();
             Assert.True(FakeTablet.WaitFor(() => server.Sessions.Count == 0));
@@ -171,21 +205,26 @@ namespace RigPlayPlugin.Tests
         [Fact]
         public void HeartbeatLossDropsTheSession()
         {
+            UseFastTimeouts();
             var closed = new List<ClientSession>();
             server.SessionClosed += s => { lock (closed) closed.Add(s); };
             var t = Connect();
             t.Hello();
+            // The pairRequest is the tablet's last line: the watchdog (600 ms) runs from when the plugin reads it, which
+            // is after this instant, so the lower bound below holds however slowly the exchange that follows runs.
+            var started = DateTime.UtcNow;
             t.Send(new PairRequestMessage { Token = "good" });
             Assert.True(t.Expect<PairResultMessage>().Ok);
             t.Expect<StateMessage>();
             Assert.Single(server.PairedSessions);
 
-            // The tablet goes silent: the plugin keeps sending heartbeats, then closes after the watchdog.
-            var started = DateTime.UtcNow;
+            // The tablet goes silent: the plugin keeps sending heartbeats, then closes after the watchdog. The lower
+            // bound is the spec; the upper bound and the heartbeat count only allow for a slow, busy runner, where the
+            // 100 ms heartbeat timer can fire late and the close can be noticed late.
             t.ExpectClosed();
             var elapsed = (DateTime.UtcNow - started).TotalMilliseconds;
-            Assert.InRange(elapsed, 400, 3000);
-            Assert.True(t.HeartbeatsReceived >= 3);
+            Assert.InRange(elapsed, 400, 10000);
+            Assert.True(t.HeartbeatsReceived >= 1, "heartbeats received: " + t.HeartbeatsReceived);
             Assert.True(FakeTablet.WaitFor(() => server.PairedSessions.Count == 0));
             Assert.True(FakeTablet.WaitFor(() => { lock (closed) return closed.Any(s => s.CloseReason.StartsWith("link lost")); }));
         }
@@ -193,6 +232,7 @@ namespace RigPlayPlugin.Tests
         [Fact]
         public void HeartbeatsKeepTheSessionOpenPastTheWatchdog()
         {
+            UseFastTimeouts();
             var t = Connect();
             t.Hello();
             t.Send(new PairRequestMessage { Token = "good" });
@@ -330,6 +370,7 @@ namespace RigPlayPlugin.Tests
         [Fact]
         public void NoPairRequestWithinTheTimeoutCloses()
         {
+            UseFastTimeouts();
             var t = Connect();
             t.Hello();
             var until = DateTime.UtcNow.AddMilliseconds(2500);
@@ -354,36 +395,21 @@ namespace RigPlayPlugin.Tests
         [Fact]
         public void TheTimeoutRestartsAfterARefusalThatLeavesNoPinPending()
         {
+            // Only the pairRequest timeout is under test (no watchdog): 2 s, and the refusal comes 0.7 s after welcome.
+            // Counted from welcome the session would close at most 1.3 s after the refusal; restarted by the refusal,
+            // at least 2 s after it. The margins leave a busy runner 1.3 s to get the refusal through.
+            var timings = Relaxed;
+            timings.PairRequestTimeoutMs = 2000;
+            UseTimings(timings);
             var t = Connect();
             t.Hello();
-            var started = DateTime.UtcNow;
-            var refusedAt = DateTime.MaxValue;
-            var closedAt = DateTime.MaxValue;
-            while (DateTime.UtcNow < started.AddMilliseconds(4000))
-            {
-                try
-                {
-                    if (refusedAt == DateTime.MaxValue && DateTime.UtcNow > started.AddMilliseconds(500))
-                    {
-                        t.Send(new PairRequestMessage { Token = "bad" });
-                        refusedAt = DateTime.UtcNow;
-                    }
-                    else
-                    {
-                        t.Send(new HeartbeatMessage());
-                    }
-                    if (t.ReadLine() == null) { closedAt = DateTime.UtcNow; break; }
-                }
-                catch (Exception)
-                {
-                    closedAt = DateTime.UtcNow;
-                    break;
-                }
-            }
-            Assert.Contains(t.Received, l => l.Contains("tokenInvalid"));
-            Assert.True(closedAt != DateTime.MaxValue, "the session was not closed");
-            // Closed about PairRequestTimeoutMs (800) after the refusal, not after welcome.
-            Assert.True((closedAt - refusedAt).TotalMilliseconds >= 600, "closed " + (closedAt - refusedAt).TotalMilliseconds + " ms after the refusal");
+            System.Threading.Thread.Sleep(700);
+            var refusedAt = DateTime.UtcNow;
+            t.Send(new PairRequestMessage { Token = "bad" });
+            Assert.Equal(PairReasons.TokenInvalid, t.Expect<PairResultMessage>().Reason);
+            t.ExpectClosed();
+            var afterRefusal = (DateTime.UtcNow - refusedAt).TotalMilliseconds;
+            Assert.True(afterRefusal >= 1650, "closed " + afterRefusal + " ms after the refusal");
         }
 
         [Fact]

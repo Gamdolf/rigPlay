@@ -23,6 +23,10 @@ namespace RigPlayPlugin.Tests
             {
                 ControlPortOverride = 0,
                 BeaconEnabled = false,
+                // The web dash probe's first result pushes a state to paired sessions at an arbitrary moment (and it
+                // would probe a real port 8888 on this machine). These tests assert on the exact sequence of lines a
+                // paired tablet receives, so a state from the probe would interleave at random; DashboardTests covers it.
+                ProbeEnabled = false,
             };
             host.Start();
             Assert.True(host.Server.Status.Listening, host.Server.Status.Error);

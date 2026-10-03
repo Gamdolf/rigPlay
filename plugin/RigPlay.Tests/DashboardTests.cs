@@ -8,7 +8,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 using RigPlayPlugin.Dashboards;
 using RigPlayPlugin.Protocol;
 using Xunit;
@@ -101,39 +100,75 @@ namespace RigPlayPlugin.Tests
 
         // Web dash probe
 
-        /// <summary>A minimal HTTP server on loopback that answers every request with 200.</summary>
+        /// <summary>
+        /// A minimal HTTP server on loopback that answers every request with 200. Deterministic on a slow or busy
+        /// runner: the listening socket exists before the constructor returns (connections queue in its backlog), and
+        /// a dedicated thread serves them with blocking calls, so no thread-pool scheduling sits between a probe and
+        /// its answer. It reads the whole request head before answering and half-closes after writing, so the client
+        /// always sees the status line followed by a clean EOF, never a reset caused by unread request bytes.
+        /// </summary>
         internal sealed class TinyHttpServer : IDisposable
         {
+            private static readonly byte[] Response = Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
+
             private readonly TcpListener listener = new TcpListener(IPAddress.Loopback, 0);
+            private readonly Thread thread;
             private volatile bool running = true;
 
             public TinyHttpServer()
             {
                 listener.Start();
-                Task.Run(Loop);
+                Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+                thread = new Thread(Loop) { IsBackground = true, Name = "TinyHttpServer " + Port };
+                thread.Start();
             }
 
-            public int Port => ((IPEndPoint)listener.LocalEndpoint).Port;
+            public int Port { get; }
 
-            private async Task Loop()
+            private void Loop()
             {
                 while (running)
                 {
+                    TcpClient client;
                     try
                     {
-                        using (var client = await listener.AcceptTcpClientAsync())
-                        {
-                            var stream = client.GetStream();
-                            var buffer = new byte[1024];
-                            await stream.ReadAsync(buffer, 0, buffer.Length);
-                            var response = Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok");
-                            await stream.WriteAsync(response, 0, response.Length);
-                        }
+                        client = listener.AcceptTcpClient();
                     }
                     catch (Exception)
                     {
                         if (!running) return;
+                        continue;
                     }
+                    try
+                    {
+                        using (client)
+                        {
+                            client.ReceiveTimeout = 10000;
+                            client.SendTimeout = 10000;
+                            var stream = client.GetStream();
+                            ReadRequestHead(stream);
+                            stream.Write(Response, 0, Response.Length);
+                            client.Client.Shutdown(SocketShutdown.Send);
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        // A client that went away early (the closed-port probe, a timeout): serve the next one.
+                    }
+                }
+            }
+
+            /// <summary>Reads until the blank line that ends the request head, or EOF.</summary>
+            private static void ReadRequestHead(NetworkStream stream)
+            {
+                var matched = 0;
+                var one = new byte[1];
+                while (matched < 4)
+                {
+                    if (stream.Read(one, 0, 1) <= 0) return;
+                    var expected = matched % 2 == 0 ? (byte)'\r' : (byte)'\n';
+                    if (one[0] == expected) matched++;
+                    else matched = one[0] == '\r' ? 1 : 0;
                 }
             }
 
@@ -141,6 +176,7 @@ namespace RigPlayPlugin.Tests
             {
                 running = false;
                 listener.Stop();
+                thread.Join(10000);
             }
         }
 
@@ -158,9 +194,10 @@ namespace RigPlayPlugin.Tests
         {
             using (var http = new TinyHttpServer())
             {
-                Assert.True(WebDashProbe.Probe(http.Port, 1000));
+                // Generous timeout: a cold CI runner can take well over a second for the first loopback round trip.
+                Assert.True(WebDashProbe.Probe(http.Port, 10000));
             }
-            Assert.False(WebDashProbe.Probe(ClosedPort(), 1000));
+            Assert.False(WebDashProbe.Probe(ClosedPort(), 10000));
         }
 
         [Fact]
@@ -170,7 +207,7 @@ namespace RigPlayPlugin.Tests
             {
                 var port = http.Port;
                 var changes = 0;
-                var probe = new WebDashProbe(() => port);
+                var probe = new WebDashProbe(() => port, timeoutMs: 10000);
                 probe.Changed += () => changes++;
                 Assert.Null(probe.Current);
                 probe.ProbeNow();
