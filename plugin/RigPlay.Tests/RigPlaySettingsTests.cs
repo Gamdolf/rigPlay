@@ -12,7 +12,7 @@ namespace RigPlayPlugin.Tests
     {
         private static PairedTablet Tablet(string id, string name, string token, DateTime pairedAt)
         {
-            return new PairedTablet { Id = id, Name = name, Token = token, PairedAt = pairedAt };
+            return new PairedTablet { Id = id, Name = name, TokenHash = string.IsNullOrWhiteSpace(token) ? token : RigPlayPlugin.Pairing.PairingTokens.Hash(token.Trim()), PairedAt = pairedAt };
         }
 
         [Fact]
@@ -60,16 +60,83 @@ namespace RigPlayPlugin.Tests
         [Fact]
         public void AValidCustomPortIsKept()
         {
-            var settings = new RigPlaySettings { ControlPort = 20000, DiscoveryPort = 20001, AudioPort = 20002 }.Normalize();
+            var settings = new RigPlaySettings { ControlPort = 20000, AudioPort = 20002 }.Normalize();
             Assert.Equal(20000, settings.ControlPort);
-            Assert.Equal(20001, settings.DiscoveryPort);
             Assert.Equal(20002, settings.AudioPort);
+        }
+
+        [Fact]
+        public void ASchema1FileMovesFromThePlaceholderPortsToTheProtocolPorts()
+        {
+            // The file the plugin skeleton wrote on the test VM.
+            var old = JsonConvert.DeserializeObject<RigPlaySettings>(
+                "{\"SchemaVersion\":1,\"ControlPort\":18877,\"DiscoveryPort\":18878,\"AudioPort\":18879,\"SelectedDashboard\":\"\",\"Volume\":90,\"PairedTablets\":[]}").Normalize();
+            Assert.Equal(RigPlaySettings.CurrentSchemaVersion, old.SchemaVersion);
+            Assert.Equal(23711, old.ControlPort);
+            Assert.Equal(23710, old.DiscoveryPort);
+            Assert.Equal(23712, old.AudioPort);
+            Assert.Equal(90, old.Volume);
+
+            var custom = new RigPlaySettings { SchemaVersion = 1, ControlPort = 20000, AudioPort = 20001 }.Normalize();
+            Assert.Equal(20000, custom.ControlPort);
+            Assert.Equal(20001, custom.AudioPort);
+        }
+
+        [Theory]
+        [InlineData(0, 0)]
+        [InlineData(8888, 8888)]
+        [InlineData(-5, 0)]
+        [InlineData(70000, 0)]
+        public void TheWebDashPortIsZeroForAutomaticOrAValidPort(int port, int expected)
+        {
+            Assert.Equal(expected, new RigPlaySettings { WebDashPort = port }.Normalize().WebDashPort);
+        }
+
+        [Fact]
+        public void TheDiscoveryPortIsFixedByTheProtocol()
+        {
+            Assert.Equal(23710, ProtocolDefaults.DiscoveryPort);
+            Assert.Equal(23711, ProtocolDefaults.ControlPort);
+            Assert.Equal(23712, ProtocolDefaults.AudioPort);
+            Assert.Equal(ProtocolDefaults.DiscoveryPort, new RigPlaySettings { DiscoveryPort = 20001 }.Normalize().DiscoveryPort);
+        }
+
+        [Fact]
+        public void AControlPortOnTheDiscoveryPortIsReset()
+        {
+            var settings = new RigPlaySettings { ControlPort = 23710, AudioPort = 20002 }.Normalize();
+            Assert.Equal(ProtocolDefaults.ControlPort, settings.ControlPort);
+            Assert.Equal(ProtocolDefaults.AudioPort, settings.AudioPort);
+        }
+
+        [Fact]
+        public void TheHostIdIsAStableLowerCaseV4Uuid()
+        {
+            var settings = new RigPlaySettings().Normalize();
+            Assert.True(RigPlaySettings.IsValidHostId(settings.HostId), settings.HostId);
+            var id = settings.HostId;
+            Assert.Equal(id, settings.Normalize().HostId);
+            var copy = JsonConvert.DeserializeObject<RigPlaySettings>(JsonConvert.SerializeObject(settings)).Normalize();
+            Assert.Equal(id, copy.HostId);
+        }
+
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        [InlineData("not-a-uuid")]
+        [InlineData("3F6C2A4E-8D1B-4C7A-9E55-0B2D7F1A6C90")]
+        [InlineData("3f6c2a4e-8d1b-1c7a-9e55-0b2d7f1a6c90")]
+        public void ABadHostIdIsRegenerated(string bad)
+        {
+            var settings = new RigPlaySettings { HostId = bad }.Normalize();
+            Assert.True(RigPlaySettings.IsValidHostId(settings.HostId));
+            Assert.NotEqual(bad, settings.HostId);
         }
 
         [Fact]
         public void CollidingPortsResetAllThreeToTheDefaults()
         {
-            var settings = new RigPlaySettings { ControlPort = 20000, DiscoveryPort = 20001, AudioPort = 20000 }.Normalize();
+            var settings = new RigPlaySettings { ControlPort = 20000, AudioPort = 20000 }.Normalize();
             Assert.Equal(ProtocolDefaults.ControlPort, settings.ControlPort);
             Assert.Equal(ProtocolDefaults.DiscoveryPort, settings.DiscoveryPort);
             Assert.Equal(ProtocolDefaults.AudioPort, settings.AudioPort);
@@ -123,7 +190,7 @@ namespace RigPlayPlugin.Tests
             var a = settings.FindTablet("tab-a");
             Assert.NotNull(a);
             Assert.Equal("Driver", a.Name);
-            Assert.Equal("new", a.Token);
+            Assert.Equal(RigPlayPlugin.Pairing.PairingTokens.Hash("new"), a.TokenHash);
             Assert.Equal(late, a.PairedAt);
         }
 
@@ -170,8 +237,8 @@ namespace RigPlayPlugin.Tests
             var pairedAt = new DateTime(2026, 9, 30, 18, 45, 12, DateTimeKind.Utc);
             var original = new RigPlaySettings
             {
+                HostName = "Sim rig",
                 ControlPort = 21000,
-                DiscoveryPort = 21001,
                 AudioPort = 21002,
                 SelectedDashboard = "rigPlay GT",
                 IdleDashboard = "rigPlay Idle",
@@ -190,7 +257,8 @@ namespace RigPlayPlugin.Tests
             Assert.Equal(42, copy.Volume);
             Assert.True(copy.Muted);
             var tablet = Assert.Single(copy.PairedTablets);
-            Assert.Equal("secret", tablet.Token);
+            Assert.Equal(RigPlayPlugin.Pairing.PairingTokens.Hash("secret"), tablet.TokenHash);
+            Assert.DoesNotContain("secret\"", json);
             Assert.Equal(pairedAt, tablet.PairedAt);
             Assert.Equal(DateTimeKind.Utc, tablet.PairedAt.Kind);
         }
@@ -199,7 +267,9 @@ namespace RigPlayPlugin.Tests
         public void AnEmptyOrPartialFileReadsAsDefaults()
         {
             var empty = JsonConvert.DeserializeObject<RigPlaySettings>("{}").Normalize();
-            Assert.Equal(JsonConvert.SerializeObject(new RigPlaySettings()), JsonConvert.SerializeObject(empty));
+            // Every field is the default except the host id, which is new for each fresh object.
+            var defaults = new RigPlaySettings { HostId = empty.HostId };
+            Assert.Equal(JsonConvert.SerializeObject(defaults), JsonConvert.SerializeObject(empty));
 
             var partial = JsonConvert.DeserializeObject<RigPlaySettings>(
                 "{\"Volume\": 900, \"PairedTablets\": null, \"ControlPort\": 5, \"SomethingFromTheFuture\": 1}").Normalize();

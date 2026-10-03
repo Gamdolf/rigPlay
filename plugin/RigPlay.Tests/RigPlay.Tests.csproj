@@ -14,6 +14,17 @@
     <Compile Include="../RigPlay/ProtocolDefaults.cs" Link="Plugin/ProtocolDefaults.cs" />
     <Compile Include="../RigPlay/RigPlaySettings.cs" Link="Plugin/RigPlaySettings.cs" />
     <Compile Include="../RigPlay/Theme.cs" Link="Plugin/Theme.cs" />
+    <!-- Protocol, networking and the host that runs them: pure by design, so the tests exercise the real code. -->
+    <Compile Include="../RigPlay/Core/**/*.cs" Link="Plugin/Core/%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="../RigPlay/Protocol/**/*.cs" Link="Plugin/Protocol/%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="../RigPlay/Net/**/*.cs" Link="Plugin/Net/%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="../RigPlay/Pairing/**/*.cs" Link="Plugin/Pairing/%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="../RigPlay/Dashboards/**/*.cs" Link="Plugin/Dashboards/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <!-- The golden samples of docs/protocol.md, read by ProtocolFixturesTests. -->
+  <ItemGroup>
+    <None Include="../../protocol/fixtures/**/*" Link="fixtures/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- The audio receiver's pure logic (#24); AudioOutput.cs and AudioSection.cs need NAudio/WASAPI and WPF and stay out. -->

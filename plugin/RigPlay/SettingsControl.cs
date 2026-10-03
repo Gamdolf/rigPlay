@@ -55,32 +55,17 @@ namespace RigPlayPlugin
 
         private FrameworkElement BuildStatus()
         {
-            var state = Ui.HStack(8, Ui.Dot(Theme.StatusIdle), Ui.Text("Not running: the tablet server is not part of this version yet"));
-            return Ui.Section("Status",
-                "Whether rigPlay is listening for tablets, and on which ports.",
-                Ui.Row("Tablet server", state),
-                Ui.Row("Control port (TCP)", Settings.ControlPort.ToString()),
-                Ui.Row("Discovery port (UDP)", Settings.DiscoveryPort.ToString()),
-                Ui.Row("Audio port", Settings.AudioPort.ToString()));
+            return new StatusSection(plugin).Build();
         }
 
         private FrameworkElement BuildPairing()
         {
-            var count = Settings.PairedTablets.Count;
-            var pair = Ui.PrimaryButton("Pair a tablet");
-            pair.IsEnabled = false;
-            return Ui.Section("Pairing",
-                "Pair a tablet once with a PIN; after that it connects on its own.",
-                Ui.Row("Paired tablets", count == 0 ? "None yet" : count.ToString()),
-                pair);
+            return new PairingSection(plugin).Build();
         }
 
         private FrameworkElement BuildDashboards()
         {
-            return Ui.Section("Dashboards",
-                "The SimHub dashboard each tablet shows, while driving and while idle.",
-                Ui.Row("While driving", Display(Settings.SelectedDashboard, "None selected")),
-                Ui.Row("While idle", Display(Settings.IdleDashboard, "Same as while driving")));
+            return new DashboardSection(plugin).Build();
         }
 
         private FrameworkElement BuildAudio()

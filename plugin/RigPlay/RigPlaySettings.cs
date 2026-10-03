@@ -12,7 +12,12 @@ namespace RigPlayPlugin
     public class RigPlaySettings
     {
         /// <summary>The shape of this file; bump it when a field changes meaning so Normalize can migrate.</summary>
-        public const int CurrentSchemaVersion = 1;
+        /// <remarks>2: protocol ports (23711/23712), host id, token hashes instead of tokens.</remarks>
+        public const int CurrentSchemaVersion = 2;
+
+        /// <summary>Placeholder defaults of schema 1, migrated by Normalize.</summary>
+        internal const int LegacyControlPort = 18877;
+        internal const int LegacyAudioPort = 18879;
 
         public const int MinVolume = 0;
         public const int MaxVolume = 100;
@@ -21,15 +26,33 @@ namespace RigPlayPlugin
 
         public int SchemaVersion { get; set; } = CurrentSchemaVersion;
 
+        /// <summary>
+        /// This installation's identity (spec §1): a lower-case RFC 4122 version 4 UUID, generated on first start and
+        /// kept across restarts and IP changes. Tablets key their pairing token by it.
+        /// </summary>
+        public string HostId { get; set; } = NewHostId();
+
+        /// <summary>The PC name shown on tablets; empty for the Windows computer name.</summary>
+        public string HostName { get; set; } = "";
+
         public int ControlPort { get; set; } = ProtocolDefaults.ControlPort;
+
+        /// <summary>The beacon port. Fixed by the protocol (spec §2): Normalize always resets it to the default.</summary>
         public int DiscoveryPort { get; set; } = ProtocolDefaults.DiscoveryPort;
+
         public int AudioPort { get; set; } = ProtocolDefaults.AudioPort;
 
-        /// <summary>The SimHub dashboard pushed to tablets while a game is running; empty for none.</summary>
+        /// <summary>
+        /// The dashboard (folder name under DashTemplates) the tablet shows for the SimHub button in CarPlay
+        /// (state.dashboardUrl); empty for none.
+        /// </summary>
         public string SelectedDashboard { get; set; } = "";
 
-        /// <summary>The dashboard shown while no game is running; empty to keep the selected one.</summary>
+        /// <summary>The dashboard shown while no iPhone is connected (state.idleDashboardUrl); empty for the tablet's home screen.</summary>
         public string IdleDashboard { get; set; } = "";
+
+        /// <summary>SimHub's web dash server port; 0 to use SimHub's own setting (8888 unless changed there).</summary>
+        public int WebDashPort { get; set; }
 
         /// <summary>The output device the tablet's audio plays on; empty for the Windows default device.</summary>
         public string AudioDeviceId { get; set; } = "";
@@ -47,17 +70,30 @@ namespace RigPlayPlugin
         /// </summary>
         public RigPlaySettings Normalize()
         {
+            if (SchemaVersion == 1)
+            {
+                // Schema 1 (plugin skeleton) used placeholder ports before docs/protocol.md fixed them: move files
+                // that still carry those defaults to the protocol's.
+                if (ControlPort == LegacyControlPort) ControlPort = ProtocolDefaults.ControlPort;
+                if (AudioPort == LegacyAudioPort) AudioPort = ProtocolDefaults.AudioPort;
+                SchemaVersion = CurrentSchemaVersion;
+            }
             if (SchemaVersion < 1 || SchemaVersion > CurrentSchemaVersion) SchemaVersion = CurrentSchemaVersion;
 
+            if (!IsValidHostId(HostId)) HostId = NewHostId();
+            HostName = Clean(HostName);
+
+            // The discovery port is not configurable: both sides always use 23710 (spec §2).
+            DiscoveryPort = ProtocolDefaults.DiscoveryPort;
             ControlPort = ValidPort(ControlPort, ProtocolDefaults.ControlPort);
-            DiscoveryPort = ValidPort(DiscoveryPort, ProtocolDefaults.DiscoveryPort);
             AudioPort = ValidPort(AudioPort, ProtocolDefaults.AudioPort);
             if (ControlPort == DiscoveryPort || ControlPort == AudioPort || DiscoveryPort == AudioPort)
             {
                 ControlPort = ProtocolDefaults.ControlPort;
-                DiscoveryPort = ProtocolDefaults.DiscoveryPort;
                 AudioPort = ProtocolDefaults.AudioPort;
             }
+
+            if (WebDashPort < 0 || WebDashPort > ProtocolDefaults.MaxPort) WebDashPort = 0;
 
             SelectedDashboard = Clean(SelectedDashboard);
             IdleDashboard = Clean(IdleDashboard);
@@ -66,8 +102,10 @@ namespace RigPlayPlugin
             Volume = Math.Min(MaxVolume, Math.Max(MinVolume, Volume));
 
             PairedTablets = (PairedTablets ?? new List<PairedTablet>())
-                .Where(t => t != null && !string.IsNullOrWhiteSpace(t.Id) && !string.IsNullOrWhiteSpace(t.Token))
+                .Where(t => t != null && !string.IsNullOrWhiteSpace(t.Id))
                 .Select(t => t.Normalize())
+                // A tablet without a valid token hash could never resume; drop it rather than show a dead entry.
+                .Where(t => PairedTablet.IsTokenHash(t.TokenHash))
                 // One entry per tablet: a tablet that paired twice keeps its newest pairing.
                 .GroupBy(t => t.Id, StringComparer.Ordinal)
                 .Select(g => g.OrderByDescending(t => t.PairedAt).First())
@@ -80,6 +118,20 @@ namespace RigPlayPlugin
         public PairedTablet FindTablet(string id)
         {
             return PairedTablets?.FirstOrDefault(t => t != null && string.Equals(t.Id, id, StringComparison.Ordinal));
+        }
+
+        /// <summary>A new host id: a lower-case, hyphenated random (version 4) UUID.</summary>
+        public static string NewHostId()
+        {
+            return Guid.NewGuid().ToString("D").ToLowerInvariant();
+        }
+
+        /// <summary>True for a lower-case, hyphenated version 4 UUID.</summary>
+        public static bool IsValidHostId(string value)
+        {
+            Guid parsed;
+            if (string.IsNullOrEmpty(value) || value.Length != 36 || !Guid.TryParseExact(value, "D", out parsed)) return false;
+            return string.Equals(value, value.ToLowerInvariant(), StringComparison.Ordinal) && value[14] == '4';
         }
 
         private static int ValidPort(int port, int fallback)
@@ -102,8 +154,11 @@ namespace RigPlayPlugin
         /// <summary>Display name, as the tablet reported it or the user renamed it.</summary>
         public string Name { get; set; } = "";
 
-        /// <summary>Shared secret issued at pairing.</summary>
-        public string Token { get; set; } = "";
+        /// <summary>
+        /// SHA-256 of the token issued at pairing, lower-case hex. The token itself is never stored (spec §15); the
+        /// tablet presents it on every later connection and the plugin compares hashes.
+        /// </summary>
+        public string TokenHash { get; set; } = "";
 
         /// <summary>When pairing completed, in UTC.</summary>
         public DateTime PairedAt { get; set; }
@@ -111,12 +166,23 @@ namespace RigPlayPlugin
         public PairedTablet Normalize()
         {
             Id = RigPlaySettings.Clean(Id);
-            Token = RigPlaySettings.Clean(Token);
+            TokenHash = RigPlaySettings.Clean(TokenHash).ToLowerInvariant();
             Name = RigPlaySettings.Clean(Name);
             if (Name.Length == 0) Name = RigPlaySettings.DefaultTabletName;
             if (PairedAt.Kind == DateTimeKind.Local) PairedAt = PairedAt.ToUniversalTime();
             else if (PairedAt.Kind == DateTimeKind.Unspecified) PairedAt = DateTime.SpecifyKind(PairedAt, DateTimeKind.Utc);
             return this;
+        }
+
+        /// <summary>64 lower-case hex digits.</summary>
+        public static bool IsTokenHash(string value)
+        {
+            if (value == null || value.Length != 64) return false;
+            foreach (var c in value)
+            {
+                if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
+            }
+            return true;
         }
     }
 }
