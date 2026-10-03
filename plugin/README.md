@@ -98,7 +98,7 @@ least one field is on, and a game runs. When the game stops it sends one `{"type
 The page's "Data to CarPlay" section has the master switch, one switch per field (speed, gear, heading, night mode,
 fuel level, range, RPM, track name, session type; `gameRunning` is always sent), the position strategy
 (`Telemetry/GpsStrategy.cs`) with its settings, and a live line with the last message sent. Settings live in
-`RigPlaySettings.Telemetry` (schema 3).
+`RigPlaySettings.Telemetry` (schema 3; schema 4 adds `Tracks`, #44).
 
 | Field | From SimHub |
 |---|---|
@@ -121,6 +121,19 @@ Position strategies (`Telemetry/GpsStrategy.cs`, `IGpsStrategy`; `Update` runs p
   on every frame (great-circle step, `GeoMath`). Back to the origin on game start, session restart, a new track or
   session type, pit exit, after standing still for the set time (default 30 s, 0 never), and beyond the drift radius
   (default 20 km); the page also has a "Back to the origin now" button.
+- **Real track** (#44, `TrackGeoReferenceStrategy.cs`): the car on the real circuit. Per track (key: `TrackCode`,
+  else the track name, normalised by `TrackKeys`) the user's `TrackCalibration` (in `RigPlaySettings.Telemetry.Tracks`,
+  schema 4) wins over the shipped table `Resources/tracks.json` (embedded as `RigPlay.Tracks.json`, read by
+  `ShippedTracks`; eight circuits' start/finish lines, approximate). Then: a recorded centreline interpolated by
+  `TrackPositionPercent` (`CentrelineMap`, wraps across the line); else `CarCoordinates` through the affine mapping
+  (`AffineMap`: origin + rotation · scale · (x, z), axis swap/flip, per-game defaults in `GameAxes`); else dead
+  reckoning from the track's origin. `RigPlay.DataUpdate` adds `TrackPositionPercent` per frame and `TrackCode` and
+  `GameName` once a second to `TelemetryInput`.
+  The page rows (`TrackSection.cs`) show the track key, the calibration source (none / shipped / yours / with a
+  recorded lap) and the placing mode, and edit origin, rotation, scale and axes; "Set origin to here" turns the
+  car's current position (and world point) into the origin; "Start recording" records the next full lap from line
+  to line every 0.5 % (`LapRecorder`, closes the loop by spreading the drift) and saves it as the centreline.
+  How-to and caveats: `docs/TRACK_CALIBRATION.md`.
 
 ## Notes
 

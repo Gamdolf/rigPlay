@@ -135,7 +135,10 @@ namespace RigPlayPlugin
         {
             if (name == GpsStrategies.Off) yield break;
             yield return OriginRow();
-            if (name == GpsStrategies.DeadReckoning) yield return DeadReckoningRow();
+            if (name == GpsStrategies.DeadReckoning || name == GpsStrategies.Track) yield return DeadReckoningRow();
+            if (name != GpsStrategies.Track) yield break;
+            // Strategy C (#44): the page origin and the reset rules apply to tracks without calibration and to dead reckoning.
+            foreach (var row in new TrackSection(plugin).Rows()) yield return row;
         }
 
         /// <summary>When dead reckoning puts the car back on the origin (#43), and a button to do it now.</summary>

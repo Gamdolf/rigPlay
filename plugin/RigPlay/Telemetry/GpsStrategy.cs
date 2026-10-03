@@ -35,6 +35,16 @@ namespace RigPlayPlugin.Telemetry
         void Reset();
     }
 
+    /// <summary>
+    /// A strategy whose position comes with its own heading (strategy C: along the circuit), which then replaces the
+    /// sim's in the heading field so the two agree.
+    /// </summary>
+    public interface IGpsHeadingSource
+    {
+        /// <summary>Degrees clockwise from north, 0 ≤ h &lt; 360; NaN to keep the sim's heading.</summary>
+        double HeadingDeg { get; }
+    }
+
     /// <summary>The strategy names stored in TelemetrySettings.GpsStrategy and shown in the page's combo.</summary>
     public static class GpsStrategies
     {
@@ -47,8 +57,11 @@ namespace RigPlayPlugin.Telemetry
         /// <summary>Strategy B (#43): dead reckoning from the origin with the sim's speed and heading.</summary>
         public const string DeadReckoning = "deadReckoning";
 
+        /// <summary>Strategy C (#44): the car on the real circuit (track calibration, recorded centreline).</summary>
+        public const string Track = "track";
+
         /// <summary>Every strategy, in the order the page lists them.</summary>
-        public static readonly string[] All = { Off, Fixed, DeadReckoning };
+        public static readonly string[] All = { Off, Fixed, DeadReckoning, Track };
 
         public static bool IsKnown(string name)
         {
@@ -63,6 +76,7 @@ namespace RigPlayPlugin.Telemetry
                 case Off: return "Off (no position)";
                 case Fixed: return "Fixed position (the origin below)";
                 case DeadReckoning: return "Drive around the origin (dead reckoning)";
+                case Track: return "Real track (the car on the actual circuit)";
                 default: return name;
             }
         }
@@ -76,6 +90,9 @@ namespace RigPlayPlugin.Telemetry
                 case DeadReckoning:
                     return new DeadReckoningStrategy(settings.OriginLat, settings.OriginLon, settings.OriginAlt,
                         settings.DriftRadiusKm * 1000.0, settings.StationaryResetSec);
+                case Track:
+                    return new TrackGeoReferenceStrategy(settings.Tracks, ShippedTracks.Default, settings.OriginLat, settings.OriginLon,
+                        settings.OriginAlt, settings.DriftRadiusKm * 1000.0, settings.StationaryResetSec);
                 default: return null;
             }
         }
@@ -91,7 +108,10 @@ namespace RigPlayPlugin.Telemetry
                 + "|" + settings.OriginLon.ToString("R", CultureInfo.InvariantCulture)
                 + "|" + settings.OriginAlt.ToString("R", CultureInfo.InvariantCulture)
                 + "|" + settings.DriftRadiusKm.ToString("R", CultureInfo.InvariantCulture)
-                + "|" + settings.StationaryResetSec.ToString(CultureInfo.InvariantCulture);
+                + "|" + settings.StationaryResetSec.ToString(CultureInfo.InvariantCulture)
+                + (settings.GpsStrategy == Track
+                    ? "|" + settings.TracksRevision.ToString(CultureInfo.InvariantCulture) + "|" + (settings.Tracks?.Count ?? 0).ToString(CultureInfo.InvariantCulture)
+                    : "");
         }
     }
 

@@ -23,6 +23,11 @@
     <Compile Include="../RigPlay/Telemetry/**/*.cs" Link="Plugin/Telemetry/%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 
+  <!-- The shipped track table of strategy C (#44), under the name ShippedTracks.Default reads. -->
+  <ItemGroup>
+    <EmbeddedResource Include="../RigPlay/Resources/tracks.json" LogicalName="RigPlay.Tracks.json" Link="Plugin/Resources/tracks.json" />
+  </ItemGroup>
+
   <!-- The golden samples of docs/protocol.md, read by ProtocolFixturesTests. -->
   <ItemGroup>
     <None Include="../../protocol/fixtures/**/*" Link="fixtures/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />

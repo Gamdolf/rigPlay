@@ -109,6 +109,9 @@ namespace RigPlayPlugin.Telemetry
                 input = last;
                 headingDeg = heading.Heading;
                 hasFix = gps != null && gps.TryGetFix(out fix);
+                // A strategy with its own heading (strategy C, along the circuit) keeps heading and position in agreement.
+                var own = gps as IGpsHeadingSource;
+                if (own != null && !double.IsNaN(own.HeadingDeg)) headingDeg = own.HeadingDeg;
                 if (double.IsNaN(lastAt) || nowSec - lastAt > StaleAfterSec) input.GameRunning = false;
             }
 
@@ -136,6 +139,22 @@ namespace RigPlayPlugin.Telemetry
             if (settings.SendTrackName && !string.IsNullOrWhiteSpace(input.TrackName)) m.TrackName = input.TrackName.Trim();
             if (settings.SendSessionType && !string.IsNullOrWhiteSpace(input.SessionType)) m.SessionType = input.SessionType.Trim();
             return m;
+        }
+
+        /// <summary>
+        /// Builds the GPS strategy for <paramref name="settings"/> now if it changed. The sender does this before every
+        /// message; the page calls it so strategy C follows the track (and can record a lap) with no tablet connected.
+        /// </summary>
+        public void EnsureStrategy(TelemetrySettings settings)
+        {
+            if (settings == null) return;
+            lock (sync) EnsureStrategyLocked(settings);
+        }
+
+        /// <summary>Runs <paramref name="read"/> on the current strategy (null when off) under the sampler's lock.</summary>
+        public T WithStrategy<T>(Func<IGpsStrategy, T> read)
+        {
+            lock (sync) return read(gps);
         }
 
         private void EnsureStrategyLocked(TelemetrySettings settings)

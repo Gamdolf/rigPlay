@@ -12,8 +12,11 @@ namespace RigPlayPlugin
     public class RigPlaySettings
     {
         /// <summary>The shape of this file; bump it when a field changes meaning so Normalize can migrate.</summary>
-        /// <remarks>2: protocol ports (23711/23712), host id, token hashes instead of tokens. 3: Telemetry (#40).</remarks>
-        public const int CurrentSchemaVersion = 3;
+        /// <remarks>
+        /// 2: protocol ports (23711/23712), host id, token hashes instead of tokens. 3: Telemetry (#40).
+        /// 4: Telemetry.Tracks, the track calibrations of fake GPS strategy C (#44).
+        /// </remarks>
+        public const int CurrentSchemaVersion = 4;
 
         /// <summary>Placeholder defaults of schema 1, migrated by Normalize.</summary>
         internal const int LegacyControlPort = 18877;
@@ -81,8 +84,8 @@ namespace RigPlayPlugin
                 if (AudioPort == LegacyAudioPort) AudioPort = ProtocolDefaults.AudioPort;
                 SchemaVersion = CurrentSchemaVersion;
             }
-            // 2 -> 3 only added Telemetry, which a file without it gets from its default.
-            if (SchemaVersion < 1 || SchemaVersion > CurrentSchemaVersion || SchemaVersion == 2) SchemaVersion = CurrentSchemaVersion;
+            // 2 -> 3 only added Telemetry and 3 -> 4 only Telemetry.Tracks, which a file without them gets from the defaults.
+            if (SchemaVersion < 1 || SchemaVersion > CurrentSchemaVersion || SchemaVersion == 2 || SchemaVersion == 3) SchemaVersion = CurrentSchemaVersion;
 
             if (!IsValidHostId(HostId)) HostId = NewHostId();
             HostName = Clean(HostName);
@@ -208,6 +211,29 @@ namespace RigPlayPlugin
         /// </summary>
         public string NightProperty { get; set; } = "";
 
+        /// <summary>
+        /// Strategy C (#44): the user's track calibrations (origin, rotation, scale, axes, recorded centreline), one per
+        /// normalised track key. They win over the shipped table (Resources/tracks.json).
+        /// </summary>
+        public List<global::RigPlayPlugin.Telemetry.TrackCalibration> Tracks { get; set; } = new List<global::RigPlayPlugin.Telemetry.TrackCalibration>();
+
+        private int tracksRevision;
+
+        /// <summary>Bumped by <see cref="MarkTracksChanged"/>; part of the strategy key, so strategy C rebuilds. Not saved.</summary>
+        internal int TracksRevision => tracksRevision;
+
+        /// <summary>Call after editing <see cref="Tracks"/> (or a calibration in it) so strategy C picks the change up.</summary>
+        public void MarkTracksChanged()
+        {
+            System.Threading.Interlocked.Increment(ref tracksRevision);
+        }
+
+        /// <summary>The user's calibration for a normalised track key; null when none.</summary>
+        public global::RigPlayPlugin.Telemetry.TrackCalibration FindTrack(string trackKey)
+        {
+            return Tracks?.FirstOrDefault(t => t != null && string.Equals(t.TrackKey, trackKey, StringComparison.Ordinal));
+        }
+
         /// <summary>True when at least one data field would be sent (spec §6.9: nothing is sent otherwise).</summary>
         public bool AnyFieldEnabled()
         {
@@ -228,6 +254,15 @@ namespace RigPlayPlugin
             if (StationaryResetSec < 0 || StationaryResetSec > MaxStationaryResetSec) StationaryResetSec = DefaultStationaryResetSec;
             if (!global::RigPlayPlugin.Telemetry.NightModes.IsKnown(NightMode)) NightMode = global::RigPlayPlugin.Telemetry.NightModes.Auto;
             NightProperty = RigPlaySettings.Clean(NightProperty);
+            // One calibration per track key; a key that appears twice keeps its last entry (the newest edit).
+            Tracks = (Tracks ?? new List<global::RigPlayPlugin.Telemetry.TrackCalibration>())
+                .Where(t => t != null)
+                .Select(t => t.Normalize())
+                .Where(t => t.TrackKey.Length > 0)
+                .GroupBy(t => t.TrackKey, StringComparer.Ordinal)
+                .Select(g => g.Last())
+                .OrderBy(t => t.TrackKey, StringComparer.Ordinal)
+                .ToList();
             return this;
         }
 

@@ -583,9 +583,33 @@ tablet cannot tell the strategies apart and does not need to.
 | Off (default) | Absent. |
 | Fixed position (#42) | Always the origin entered on the page (default 50.3356, 6.9475, 617 m). Speed, gear and heading still come from the sim, so the phone's map shows the car at the origin with the real speed. |
 | Drive around the origin (#43) | Dead reckoning: starts at the origin and, on every game frame, moves `speed × Δt` along `heading` on a great circle (spherical earth, radius 6 371 008.8 m; frames more than 0.25 s apart are not integrated). Back to the origin when the game starts, on a session restart or a new track or session type, when the car leaves the pit lane, after standing still (< 0.5 m/s) for a set time (default 30 s, 0 = never), and when it is further than the drift radius (default 20 km) from the origin. `alt` is the origin's. |
+| Real track (#44) | The car on the real circuit, from a per-track calibration (below). `alt` is the page origin's. |
 
 A reset makes the position jump back to the origin between two messages; the tablet passes positions
 on as they come and does not smooth or reject jumps.
+
+**Real track (strategy C).** Each track is identified by a key: SimHub's `TrackCode`, else the track
+name, lower-cased, accents removed and every run of other characters than `a-z`/`0-9` turned into one
+space (`spa gp`, `ks nurburgring layout gp a`). Its calibration is the user's (saved by the plugin),
+else an entry of a shipped table of start/finish-line coordinates (`approximate`, see
+[TRACK_CALIBRATION.md](TRACK_CALIBRATION.md)), else none (the page's origin). The position is, in this
+order of preference:
+
+1. *centreline*: when the track has a recorded lap — samples of (lap fraction → lat, lon) every 0.5 %
+   of the lap — and the game publishes `TrackPositionPercent`, linear interpolation between the two
+   samples around the current fraction, and across the start/finish line between the last and the first;
+2. *affine*: when the game publishes `CarCoordinates` (counted once they have moved 5 m in the session,
+   so a frozen or zero value is ignored), with (u, v) = (x − x₀, z − z₀) swapped and/or
+   negated as the calibration's axes say (default per game: Assetto Corsa x east and z south, others
+   x east and z north), east = s·(u cos θ + v sin θ), north = s·(−u sin θ + v cos θ) metres from the
+   origin, θ the rotation clockwise and s the scale; metres become degrees on the tangent plane at the
+   origin;
+3. *dead reckoning* as above, starting at the track's origin, the heading turned by θ and the speed
+   multiplied by s.
+
+`heading` then follows the position: along the centreline (bearing from 0.25 % behind to 0.25 % ahead),
+the direction between successive affine positions at least 1 m apart (the sim's heading turned by θ
+until the car has moved), or the turned sim heading for dead reckoning.
 
 ### 6.10 `error`
 

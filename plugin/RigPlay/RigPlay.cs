@@ -147,13 +147,17 @@ namespace RigPlayPlugin
                         input.Z = c[2];
                     }
                     input.SessionRestart = d.IsSessionRestart;
+                    input.TrackPct = d.TrackPositionPercent;
                     if (slowCountdown-- <= 0)
                     {
                         slowCountdown = 60;
                         ReadSlow(pluginManager, d);
+                        gameName = data.GameName;
                     }
                     input.TrackName = trackName;
                     input.SessionType = sessionType;
+                    input.TrackCode = trackCode;
+                    input.GameName = gameName;
                     input.FuelPercent = slow.FuelPercent;
                     input.Fuel = slow.Fuel;
                     input.MaxFuel = slow.MaxFuel;
@@ -179,6 +183,8 @@ namespace RigPlayPlugin
         private int slowCountdown;
         private string trackName;
         private string sessionType;
+        private string trackCode;
+        private string gameName;
         private bool dataUpdateFailed;
         private TelemetryInput slow = TelemetryInput.Empty;
 
@@ -191,6 +197,7 @@ namespace RigPlayPlugin
             trackName = d.TrackNameWithConfig;
             if (string.IsNullOrWhiteSpace(trackName)) trackName = d.TrackName;
             sessionType = d.SessionTypeName;
+            trackCode = d.TrackCode;
 
             slow.FuelPercent = d.FuelPercent;
             slow.Fuel = d.Fuel;
