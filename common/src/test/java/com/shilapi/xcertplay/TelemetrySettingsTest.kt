@@ -39,6 +39,17 @@ class TelemetrySettingsTest {
         assertEquals(LocationSource.NONE, AirPlayPersistence.loadLocationSource(context))
     }
 
+    @Test fun nightFromSimHubDefaultsToTheLocationSourceUntilChosen() {
+        assertFalse(AirPlayPersistence.loadNightFromSimHub(context))
+        AirPlayPersistence.saveLocationSource(context, LocationSource.SIMHUB)
+        assertTrue(AirPlayPersistence.loadNightFromSimHub(context))
+        AirPlayPersistence.saveNightFromSimHub(context, false)
+        assertFalse(AirPlayPersistence.loadNightFromSimHub(context))
+        AirPlayPersistence.saveLocationSource(context, LocationSource.NONE)
+        AirPlayPersistence.saveNightFromSimHub(context, true)
+        assertTrue(AirPlayPersistence.loadNightFromSimHub(context))
+    }
+
     @Test fun deniedPreciseLocationTurnsTheTabletSourceOff() {
         AirPlayPersistence.saveLocationSource(context, LocationSource.TABLET)
         // What the permission callbacks do when precise location is refused.

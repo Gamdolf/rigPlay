@@ -860,6 +860,9 @@ class RigPlayActivity : ComponentActivity() {
             }
         }
         card.addView(label(getString(R.string.telemetry_location_source_desc), 14, MUTED))
+        // #45: applies live, no reconnect.
+        toggle(card, getString(R.string.telemetry_night_from_simhub), getString(R.string.telemetry_night_from_simhub_desc),
+            AirPlayPersistence.loadNightFromSimHub(this)) { AirPlayPersistence.saveNightFromSimHub(this, it) }
     }
 
     private fun hasPreciseLocation() =

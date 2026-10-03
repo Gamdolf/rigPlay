@@ -7,4 +7,8 @@
     <string name="telemetry_location_source_tablet">This tablet</string>
     <string name="telemetry_location_source_none">None</string>
     <string name="telemetry_location_source_desc">SimHub sends the game car\'s position, speed and gear to Apple Maps; the iPhone falls back to its own GPS when the game stops. This tablet sends its precise Android location. Applies on the next connection: the iPhone reads it when CarPlay connects.</string>
+
+    <!-- Night mode (#45) -->
+    <string name="telemetry_night_from_simhub">Night mode from SimHub</string>
+    <string name="telemetry_night_from_simhub_desc">CarPlay follows the game\'s day and night instead of the tablet\'s. Without game data it follows the tablet.</string>
 </resources>

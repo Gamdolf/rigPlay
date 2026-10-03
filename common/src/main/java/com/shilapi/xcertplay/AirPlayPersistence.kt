@@ -69,6 +69,7 @@ object AirPlayPersistence {
     private const val KEY_AUTO_START_ON_BOOT = "auto_start_on_boot"
     private const val KEY_LOCATION_REPORTING_ENABLED = "location_reporting_enabled"
     private const val KEY_LOCATION_SOURCE = "location_source"
+    private const val KEY_NIGHT_FROM_SIMHUB = "night_from_simhub"
     private const val KEY_AUDIO_OUTPUT_TARGET = "audio_output_target"
     private const val KEY_SIMHUB_HOST_ID = "simhub_host_id"
     private const val KEY_SIMHUB_HOST = "simhub_host"
@@ -421,6 +422,22 @@ object AirPlayPersistence {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(KEY_LOCATION_SOURCE, source.key)
             .putBoolean(KEY_LOCATION_REPORTING_ENABLED, source == LocationSource.TABLET)
+            .apply()
+    }
+
+    /** "Night mode from SimHub" (#45); until chosen, on exactly when the location source is SimHub. */
+    fun loadNightFromSimHub(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return if (prefs.contains(KEY_NIGHT_FROM_SIMHUB)) {
+            prefs.getBoolean(KEY_NIGHT_FROM_SIMHUB, false)
+        } else {
+            loadLocationSource(context) == LocationSource.SIMHUB
+        }
+    }
+
+    fun saveNightFromSimHub(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_NIGHT_FROM_SIMHUB, enabled)
             .apply()
     }
 

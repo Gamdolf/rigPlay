@@ -85,6 +85,8 @@ import com.shilapi.xcertplay.transport.Iap2LocationProvider
 import com.shilapi.xcertplay.transport.VehicleSpeedLocationProvider
 import com.shilapi.xcertplay.simhub.SimHubEndpoints
 import com.shilapi.xcertplay.simhub.SimHubLocationProvider
+import com.shilapi.xcertplay.simhub.SimHubNightMode
+import com.shilapi.xcertplay.simhub.SimHubTelemetryStore
 import com.shilapi.xcertplay.simhub.SimHubVehicleSpeedSource
 import com.shilapi.xcertplay.transport.UsbDeviceId
 import java.io.File
@@ -312,6 +314,11 @@ class CarPlayHostActivity : ComponentActivity() {
     private var darkMode = false
     private var lastConfiguration: Configuration? = null
     private var activeAirPlaySession: AirPlaySession? = null
+    private val simHubNight = SimHubNightMode()
+    private val simHubNightTick = Runnable { refreshSimHubNight() }
+    private val simHubNightStaleCheck = Runnable { refreshSimHubNight() }
+    // Link thread, up to 10 Hz: decide on the main thread.
+    private val simHubNightListener: (SimHubTelemetryStore.Sample) -> Unit = { mainHandler.post(simHubNightTick) }
     private val activeScreenStreamTypes = mutableSetOf<Int>()
     private var handshakeResetInProgress = false
     private var startAfterHandshakeReset = false
@@ -399,6 +406,7 @@ class CarPlayHostActivity : ComponentActivity() {
         initializeSessionLog()
         lastConfiguration = Configuration(resources.configuration)
         darkMode = nightModeOrNull(resources.configuration.uiMode) ?: false
+        SimHubEndpoints.telemetry.addListener(simHubNightListener)
         advancedAudioChannelMappingSupported =
             resources.getBoolean(R.bool.config_advanced_audio_channel_mapping)
         airPlayIdentity = AirPlayPersistence.loadIdentity(this)
@@ -618,6 +626,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        stopSimHubNight()
         mainHandler.removeCallbacks(applyDisplaySize)
         mainHandler.removeCallbacks(expireOldLogLines)
         mainHandler.removeCallbacks(pollConfiguration)
@@ -2882,9 +2891,34 @@ class CarPlayHostActivity : ComponentActivity() {
         syncAirPlayDarkMode()
     }
 
+    /**
+     * #45: SimHub's `night` (debounced, on change only) overrides the tablet's day/night while
+     * "Night mode from SimHub" is on; [syncAirPlayDarkMode] sends [SimHubNightMode.effective].
+     */
+    private fun refreshSimHubNight() {
+        val telemetry = SimHubEndpoints.telemetry
+        // Re-check once the stream would be stale, so a stopped game falls back to the tablet's mode.
+        mainHandler.removeCallbacks(simHubNightStaleCheck)
+        if (telemetry.fresh() != null) mainHandler.postDelayed(simHubNightStaleCheck, telemetry.staleAfterMillis + 100)
+        val changed = simHubNight.update(
+            enabled = AirPlayPersistence.loadNightFromSimHub(this),
+            night = telemetry.fresh()?.night,
+            androidNight = darkMode,
+            nowMillis = telemetry.nowMillis(),
+        ) ?: return
+        appendLog("SimHub switched CarPlay to ${if (changed) "night" else "day"} mode")
+        syncAirPlayDarkMode()
+    }
+
+    private fun stopSimHubNight() {
+        SimHubEndpoints.telemetry.removeListener(simHubNightListener)
+        mainHandler.removeCallbacks(simHubNightTick)
+        mainHandler.removeCallbacks(simHubNightStaleCheck)
+    }
+
     private fun syncAirPlayDarkMode() {
         val session = activeAirPlaySession ?: return
-        val night = darkMode
+        val night = simHubNight.effective(darkMode)
         airPlayCommandExecutor.execute {
             try {
                 val sent = session.setNightMode(night)
