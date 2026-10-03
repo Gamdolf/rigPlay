@@ -133,6 +133,15 @@ The phone is connected only while the PC runs SimHub with the plugin.
   touch the tablet or the phone.
 - **Connect phone** still works while SimHub is down, with a warning. Audio then plays on the tablet.
 
+**Idle screen.** With no phone connected, the tablet shows the SimHub idle dashboard while the PC is on
+(**Settings → When no iPhone is connected → Show**), or the rigPlay screen (clock and PC name) when you pick
+it there or when the PC is off. If you are on the home page or in the settings at that moment, they stay on
+screen while you use them: the rigPlay screen takes over only after **Go idle after** (default 3 minutes)
+without a touch, and a tap on it brings you back to where you were. **Immediately** switches the moment the
+PC goes away instead, and leaves you alone once you tap back. CarPlay and a dashboard you opened yourself
+are never replaced. When the tablet starts with **Auto-start on boot**, rigPlay goes straight to the idle
+screen.
+
 ## Display and start-up settings
 
 - In CarPlay, swipe down with three fingers to open rigPlay settings.

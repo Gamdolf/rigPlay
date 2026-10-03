@@ -93,7 +93,11 @@ class DashboardActivity : ComponentActivity() {
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        if (idleMode && event.actionMasked == MotionEvent.ACTION_DOWN) toolbar?.show()
+        if (idleMode && event.actionMasked == MotionEvent.ACTION_DOWN) {
+            // The idle screen that took over the home page after inactivity (#53): a tap goes back there.
+            if (RigSessionCoordinator.returnFromIdle(this)) return true
+            toolbar?.show()
+        }
         return super.dispatchTouchEvent(event)
     }
 

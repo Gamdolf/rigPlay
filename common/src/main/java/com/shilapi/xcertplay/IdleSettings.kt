@@ -26,3 +26,15 @@ object IdleScreenOff {
 
     fun sanitize(minutes: Int): Int = if (minutes in CHOICES) minutes else DEFAULT
 }
+
+/**
+ * "Go idle after" (#53): minutes without a touch before the rigPlay idle screen takes over the home
+ * page or settings while no phone is connected. 0 = immediately: the moment the PC goes away (or the
+ * phone does), without a timer afterwards.
+ */
+object IdleAfter {
+    val CHOICES = listOf(0, 1, 3, 5, 10)
+    const val DEFAULT = 3
+
+    fun sanitize(minutes: Int): Int = if (minutes in CHOICES) minutes else DEFAULT
+}

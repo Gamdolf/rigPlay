@@ -4,6 +4,8 @@ import android.content.Context
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import android.app.Activity
 import android.provider.Settings
 import android.util.Log
 import android.content.Intent
@@ -54,6 +56,9 @@ object RigSessionCoordinator {
 
     private val main = Handler(Looper.getMainLooper())
     private val observers = LinkedHashSet<() -> Unit>()
+
+    /** Last touch on a rigPlay screen, for "Go idle after" (#53). */
+    private val userActivity = UserActivityMonitor { SystemClock.elapsedRealtime() }
 
     private var appContext: Context? = null
     private lateinit var link: SimHubLink
@@ -119,7 +124,9 @@ object RigSessionCoordinator {
         link = SimHubLink(identity(app), LinkListener, features = LINK_FEATURES)
         linkPort = EpochLinkPort(SimHubLinkPort.of(link))
         flow = SimHubPairingFlow(linkPort) { notifyObservers() }
-        lifecycle = RigSessionLifecycle(linkPort, RigPhoneSession(app), AppScreens(app), AppIdleInputs(app)) { Log.i(TAG, it) }
+        lifecycle = RigSessionLifecycle(
+            linkPort, RigPhoneSession(app), AppScreens(app), AppIdleInputs(app), userActivity, HandlerTimer(main),
+        ) { Log.i(TAG, it) }
         lifecycle.mediaCommandHandler = pendingMediaHandler
         // CarPlay audio to the PC (#31): the link exists from here on.
         attachAudioTransport()
@@ -173,6 +180,19 @@ object RigSessionCoordinator {
         notifyObservers()
     }
 
+    /** A touch or key on a rigPlay screen (`Activity.onUserInteraction`), for "Go idle after" (#53). Main thread. */
+    fun onUserInteraction() = userActivity.onUserInteraction()
+
+    /**
+     * A tap on an idle screen (#53): when it took over after inactivity, reopens the home page or
+     * settings the user was on, finishes [activity] and returns true. False: the tap is the idle screen's own.
+     */
+    fun returnFromIdle(activity: Activity): Boolean {
+        if (!initialized || !lifecycle.returnFromIdle()) return false
+        activity.finish()
+        return true
+    }
+
     /** Which rigPlay screen is in the foreground; from [RigPlayApplication]'s activity callbacks. */
     fun onForegroundChanged(foreground: RigSessionLifecycle.Foreground) {
         if (!initialized) return
@@ -221,6 +241,31 @@ object RigSessionCoordinator {
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
             )
         }
+
+        override fun returnHome() {
+            context.startActivity(
+                Intent(context, RigPlayActivity::class.java)
+                    .putExtra(RigPlayActivity.EXTRA_KEEP_PAGE, true)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+            )
+        }
+    }
+
+    /** [RigSessionLifecycle.Timer] on the main thread's handler. */
+    private class HandlerTimer(private val handler: Handler) : RigSessionLifecycle.Timer {
+        private var pending: Runnable? = null
+
+        override fun schedule(delayMs: Long, action: () -> Unit) {
+            cancel()
+            val next = Runnable { pending = null; action() }
+            pending = next
+            handler.postDelayed(next, delayMs)
+        }
+
+        override fun cancel() {
+            pending?.let(handler::removeCallbacks)
+            pending = null
+        }
     }
 
     /** The idle policy's view of the pairing, the settings and the latest `state` (#39). Main thread. */
@@ -228,6 +273,7 @@ object RigSessionCoordinator {
         override fun paired(): Boolean = pairing != null
         override fun mode(): IdleMode = AirPlayPersistence.loadIdleMode(context)
         override fun idleDashboardAvailable(): Boolean = DashboardContent.idleDashboardAvailable(state, pairing != null)
+        override fun idleAfterMinutes(): Int = AirPlayPersistence.loadIdleAfterMinutes(context)
     }
 
     // --- onboarding (#27) -----------------------------------------------------------------------

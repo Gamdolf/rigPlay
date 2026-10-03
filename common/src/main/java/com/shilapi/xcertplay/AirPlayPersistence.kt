@@ -85,6 +85,7 @@ object AirPlayPersistence {
     private const val KEY_SIMHUB_TABLET_ID = "simhub_tablet_id"
     private const val KEY_IDLE_MODE = "idle_mode"
     private const val KEY_IDLE_SCREEN_OFF_MINUTES = "idle_screen_off_minutes"
+    private const val KEY_IDLE_AFTER_MINUTES = "idle_after_minutes"
     private const val SAFE_AREA_KEY_PREFIX = "safe_area_"
     private const val CUSTOM_ICON_FILE = "airplay-icon.png"
 
@@ -457,6 +458,18 @@ object AirPlayPersistence {
     fun saveIdleScreenOffMinutes(context: Context, minutes: Int) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_IDLE_SCREEN_OFF_MINUTES, IdleScreenOff.sanitize(minutes))
+            .apply()
+    }
+
+    /** Minutes without a touch before the rigPlay idle screen takes over the home page; 0 = immediately (#53). */
+    fun loadIdleAfterMinutes(context: Context): Int = IdleAfter.sanitize(
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt(KEY_IDLE_AFTER_MINUTES, IdleAfter.DEFAULT),
+    )
+
+    fun saveIdleAfterMinutes(context: Context, minutes: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_IDLE_AFTER_MINUTES, IdleAfter.sanitize(minutes))
             .apply()
     }
 
