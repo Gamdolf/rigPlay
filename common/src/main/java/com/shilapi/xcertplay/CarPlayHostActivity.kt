@@ -1,7 +1,6 @@
 package com.shilapi.xcertplay
 
 import android.Manifest
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -108,11 +107,6 @@ class CarPlayHostActivity : ComponentActivity() {
     private var wifiRecoveryButton: View? = null
     private var reconnectAttempts = 0
     private lateinit var airPlayIdentity: AirPlayIdentity
-    private var languagePreferenceAtCreate = AppLocale.SYSTEM
-
-    override fun attachBaseContext(newBase: Context) {
-        super.attachBaseContext(AppLocale.wrap(newBase))
-    }
 
     private fun appVersionName(): String =
         runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull()
@@ -376,7 +370,6 @@ class CarPlayHostActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         NavigationWidgetUpdater.attach(applicationContext)
-        languagePreferenceAtCreate = AppLocale.preference(this)
         if (intent.action == "android.hardware.usb.action.USB_DEVICE_ATTACHED") {
             AirPlayPersistence.saveWirelessEnabled(this, false)
         }
@@ -558,12 +551,6 @@ class CarPlayHostActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        val languagePreference = AppLocale.preference(this)
-        if (Build.VERSION.SDK_INT < 33 && languagePreference != languagePreferenceAtCreate) {
-            languagePreferenceAtCreate = languagePreference
-            recreate()
-            return
-        }
         locationPermissionAvailable = hasFineLocationPermission()
         if (locationReportingEnabled && !locationPermissionAvailable && !menuOpen) {
             requestLocationPermission()
@@ -819,7 +806,7 @@ class CarPlayHostActivity : ComponentActivity() {
             settingsSwitchRow(
                 label = getString(R.string.auto_start_on_boot),
                 checked = autoStartOnBoot,
-                description = getString(R.string.start_carplay_automatically_after_device_boot),
+                description = getString(R.string.open_rigplay_automatically_when_the_tablet_boots),
             ) { checked ->
                 autoStartOnBoot = checked
                 appendLog("Boot auto-start ${if (checked) "enabled" else "disabled"}")
@@ -1225,12 +1212,6 @@ class CarPlayHostActivity : ComponentActivity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(12) },
         )
-
-        content.addView(Button(this).apply {
-            text = getString(R.string.language_app_language)
-            isAllCaps = false
-            setOnClickListener { AppLocale.showPicker(this@CarPlayHostActivity) }
-        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
 
         val scroll = ScrollView(this).apply {
             isFillViewport = true
@@ -1977,7 +1958,7 @@ class CarPlayHostActivity : ComponentActivity() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 add(WirelessHotspotMode.WIFI_P2P to getString(R.string.wi_fi_p2p_5_ghz))
             }
-            add(WirelessHotspotMode.MANUAL to getString(R.string.built_in_car_hotspot))
+            add(WirelessHotspotMode.MANUAL to getString(R.string.tablet_hotspot))
         }
         var selectedId = View.NO_ID
         for ((mode, label) in modes) {
@@ -2411,7 +2392,7 @@ class CarPlayHostActivity : ComponentActivity() {
             appendLog("Larger CarPlay canvas unavailable reason=${support.reason}; using Default icon and text size")
             runOnUiThread {
                 android.widget.Toast.makeText(this,
-                    getString(R.string.this_head_unit_cannot_use_the_smaller_size_at_this_resolut),
+                    getString(R.string.this_tablet_cannot_use_the_smaller_size),
                     android.widget.Toast.LENGTH_LONG).show()
             }
         }
@@ -3263,13 +3244,13 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun friendlyStage(message: String): String = when {
-        message.contains("Turn on Wi-Fi", true) -> getString(R.string.turn_on_wi_fi_in_the_head_unit_s_settings_to_connect)
-        message.contains("Allow precise Location", true) -> getString(R.string.allow_precise_location_for_rigplay_in_the_head_unit_s_app_p)
-        message.contains("Allow Nearby devices", true) -> getString(R.string.allow_nearby_devices_for_rigplay_in_the_head_unit_s_app_per)
-        message.contains("createGroup failed", true) -> getString(R.string.the_head_unit_couldn_t_start_carplay_wi_fi_check_wi_fi_and)
+        message.contains("Turn on Wi-Fi", true) -> getString(R.string.turn_on_wi_fi_in_the_tablet_settings_to_connect)
+        message.contains("Allow precise Location", true) -> getString(R.string.allow_precise_location_in_tablet_app_permissions)
+        message.contains("Allow Nearby devices", true) -> getString(R.string.allow_nearby_devices_in_tablet_app_permissions)
+        message.contains("createGroup failed", true) -> getString(R.string.the_tablet_couldn_t_start_carplay_wi_fi)
         message.contains("needs a reset", true) -> getString(R.string.a_previous_wi_fi_direct_connection_is_still_running_reset)
         message.contains("socket", true) || message.contains("RFCOMM", true) -> getString(R.string.your_iphone_isn_t_available_unlock_it_and_check_bluetooth)
-        message.contains("unsupported", true) || message.contains("not supported", true) -> getString(R.string.this_head_unit_may_not_support_wireless_carplay_try_a_usb)
+        message.contains("unsupported", true) || message.contains("not supported", true) -> getString(R.string.this_tablet_may_not_support_wireless_carplay)
         message.contains("denied", true) || message.contains("permission", true) -> getString(R.string.allow_the_connection_permission_to_continue)
         message.contains("Failed", true) || message.contains("error", true) -> getString(R.string.connection_interrupted_retrying)
         message.contains("Waiting for iPhone", true) || message.contains("Discovering iPhone", true) -> getString(R.string.connect_your_iphone_with_a_usb_cable)
