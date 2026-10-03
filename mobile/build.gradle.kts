@@ -22,7 +22,7 @@ android {
         minSdk = 28
         targetSdk = 37
         // Bumped by hand for every release (it must grow for Android to accept an update).
-        versionCode = 1
+        versionCode = 2
         versionName = rigPlayVersion.get()
     }
 

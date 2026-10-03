@@ -1,4 +1,11 @@
-# rigPlay 0.1.0 — unreleased
+# rigPlay 0.2.0 — unreleased
+
+- Nothing yet since 0.2.0-rc.1. Changes for the final 0.2.0 go here.
+
+# rigPlay 0.2.0-rc.1 — 2026-10-03
+
+Second pre-release, for testing on a rig. Android versionCode 2, so it installs over 0.1.0-rc.1 when
+both are signed with the same key.
 
 - Audio to the PC no longer cuts in and out on a tablet on Wi-Fi. The tablet holds a low-latency Wi-Fi
   lock and marks the audio datagrams for the Wi-Fi voice queue while it streams, decodes on an
@@ -7,6 +14,11 @@
   buffer dry. The plugin's jitter buffer starts at 80 ms, grows on every underrun (up to 250 ms, kept
   across a stream restart) and only skips ahead above 500 ms instead of 200 ms; its WASAPI buffer is
   100 ms. The rigPlay page shows the buffer target, underruns, late datagrams and skips per stream.
+
+- The APK attached to the release, `rigPlay-0.2.0-rc.1.apk`, is built and signed locally and carries
+  the same experimental accessory identity DiPlay ships, so it connects to an iPhone; see
+  `docs/THIRD_PARTY_NOTICES.md` ("Experimental authentication data") and `SECURITY.md`. APKs built
+  by CI carry no identity and cannot connect.
 
 # rigPlay 0.1.0-rc.1 — 2026-10-03
 
