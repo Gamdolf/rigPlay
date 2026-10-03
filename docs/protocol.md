@@ -362,7 +362,7 @@ Plugin → tablet. A complete snapshot, never a delta. Sent immediately after `p
 |---|---|---|---|
 | `type` | string | yes | `"state"` |
 | `dashboardUrl` | string (absolute `http` or `https` URL) or `null` | yes | Dashboard shown in `dashboard` mode (the SimHub button in CarPlay). `null`: none selected on the PC. |
-| `idleDashboardUrl` | string (absolute `http` or `https` URL) or `null` | no | Dashboard shown while no phone is connected. Absent or `null`: none, the tablet shows its home screen. Only sent when the session has feature `idleDashboard`. |
+| `idleDashboardUrl` | string (absolute `http` or `https` URL) or `null` | no | Dashboard shown while no phone is connected (`screen: idle`), chosen on the plugin page as "Idle dashboard (no phone connected)" from the same list as `dashboardUrl` and built the same way ([§11](#11-dashboard-urls)). Absent or `null`: none, the tablet shows its home screen. Only sent when the session has feature `idleDashboard`; a plugin leaves the member out (rather than sending `null`) for other sessions. A change of the choice alone is a change of `state` and is pushed within 1 s. |
 | `dashboardServer` | object | no | State of SimHub's web dash server. Absent: unknown, the tablet assumes it is reachable. |
 | `dashboardServer.reachable` | boolean | yes, in the object | `false`: the plugin could not reach the web dash server; the URLs will not load. The tablet shows "Enable the web dash server in SimHub" instead of a browser error. |
 | `dashboardServer.port` | integer 1–65535 | yes, in the object | Port the plugin probed. |
@@ -972,7 +972,7 @@ NCalc formulas and control mappings use the prefixed names below (`RigPlay.Table
 |---|---|---|---|
 | `RigPlay.TabletConnected` | bool | At least one Paired session exists. | `false` |
 | `RigPlay.PhoneConnected` | bool | `status.phoneConnected` | `false` |
-| `RigPlay.Screen` | string | `status.screen`: `carplay`, `dashboard`, `idle` or `off` | `off` |
+| `RigPlay.Screen` | string | `status.screen`: `carplay`, `dashboard`, `idle` (no phone: the idle dashboard or the tablet's home screen is shown) or `off` | `off` |
 | `RigPlay.NowPlaying.Title` | string | `status.nowPlaying.title` | `""` |
 | `RigPlay.NowPlaying.Artist` | string | `status.nowPlaying.artist` | `""` |
 | `RigPlay.NowPlaying.Album` | string | `status.nowPlaying.album` | `""` |
@@ -996,7 +996,9 @@ individual member `null`.
 | `RigPlay.ShowCarPlay` | `command` `showCarPlay` |
 | `RigPlay.ToggleScreen` | `command` `showCarPlay` if the primary tablet's last `status.screen` is `dashboard`, otherwise `command` `showDashboard` |
 
-With no primary tablet an action does nothing, and the plugin logs it at debug level.
+With no primary tablet an action does nothing, and the plugin logs it at debug level. The screen actions work
+from every screen: from `idle`, `RigPlay.ShowDashboard` (and `RigPlay.ToggleScreen`) bring up `state.dashboardUrl`,
+and `RigPlay.ShowCarPlay` is answered `commandUnavailable` while no phone is connected ([§6.8](#68-command)).
 
 ## 17. Fixtures and conformance tests
 

@@ -45,7 +45,7 @@ namespace RigPlayPlugin
             idle = new ComboBox { Width = 320 };
             Fill();
             selected.SelectionChanged += (s, e) => PageKit.Safe(() => Changed(selected, "SimHub button", v => Settings.SelectedDashboard = v, () => Settings.SelectedDashboard));
-            idle.SelectionChanged += (s, e) => PageKit.Safe(() => Changed(idle, "no iPhone", v => Settings.IdleDashboard = v, () => Settings.IdleDashboard));
+            idle.SelectionChanged += (s, e) => PageKit.Safe(() => Changed(idle, "the idle screen (no phone connected)", v => Settings.IdleDashboard = v, () => Settings.IdleDashboard));
 
             var refresh = PageKit.SecondaryButton("Refresh list", () =>
             {
@@ -71,9 +71,9 @@ namespace RigPlayPlugin
             port.ToolTip = "Leave empty to use SimHub's own setting (8888 unless changed in SimHub).";
 
             var section = Ui.Section("Dashboards",
-                "The SimHub dashboard the tablet shows. Tablets load it from SimHub's web dash server on this PC.",
+                "The SimHub dashboards the tablet shows: one behind the SimHub button in CarPlay, one while no iPhone is connected. Tablets load them from SimHub's web dash server on this PC.",
                 Ui.Row("Dashboard shown by the SimHub button", Ui.HStack(10, selected, refresh)),
-                Ui.Row("While no iPhone is connected", idle),
+                Ui.Row("Idle dashboard (no phone connected)", idle),
                 Ui.Row("Web dash server", serverValue),
                 Ui.Row("Web dash server port", Ui.HStack(10, port, Ui.Caption("empty: automatic"))));
             PageKit.Live(section, 1000, Refresh);
@@ -85,7 +85,7 @@ namespace RigPlayPlugin
             var host = plugin.Host;
             var dashboards = host?.Dashboards ?? new List<DashboardInfo>();
             FillOne(selected, dashboards, "(None)", Settings.SelectedDashboard);
-            FillOne(idle, dashboards, "(The tablet's home screen)", Settings.IdleDashboard);
+            FillOne(idle, dashboards, "(None: the tablet's home screen)", Settings.IdleDashboard);
         }
 
         private static void FillOne(ComboBox combo, List<DashboardInfo> dashboards, string none, string current)
