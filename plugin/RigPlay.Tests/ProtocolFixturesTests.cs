@@ -100,7 +100,7 @@ namespace RigPlayPlugin.Tests
             {
                 MessageTypes.Beacon, MessageTypes.Hello, MessageTypes.Welcome, MessageTypes.PairRequest, MessageTypes.PairResult,
                 MessageTypes.Heartbeat, MessageTypes.State, MessageTypes.Status, MessageTypes.Command, MessageTypes.Telemetry,
-                MessageTypes.Error, MessageTypes.AudioStart, MessageTypes.AudioStop,
+                MessageTypes.Error, MessageTypes.AudioStart, MessageTypes.AudioStop, MessageTypes.Artwork,
             })
             {
                 Assert.Contains(type, types);

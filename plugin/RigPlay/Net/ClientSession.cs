@@ -117,6 +117,9 @@ namespace RigPlayPlugin.Net
         /// <summary>The tablet's last valid status, or null.</summary>
         public StatusMessage LastStatus { get; internal set; }
 
+        /// <summary>The tablet's last artwork (spec §6.14), or null before the first.</summary>
+        public ArtworkMessage LastArtwork { get; internal set; }
+
         /// <summary>Monotonic time the last status arrived.</summary>
         public long LastStatusAtMs { get; internal set; }
 

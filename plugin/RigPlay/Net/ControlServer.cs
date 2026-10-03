@@ -90,6 +90,7 @@ namespace RigPlayPlugin.Net
         public event Action<ClientSession, StatusMessage> StatusReceived;
         public event Action<ClientSession, AudioStartMessage> AudioStartReceived;
         public event Action<ClientSession, AudioStopMessage> AudioStopReceived;
+        public event Action<ClientSession, ArtworkMessage> ArtworkReceived;
 
         /// <summary>Starts listening. False (with Status.Error set) when the port cannot be bound.</summary>
         public bool Start()
@@ -267,6 +268,16 @@ namespace RigPlayPlugin.Net
                     {
                         try { startHandler(session, start); } catch (Exception ex) { PluginLog.Error("An audioStart handler failed", ex); }
                     }
+                    break;
+                case ArtworkMessage artwork:
+                    session.LastArtwork = artwork;
+                    PluginLog.Debug(session + ": artwork " + (artwork.Mime + ", " + artwork.Bytes.Length + " bytes"));
+                    var artworkHandler = ArtworkReceived;
+                    if (artworkHandler != null)
+                    {
+                        try { artworkHandler(session, artwork); } catch (Exception ex) { PluginLog.Error("An artwork handler failed", ex); }
+                    }
+                    RaiseChanged();
                     break;
                 case AudioStopMessage stop:
                     var stopHandler = AudioStopReceived;

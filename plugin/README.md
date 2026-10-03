@@ -29,7 +29,8 @@ It holds no SimHub assemblies and no `.pdb`: SimHub ships everything the plugin 
 The plugin targets .NET Framework 4.8 through the `Microsoft.NETFramework.ReferenceAssemblies` package and
 references WPF as plain assemblies, without `UseWPF` or XAML: the page is built in C# and picks up SimHub's own
 controls and styles at runtime. That keeps the build cross-platform. The files the tests compile
-(`ProtocolDefaults.cs`, `RigPlaySettings.cs`, `Theme.cs` and everything under `Core/`, `Protocol/` and `Net/`)
+(`ProtocolDefaults.cs`, `RigPlaySettings.cs`, `Theme.cs` and everything under `Core/`, `Protocol/`, `Net/`,
+`Pairing/`, `Dashboards/` and `Telemetry/`)
 must stay free of SimHub and WPF types; SimHub-facing glue lives in `RigPlay.cs`, `PluginBridge.cs` and the page.
 
 ## Tablet server
@@ -66,6 +67,12 @@ paired tablet whose iPhone connected most recently, else the one that paired mos
 | `RigPlay.NowPlaying.Playing` | property | bool | `status.nowPlaying.playing` | `false` |
 | `RigPlay.NowPlaying.Position` | property | double, s | Last `position` plus the time since that status arrived while playing, clamped to the duration. | `0` |
 | `RigPlay.NowPlaying.Duration` | property | double, s | `status.nowPlaying.duration` (`0` for live streams) | `0` |
+| `RigPlay.NowPlaying.ArtworkPath` | property | string | File with the last `artwork` (§6.14): `%TEMP%\rigPlay\artwork.jpg` (`.png` for PNG), replaced atomically | `""` |
+| `RigPlay.Nav.Active` | property | bool | `status.nav` present: CarPlay route guidance is active (§6.7.1) | `false` |
+| `RigPlay.Nav.Maneuver` | property | string | `status.nav.maneuver`, Apple's maneuver name in lowerCamel (`slightRightTurn`, `roundaboutExit2`, ...) | `""` |
+| `RigPlay.Nav.Distance` | property | double, m | `status.nav.distanceM` | `0` |
+| `RigPlay.Nav.Road` | property | string | `status.nav.road` | `""` |
+| `RigPlay.Nav.Eta` | property | string | `status.nav.etaEpochS` as local `HH:mm` | `""` |
 | `RigPlay.PlayPause` | action | | `command media playPause` | |
 | `RigPlay.NextTrack` | action | | `command media next` | |
 | `RigPlay.PreviousTrack` | action | | `command media previous` | |
@@ -74,8 +81,46 @@ paired tablet whose iPhone connected most recently, else the one that paired mos
 | `RigPlay.ShowCarPlay` | action | | `command showCarPlay` | |
 | `RigPlay.ToggleScreen` | action | | `showCarPlay` when the last `status.screen` is `dashboard`, otherwise `showDashboard` | |
 
+Nav and artwork come from the tablet (#47): `status.nav` and the `artwork` message; `Core/ArtworkFile.cs` writes the
+primary tablet's image next to the old one and swaps it in with `File.Replace`.
+
 Bind an action in SimHub under Controls and events → the rigPlay entries; use a property in a dashboard as
 `[RigPlay.NowPlaying.Title]`.
+
+## Data to CarPlay (#40)
+
+The plugin is an `IDataPlugin`: `RigPlay.DataUpdate` (60 Hz) copies each SimHub frame into a `TelemetryInput`
+struct without allocating, and `Telemetry/TelemetrySampler.cs` keeps the latest frame, the heading and the fake-GPS
+strategy. `Telemetry/TelemetrySender.cs` runs a 100 ms timer that sends `telemetry` (docs/protocol.md §6.9) to every
+paired tablet that named feature `telemetry` and reports a connected iPhone, while the page's master switch is on, at
+least one field is on, and a game runs. When the game stops it sends one `{"type":"telemetry","gameRunning":false}`.
+
+The page's "Data to CarPlay" section has the master switch, one switch per field (speed, gear, heading, night mode,
+fuel level, range, RPM, track name, session type; `gameRunning` is always sent), the position strategy
+(`Telemetry/GpsStrategy.cs`) with its settings, and a live line with the last message sent. Settings live in
+`RigPlaySettings.Telemetry` (schema 3).
+
+| Field | From SimHub |
+|---|---|
+| `speedMps` | `SpeedKmh` / 3.6 |
+| `gear` | `Gear`: R → `R`, 1.. → `D`, N → `P` in the pit lane or box, else `N` |
+| `heading` | `OrientationYaw` once it is non-zero in the session, else the direction of movement in `CarCoordinates` |
+| `rpm`, `trackName`, `sessionType` | `Rpms`, `TrackNameWithConfig` (else `TrackName`), `SessionTypeName` |
+| `night` (#45) | Page "Night mode": Always day / Always night, or Auto: the optional night property, else the in-game clock (iRacing `SessionTimeOfDay`, ACC `Graphics.Clock`; night 19:00–07:00), else headlights (ACC `LightsStage`, rF2/LMU `mHeadlights`) |
+| `fuelPercent` (#46) | `FuelPercent`, else `Fuel` / `MaxFuel`; absent when the game publishes no fuel |
+| `rangeKm` (#46) | `EstimatedFuelRemaingLaps` × `TrackLength` (else `ReportedTrackLength`) / 1000 |
+| `lat`, `lon`, `alt` | The position strategy (below) |
+
+Position strategies (`Telemetry/GpsStrategy.cs`, `IGpsStrategy`; `Update` runs per frame, `TryGetFix` at 10 Hz):
+
+- **Off**: no position.
+- **Fixed position** (#42, `FixedOriginStrategy`): always the origin typed on the page (latitude, longitude,
+  altitude; pasting "lat, lon" from a map into the latitude box fills both). Maps shows the car there while speed,
+  gear and heading are the sim's; heading is 0 while the game publishes no yaw.
+- **Drive around the origin** (#43, `DeadReckoningStrategy.cs`): starts at the origin and integrates speed × heading
+  on every frame (great-circle step, `GeoMath`). Back to the origin on game start, session restart, a new track or
+  session type, pit exit, after standing still for the set time (default 30 s, 0 never), and beyond the drift radius
+  (default 20 km); the page also has a "Back to the origin now" button.
 
 ## Notes
 
