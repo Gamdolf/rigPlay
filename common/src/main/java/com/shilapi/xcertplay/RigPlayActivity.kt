@@ -57,6 +57,10 @@ class RigPlayActivity : ComponentActivity() {
     private var testToneTrack: AudioTrack? = null
     private var toneStop: Runnable? = null
     private var exportButton: Button? = null
+    private var simhubContainer: LinearLayout? = null
+    private var simhubRendered: Any? = null
+    private var simhubStatusView: TextView? = null
+    private val simhubObserver: () -> Unit = { onSimHubChanged() }
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         connect(notificationTransport)
     }
@@ -96,12 +100,13 @@ class RigPlayActivity : ComponentActivity() {
             getString(R.string.setup_error_auth)
         }
         pendingCarHotspotSetup = savedInstanceState?.getBoolean("pending_car_hotspot") ?: false
-        page = savedInstanceState?.getString("page") ?: intent.getStringExtra("page") ?: "home"
+        RigSessionCoordinator.init(this)
+        page = routedPage(savedInstanceState?.getString("page") ?: intent.getStringExtra("page"))
         render()
         handleWirelessRecovery()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (page != "home") { page = "home"; render() }
+                if (page != "home") showPage("home")
                 else { isEnabled = false; onBackPressedDispatcher.onBackPressed(); isEnabled = true }
             }
         })
@@ -109,7 +114,7 @@ class RigPlayActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent); setIntent(intent)
-        page = intent.getStringExtra("page") ?: "home"; render()
+        page = routedPage(intent.getStringExtra("page")); render()
         handleWirelessRecovery()
     }
     override fun onSaveInstanceState(outState: Bundle) { outState.putString("page", page); outState.putBoolean("pending_car_hotspot", pendingCarHotspotSetup); super.onSaveInstanceState(outState) }
@@ -121,20 +126,63 @@ class RigPlayActivity : ComponentActivity() {
             return
         }
         handler.removeCallbacks(tick); handler.post(tick)
+        RigSessionCoordinator.addObserver(simhubObserver)
+        RigSessionCoordinator.setOnboardingVisible(page == "simhub")
         // Back from the car settings: refresh the car hotspot reminder on the home page.
         if (!initialLaunch && (page == "home" || page == "settings" || page == "connection")) render()
         if (initialLaunch) {
             initialLaunch = false
             if (setupError == null && !CarPlayBackgroundSession.hasSession() &&
-                RigPlayPreferences.autoConnect(this) && intent.getStringExtra("page") == null) {
+                RigPlayPreferences.autoConnect(this) && intent.getStringExtra("page") == null && page == "home") {
                 handler.post { connect(AirPlayPersistence.loadWirelessEnabled(this)) }
             }
         }
     }
-    override fun onPause() { handler.removeCallbacks(tick); super.onPause() }
+    override fun onPause() {
+        handler.removeCallbacks(tick)
+        RigSessionCoordinator.removeObserver(simhubObserver)
+        RigSessionCoordinator.setOnboardingVisible(false)
+        super.onPause()
+    }
+
+    /** Launch routing (#27): unpaired → SimHub onboarding, paired → the requested page or home. */
+    private fun routedPage(requested: String?): String {
+        val paired = RigSessionCoordinator.isPaired
+        return when {
+            requested == "simhub" && paired -> "home"
+            requested != null -> requested
+            paired || RigSessionCoordinator.onboardingSkipped -> "home"
+            else -> "simhub"
+        }
+    }
+
+    private fun showPage(next: String) {
+        page = next
+        RigSessionCoordinator.setOnboardingVisible(next == "simhub")
+        render()
+    }
+
+    private fun onSimHubChanged() {
+        if (isFinishing || isDestroyed) return
+        when {
+            page == "simhub" && RigSessionCoordinator.pairingStep is SimHubPairingFlow.Step.Paired &&
+                RigSessionCoordinator.isPaired -> {
+                toast(getString(R.string.rig_simhub_paired_toast, RigSessionCoordinator.pairing?.name ?: ""))
+                showPage("home")
+            }
+            page == "simhub" -> refreshSimHubPage()
+            // Token revoked or forgotten on the PC (§8): back to onboarding.
+            !RigSessionCoordinator.isPaired && !RigSessionCoordinator.onboardingSkipped && page == "home" -> {
+                toast(getString(R.string.rig_simhub_unpaired_toast))
+                showPage("simhub")
+            }
+            else -> refreshStatus()
+        }
+    }
 
     private fun render() {
         status = null; connectButton = null; disconnectButton = null; lastRunning = null
+        simhubContainer = null; simhubRendered = null; simhubStatusView = null
         val scroll = ScrollView(this).apply { setBackgroundColor(BG); isFillViewport = true; clipToPadding = false }
         val content = column().apply { setPadding(dp(32), dp(24), dp(32), dp(32)) }
         scroll.addView(content)
@@ -143,12 +191,13 @@ class RigPlayActivity : ComponentActivity() {
         header.addView(label(getString(R.string.rigplay), 26, TEXT, true).apply { setPadding(dp(12), 0, 0, 0) }, LinearLayout.LayoutParams(0, dp(56), 1f))
         header.addView(button(if (page == "home") getString(R.string.car_home) else getString(R.string.back), false) {
             if (page == "home") startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME))
-            else { page = "home"; render() }
+            else showPage("home")
         }, LinearLayout.LayoutParams(dp(130), dp(56)))
         content.addView(header)
         content.addView(space(24))
         when (page) {
             "connection" -> connectionSetup(content)
+            "simhub" -> simHubOnboarding(content)
             "settings" -> settings(content)
             "about" -> about(content)
             else -> home(content)
@@ -232,6 +281,7 @@ class RigPlayActivity : ComponentActivity() {
     private fun settings(content: LinearLayout) {
         content.addView(label(getString(R.string.your_drive_your_way), 34, TEXT, true))
         content.addView(label(getString(R.string.apply_reconnects_carplay_for_size_resolution_music_buffer), 17, MUTED).apply { setPadding(0, dp(8), 0, dp(24)) })
+        simHubSettings(content)
         section(content, getString(R.string.connection_setup), R.drawable.ic_dp_connection) { card ->
             card.addView(label(getString(R.string.choose_how_to_connect_follow_the_setup_steps_and_save_your), 16, MUTED))
             card.addView(button(getString(R.string.open_connection_setup), false) { page = "connection"; render() }, matchButton(12, 60))
@@ -300,6 +350,239 @@ class RigPlayActivity : ComponentActivity() {
             card.addView(button(getString(R.string.about_rigplay), false) { page = "about"; render() }, matchButton(0, 60))
         }
         languageSettings(content)
+    }
+
+    // --- SimHub onboarding (#27) ---------------------------------------------------------------
+
+    private fun simHubOnboarding(content: LinearLayout) {
+        content.addView(label(getString(R.string.rig_simhub_title), 34, TEXT, true))
+        content.addView(label(getString(R.string.rig_simhub_intro), 17, MUTED).apply { setPadding(0, dp(8), 0, dp(24)) })
+        simhubContainer = column().also { content.addView(it) }
+        refreshSimHubPage()
+    }
+
+    /** Rebuilds the step only when it changed, so typing a PIN survives host-list updates. */
+    private fun refreshSimHubPage() {
+        val container = simhubContainer ?: return
+        val step = RigSessionCoordinator.pairingStep
+        val key: Any = if (step is SimHubPairingFlow.Step.ChooseHost || step is SimHubPairingFlow.Step.Paired) {
+            listOf(step, RigSessionCoordinator.hosts.map { it.copy(lastSeen = 0) }, RigSessionCoordinator.discoveryError)
+        } else step
+        if (key == simhubRendered) return
+        simhubRendered = key
+        container.removeAllViews()
+        when (step) {
+            is SimHubPairingFlow.Step.ChooseHost, is SimHubPairingFlow.Step.Paired -> simHubHostList(container)
+            is SimHubPairingFlow.Step.Connecting ->
+                simHubProgress(container, getString(R.string.rig_simhub_connecting, step.name ?: "${step.host}:${step.port}"))
+            is SimHubPairingFlow.Step.WaitingForPin ->
+                simHubProgress(container, getString(R.string.rig_simhub_waiting_pin, step.name))
+            is SimHubPairingFlow.Step.EnterPin -> simHubPinEntry(container, step)
+            is SimHubPairingFlow.Step.Failed -> simHubFailure(container, step)
+        }
+    }
+
+    private fun simHubHostList(container: LinearLayout) {
+        val card = card()
+        val hosts = RigSessionCoordinator.hosts
+        val discoveryError = RigSessionCoordinator.discoveryError
+        when {
+            discoveryError != null -> card.addView(label(getString(R.string.rig_simhub_discovery_unavailable, discoveryError), 16, WARNING))
+            hosts.isEmpty() -> {
+                val searching = row().apply { gravity = Gravity.CENTER_VERTICAL }
+                searching.addView(ProgressBar(this).apply { isIndeterminate = true }, LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginEnd = dp(16) })
+                searching.addView(label(getString(R.string.rig_simhub_searching), 18, MUTED), LinearLayout.LayoutParams(0, -2, 1f))
+                card.addView(searching)
+            }
+        }
+        hosts.forEachIndexed { index, host ->
+            val address = "${host.address.hostAddress}:${host.controlPort}"
+            val details = host.simhubVersion?.let { getString(R.string.rig_simhub_host_details_simhub, address, it, host.version) }
+                ?: getString(R.string.rig_simhub_host_details, address, host.version)
+            val entry = column().apply {
+                setPadding(dp(20), dp(16), dp(20), dp(16))
+                background = android.graphics.drawable.RippleDrawable(ColorStateList.valueOf(0x336F9FD9), rounded(SURFACE, if (host.compatible) ACCENT else BORDER), null)
+                isClickable = host.compatible; isFocusable = host.compatible
+                contentDescription = "${host.name}, $details"
+                if (host.compatible) setOnClickListener {
+                    val ip = host.address.hostAddress ?: return@setOnClickListener
+                    RigSessionCoordinator.connect(ip, host.controlPort, host.name)
+                }
+            }
+            entry.addView(label(host.name, 20, if (host.compatible) TEXT else MUTED, true))
+            entry.addView(label(details, 14, MUTED).apply { setPadding(0, dp(4), 0, 0) })
+            if (!host.compatible) entry.addView(label(getString(R.string.rig_simhub_host_incompatible), 14, WARNING).apply { setPadding(0, dp(4), 0, 0) })
+            card.addView(entry, LinearLayout.LayoutParams(-1, -2).apply { if (index > 0) topMargin = dp(12) })
+        }
+        card.addView(button(getString(R.string.rig_simhub_enter_manually), hosts.isEmpty()) { askSimHubAddress() }, matchButton(18, 60))
+        card.addView(button(getString(R.string.rig_simhub_later), false) {
+            RigSessionCoordinator.onboardingSkipped = true
+            showPage("home")
+        }, matchButton(10, 56))
+        container.addView(card)
+    }
+
+    private fun simHubProgress(container: LinearLayout, message: String) {
+        val card = card()
+        val line = row().apply { gravity = Gravity.CENTER_VERTICAL }
+        line.addView(ProgressBar(this).apply { isIndeterminate = true }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginEnd = dp(16) })
+        line.addView(label(message, 22, TEXT, true).apply { accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }, LinearLayout.LayoutParams(0, -2, 1f))
+        card.addView(line)
+        card.addView(button(getString(R.string.cancel), false) { RigSessionCoordinator.cancelPairing() }, matchButton(20, 56))
+        container.addView(card)
+    }
+
+    private fun simHubPinEntry(container: LinearLayout, step: SimHubPairingFlow.Step.EnterPin) {
+        val card = card()
+        card.addView(label(getString(R.string.rig_simhub_enter_pin_title), 24, TEXT, true))
+        card.addView(label(getString(R.string.rig_simhub_enter_pin_body, step.name), 16, MUTED).apply { setPadding(0, dp(8), 0, 0) })
+        step.expiresInSec?.let { card.addView(label(getString(R.string.rig_simhub_pin_expires, it), 14, MUTED).apply { setPadding(0, dp(4), 0, 0) }) }
+        val error = when (step.error) {
+            SimHubPairingFlow.PairingError.WRONG_PIN -> step.attemptsLeft?.let { getString(R.string.rig_simhub_error_wrong_pin, it) }
+                ?: getString(R.string.rig_simhub_error_wrong_pin_plain)
+            SimHubPairingFlow.PairingError.PIN_EXPIRED -> getString(R.string.rig_simhub_error_pin_expired)
+            SimHubPairingFlow.PairingError.TOO_MANY_ATTEMPTS -> getString(R.string.rig_simhub_error_too_many)
+            SimHubPairingFlow.PairingError.DENIED -> getString(R.string.rig_simhub_error_denied)
+            else -> null
+        }
+        error?.let {
+            card.addView(label(it, 16, WARNING).apply { setPadding(0, dp(12), 0, 0); accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE })
+        }
+        if (step.needsNewPin) {
+            card.addView(button(getString(R.string.rig_simhub_new_pin), true) { RigSessionCoordinator.requestNewPin() }, matchButton(18, 60))
+        } else {
+            val pin = EditText(this).apply {
+                hint = getString(R.string.rig_simhub_pin_hint); setSingleLine(); textSize = 34f; letterSpacing = .3f
+                gravity = Gravity.CENTER; setTextColor(TEXT); setHintTextColor(MUTED)
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                filters = arrayOf(android.text.InputFilter.LengthFilter(6))
+                imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE or android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI
+                isEnabled = !step.submitting
+                contentDescription = getString(R.string.rig_simhub_pin_hint)
+            }
+            val pair = button(getString(R.string.rig_simhub_pair), true) { RigSessionCoordinator.submitPin(pin.text.toString()) }
+            pair.isEnabled = false
+            pin.addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+                override fun afterTextChanged(text: android.text.Editable?) { pair.isEnabled = !step.submitting && text?.length == 6 }
+            })
+            pin.setOnEditorActionListener { _, action, _ ->
+                if (action == android.view.inputmethod.EditorInfo.IME_ACTION_DONE && pin.text.length == 6) {
+                    RigSessionCoordinator.submitPin(pin.text.toString()); true
+                } else false
+            }
+            card.addView(pin, LinearLayout.LayoutParams(-1, dp(80)).apply { topMargin = dp(16) })
+            if (step.submitting) {
+                card.addView(label(getString(R.string.rig_simhub_checking_pin), 16, MUTED).apply { setPadding(0, dp(12), 0, 0) })
+            } else {
+                card.addView(pair, matchButton(12, 60))
+                pin.requestFocus()
+            }
+        }
+        card.addView(button(getString(R.string.cancel), false) { RigSessionCoordinator.cancelPairing() }, matchButton(10, 56))
+        container.addView(card)
+    }
+
+    private fun simHubFailure(container: LinearLayout, step: SimHubPairingFlow.Step.Failed) {
+        val card = card()
+        val name = step.name ?: "${step.host}:${step.port}"
+        val message = when (step.error) {
+            SimHubPairingFlow.PairingError.INCOMPATIBLE -> getString(R.string.rig_simhub_error_incompatible, name)
+            else -> getString(R.string.rig_simhub_error_unreachable, name)
+        }
+        card.addView(label(message, 18, WARNING).apply { accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE })
+        card.addView(button(getString(R.string.rig_simhub_retry), true) { RigSessionCoordinator.retryPairing() }, matchButton(18, 60))
+        card.addView(button(getString(R.string.rig_simhub_choose_other), false) { RigSessionCoordinator.cancelPairing() }, matchButton(10, 56))
+        container.addView(card)
+    }
+
+    private fun askSimHubAddress() {
+        val fields = column().apply { setPadding(dp(24), dp(12), dp(24), dp(12)) }
+        val input = EditText(this).apply {
+            hint = getString(R.string.rig_simhub_address_hint); setSingleLine()
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+            imeOptions = android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI
+        }
+        val error = label("", 14, WARNING).apply { accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE }
+        fields.addView(input); fields.addView(error)
+        val dialog = AlertDialog.Builder(this).setTitle(getString(R.string.rig_simhub_address_title)).setView(fields)
+            .setPositiveButton(getString(R.string.rig_simhub_connect), null)
+            .setNegativeButton(getString(R.string.cancel), null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val parsed = SimHubAddress.parse(input.text.toString(), AirPlayPersistence.loadSimHubControlPort(this))
+                if (parsed == null) error.text = getString(R.string.rig_simhub_address_invalid)
+                else { dialog.dismiss(); RigSessionCoordinator.connect(parsed.host, parsed.port) }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun simHubStatusText(): String {
+        val pairing = RigSessionCoordinator.pairing ?: return getString(R.string.rig_simhub_status_not_paired)
+        val state = RigSessionCoordinator.state
+        return when {
+            state.paired -> getString(R.string.rig_simhub_status_connected, state.hostName ?: pairing.name)
+            state.phase == com.shilapi.xcertplay.simhub.SimHubState.Phase.INCOMPATIBLE ->
+                getString(R.string.rig_simhub_status_incompatible, pairing.name)
+            else -> getString(R.string.rig_simhub_status_searching, pairing.name)
+        }
+    }
+
+    private fun simHubSettings(content: LinearLayout) {
+        section(content, getString(R.string.rig_settings_simhub), R.drawable.ic_dp_connection) { card ->
+            val pairing = RigSessionCoordinator.pairing
+            if (pairing != null) {
+                card.addView(label(getString(R.string.rig_settings_simhub_paired, pairing.name, "${pairing.host}:${pairing.port}"), 18, TEXT, true))
+                simhubStatusView = label(simHubStatusText(), 16, MUTED).apply { setPadding(0, dp(6), 0, 0) }
+                card.addView(simhubStatusView)
+                card.addView(button(getString(R.string.rig_settings_simhub_reconnect), false) { RigSessionCoordinator.reconnect() }, matchButton(16, 60))
+                card.addView(button(getString(R.string.rig_settings_simhub_forget), false) {
+                    AlertDialog.Builder(this).setTitle(getString(R.string.rig_settings_simhub_forget_title, pairing.name))
+                        .setMessage(getString(R.string.rig_settings_simhub_forget_body))
+                        .setPositiveButton(getString(R.string.rig_settings_simhub_forget)) { _, _ ->
+                            RigSessionCoordinator.forget()
+                            RigSessionCoordinator.onboardingSkipped = false
+                            showPage("simhub")
+                        }
+                        .setNegativeButton(getString(R.string.cancel), null).show()
+                }, matchButton(10, 60))
+            } else {
+                card.addView(label(getString(R.string.rig_simhub_status_not_paired), 16, MUTED))
+                card.addView(button(getString(R.string.rig_settings_simhub_pair), true) { showPage("simhub") }, matchButton(12, 60))
+            }
+            card.addView(label(getString(R.string.rig_settings_simhub_advanced), 18, TEXT, true).apply { setPadding(0, dp(24), 0, 0) })
+            card.addView(label(getString(R.string.rig_settings_simhub_ports_note), 14, MUTED).apply { setPadding(0, dp(6), 0, 0) })
+            val controlPort = AirPlayPersistence.loadSimHubControlPort(this)
+            card.addView(button(getString(R.string.rig_settings_simhub_control_port, controlPort), false) {
+                askPort(getString(R.string.rig_settings_simhub_control_port, controlPort), controlPort) {
+                    AirPlayPersistence.saveSimHubControlPort(this, it); render()
+                }
+            }, matchButton(12, 60))
+            val discoveryPort = AirPlayPersistence.loadSimHubDiscoveryPort(this)
+            card.addView(button(getString(R.string.rig_settings_simhub_discovery_port, discoveryPort), false) {
+                askPort(getString(R.string.rig_settings_simhub_discovery_port, discoveryPort), discoveryPort) {
+                    AirPlayPersistence.saveSimHubDiscoveryPort(this, it)
+                    RigSessionCoordinator.restartDiscovery()
+                    render()
+                }
+            }, matchButton(10, 60))
+        }
+    }
+
+    private fun askPort(title: String, current: Int, save: (Int) -> Unit) {
+        val input = EditText(this).apply {
+            setText(current.toString()); setSingleLine()
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            filters = arrayOf(android.text.InputFilter.LengthFilter(5))
+        }
+        AlertDialog.Builder(this).setTitle(title).setView(input)
+            .setPositiveButton(getString(R.string.save)) { _, _ ->
+                val port = input.text.toString().toIntOrNull()
+                if (port == null || port !in 1..65535) toast(getString(R.string.rig_settings_simhub_port_invalid)) else save(port)
+            }
+            .setNegativeButton(getString(R.string.cancel), null).show()
     }
 
     private fun about(content: LinearLayout) {
@@ -705,6 +988,7 @@ class RigPlayActivity : ComponentActivity() {
     }
 
     private fun refreshStatus() {
+        simhubStatusView?.text = simHubStatusText()
         val running = CarPlayBackgroundSession.hasSession()
         status?.text = when {
             setupError != null -> getString(R.string.setup_needs_attention)

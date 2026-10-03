@@ -1,0 +1,276 @@
+package com.shilapi.xcertplay
+
+import android.content.Context
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
+import android.util.Log
+import com.shilapi.xcertplay.simhub.DiscoveredHost
+import com.shilapi.xcertplay.simhub.SimHubDiscovery
+import com.shilapi.xcertplay.simhub.SimHubLink
+import com.shilapi.xcertplay.simhub.SimHubMessage
+import com.shilapi.xcertplay.simhub.SimHubState
+
+/**
+ * Process-wide owner of the SimHub link (#26) and discovery, created by [RigPlayApplication].
+ *
+ * Everything here runs on the main thread: link and discovery callbacks are posted to it, and the
+ * public methods must be called from it. Observers ([addObserver]) are told about any change of
+ * [state], [hosts], [pairing] or [pairingStep].
+ */
+object RigSessionCoordinator {
+    private const val TAG = "rigplay-coordinator"
+
+    private val main = Handler(Looper.getMainLooper())
+    private val observers = LinkedHashSet<() -> Unit>()
+
+    private var appContext: Context? = null
+    private lateinit var link: SimHubLink
+    private lateinit var linkPort: SimHubLinkPort
+    private lateinit var flow: SimHubPairingFlow
+    private var discovery: SimHubDiscovery? = null
+    private var onboardingVisible = false
+
+    /** The stored pairing, or `null` while unpaired. */
+    var pairing: SimHubPairing? = null
+        private set
+
+    /** Latest link state, as seen on the main thread. */
+    var state: SimHubState = SimHubState.STOPPED
+        private set
+
+    /** PCs heard from on the network (sorted by name). */
+    var hosts: List<DiscoveredHost> = emptyList()
+        private set
+
+    /** Why discovery could not start (port busy, no Wi-Fi), or `null`. */
+    var discoveryError: String? = null
+        private set
+
+    /** "Set up later" on the onboarding page; asked again on the next launch. */
+    var onboardingSkipped = false
+
+    val initialized: Boolean get() = appContext != null
+    val isPaired: Boolean get() = pairing != null
+    val pairingStep: SimHubPairingFlow.Step get() = if (initialized) flow.step else SimHubPairingFlow.Step.ChooseHost
+
+    /** Creates the link and connects to the paired PC, if any. Idempotent. */
+    fun init(context: Context) {
+        if (appContext != null) return
+        val app = context.applicationContext ?: context
+        appContext = app
+        link = SimHubLink(identity(app), LinkListener)
+        linkPort = EpochLinkPort(SimHubLinkPort.of(link))
+        flow = SimHubPairingFlow(linkPort) { notifyObservers() }
+        pairing = AirPlayPersistence.loadSimHubPairing(app)
+        pairing?.let(::startPaired)
+        updateDiscovery()
+    }
+
+    fun addObserver(observer: () -> Unit) { observers.add(observer) }
+    fun removeObserver(observer: () -> Unit) { observers.remove(observer) }
+
+    // --- onboarding (#27) -----------------------------------------------------------------------
+
+    /** The onboarding page is on screen: listen for beacons even when not paired. */
+    fun setOnboardingVisible(visible: Boolean) {
+        if (onboardingVisible == visible) return
+        onboardingVisible = visible
+        updateDiscovery()
+    }
+
+    fun connect(host: String, port: Int, name: String? = null) {
+        if (!initialized) return
+        flow.connect(host, port, name)
+        notifyObservers()
+    }
+
+    fun submitPin(pin: String): Boolean = initialized && flow.submitPin(pin)
+    fun requestNewPin() { if (initialized) flow.requestNewPin() }
+    fun retryPairing() { if (initialized) flow.retry() }
+
+    /** Leaves the PIN/progress step. A paired PC is reconnected. */
+    fun cancelPairing() {
+        if (!initialized) return
+        flow.cancel()
+        pairing?.let(::startPaired)
+        notifyObservers()
+    }
+
+    /** Settings → SimHub → Reconnect: connect now instead of waiting for the back-off. */
+    fun reconnect() {
+        val current = pairing ?: return
+        startPaired(current)
+        linkPort.reconnectNow()
+    }
+
+    /** Settings → SimHub → Forget: deletes the token locally (§8) and stops the link. */
+    fun forget() {
+        val context = appContext ?: return
+        Log.i(TAG, "forgetting SimHub ${pairing?.hostId}")
+        AirPlayPersistence.clearSimHubPairing(context)
+        pairing = null
+        linkPort.stop()
+        state = SimHubState.STOPPED
+        flow.reset()
+        updateDiscovery()
+        notifyObservers()
+    }
+
+    /** Settings → SimHub → Advanced: the discovery port changed. */
+    fun restartDiscovery() {
+        discovery?.stop()
+        discovery = null
+        updateDiscovery()
+    }
+
+    // --- internals ------------------------------------------------------------------------------
+
+    private fun startPaired(current: SimHubPairing) {
+        linkPort.start(SimHubLink.Target(current.host, current.port, current.hostId, current.token))
+    }
+
+    private fun identity(context: Context): SimHubLink.Identity {
+        val name = runCatching { Settings.Global.getString(context.contentResolver, "device_name") }.getOrNull()
+            ?.takeIf { it.isNotBlank() }
+            ?: listOf(Build.MANUFACTURER, Build.MODEL).filter { !it.isNullOrBlank() }.joinToString(" ")
+                .ifBlank { "rigPlay tablet" }
+        val version = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }
+            .getOrNull()?.takeIf { it.isNotBlank() } ?: "0.0.0"
+        return SimHubLink.Identity(AirPlayPersistence.loadSimHubTabletId(context), name, version)
+    }
+
+    /** Beacons are needed while choosing a PC and while the paired PC is not connected (§9). */
+    private fun updateDiscovery() {
+        val context = appContext ?: return
+        val wanted = onboardingVisible || flow.active || (pairing != null && !state.paired)
+        if (!wanted) {
+            discovery?.stop()
+            discovery = null
+            hosts = emptyList()
+            return
+        }
+        if (discovery != null) return
+        val next = SimHubDiscovery(
+            listener = DiscoveryListener,
+            port = AirPlayPersistence.loadSimHubDiscoveryPort(context),
+            networkLock = SimHubDiscovery.wifiMulticastLock(context),
+        )
+        discoveryError = try {
+            next.start()
+            discovery = next
+            null
+        } catch (error: Exception) {
+            Log.w(TAG, "discovery could not start", error)
+            error.message ?: error.javaClass.simpleName
+        }
+    }
+
+    private fun onLinkState(next: SimHubState) {
+        state = next
+        flow.onStateChanged(next)
+        // A beacon moved the paired PC to a new address (§9): remember it.
+        val stored = pairing
+        val target = link.currentTarget
+        if (stored != null && target != null && target.hostId == stored.hostId &&
+            (target.host != stored.host || target.port != stored.port)
+        ) {
+            val moved = stored.copy(host = target.host, port = target.port)
+            pairing = moved
+            appContext?.let { AirPlayPersistence.saveSimHubAddress(it, moved.host, moved.port) }
+        }
+        updateDiscovery()
+        notifyObservers()
+    }
+
+    private fun onPaired(hostId: String, token: String) {
+        val context = appContext ?: return
+        val stored = pairing
+        val next = if (flow.active) {
+            flow.onPaired(hostId, token, link.state.hostName)
+        } else if (stored != null && stored.hostId == hostId) {
+            // Resume: the plugin may hand out a new token; always store what it sent (§6.4).
+            stored.copy(token = token, name = link.state.hostName ?: stored.name)
+        } else {
+            null
+        }
+        if (next != null) {
+            AirPlayPersistence.saveSimHubPairing(context, next)
+            pairing = next
+            Log.i(TAG, "paired with ${next.name} (${next.hostId})")
+        }
+        updateDiscovery()
+        notifyObservers()
+    }
+
+    private fun onTokenRevoked(hostId: String, code: String) {
+        if (pairing?.hostId != hostId) return
+        Log.i(TAG, "token revoked by $hostId ($code); back to onboarding")
+        forget()
+    }
+
+    private fun notifyObservers() {
+        for (observer in observers.toList()) {
+            try {
+                observer()
+            } catch (error: RuntimeException) {
+                Log.w(TAG, "observer failed", error)
+            }
+        }
+    }
+
+    private fun onMain(block: () -> Unit) {
+        if (Looper.myLooper() === Looper.getMainLooper()) block() else main.post(block)
+    }
+
+    /**
+     * Incremented whenever the link is stopped or pointed at another target, so that callbacks the
+     * old session queued for the main thread are dropped instead of overwriting the new state.
+     */
+    @Volatile private var epoch = 0
+
+    /** Runs [block] on the main thread unless the link was stopped or retargeted in between. */
+    private fun fromLink(block: () -> Unit) {
+        val captured = epoch
+        onMain { if (captured == epoch) block() }
+    }
+
+    private class EpochLinkPort(private val delegate: SimHubLinkPort) : SimHubLinkPort by delegate {
+        override fun start(target: SimHubLink.Target) {
+            if (target != delegate.currentTarget || delegate.state.phase == SimHubState.Phase.STOPPED) epoch++
+            delegate.start(target)
+        }
+
+        override fun stop() {
+            epoch++
+            delegate.stop()
+        }
+    }
+
+    private object LinkListener : SimHubLink.Listener {
+        override fun onStateChanged(state: SimHubState) = fromLink { onLinkState(state) }
+        override fun onPairResult(result: SimHubMessage.PairResult) = fromLink {
+            flow.onPairResult(result)
+        }
+        override fun onPaired(hostId: String, token: String) = fromLink { this@RigSessionCoordinator.onPaired(hostId, token) }
+        override fun onAttemptFailed(loss: SimHubLink.LinkLoss) = fromLink {
+            flow.onAttemptFailed(loss)
+            updateDiscovery()
+            notifyObservers()
+        }
+        override fun onTokenRevoked(hostId: String, code: String) = fromLink {
+            this@RigSessionCoordinator.onTokenRevoked(hostId, code)
+        }
+    }
+
+    private object DiscoveryListener : SimHubDiscovery.Listener {
+        override fun onHostsChanged(hosts: List<DiscoveredHost>) = onMain {
+            this@RigSessionCoordinator.hosts = hosts
+            notifyObservers()
+        }
+
+        // Thread-safe; lets the link reconnect at once to the paired PC (§9).
+        override fun onBeacon(host: DiscoveredHost) = linkPort.onBeacon(host)
+    }
+}
