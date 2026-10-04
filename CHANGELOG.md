@@ -1,5 +1,12 @@
 # rigPlay 0.2.0 — unreleased
 
+- Nothing yet since 0.2.0-rc.2. Changes for the final 0.2.0 go here.
+
+# rigPlay 0.2.0-rc.2 — 2026-10-04
+
+Third pre-release, for testing on a rig: the v2 features (idle dashboard, data to CarPlay, PC microphone)
+and the audio fixes from the second rig test. Android versionCode 3; it installs over 0.2.0-rc.1.
+
 - Audio to the PC: no more dropouts on a Wi-Fi link that stalls. The second rig test still cut out
   (18 underruns and 10 skips in 100 s at 0 % loss): the buffer's target was capped at 250 ms and it threw
   the depth away above 500 ms, so every stall of 300–650 ms was a dropout, often followed by a skip. The
@@ -31,6 +38,17 @@
   the tablet without tapping Fullscreen (#50); the page loads as soon as SimHub names a dashboard and
   stays loaded between opens (#51); SimHub's own icon is used on the SimHub button and the CarPlay
   car icon, fetched once from the web dash server (#52).
+
+- Wireless on an existing Wi-Fi network: a second wireless mode where the phone and the tablet share
+  the home network instead of the tablet's own Wi-Fi Direct group, with the spike procedure for the
+  target tablet in `docs/COMPATIBILITY.md` (#33).
+- Opus is available as an optional audio format for the stream to the PC, off by default; PCM stays
+  the default.
+- Releases: the APK on the GitHub release is now built, signed and bundled with the experimental
+  accessory identity by the release workflow itself, from repository secrets, and verified before it is
+  attached; `SHA256SUMS.txt` lists every file. Pull-request CI builds still carry no identity. The
+  identity caveat is unchanged: see `docs/THIRD_PARTY_NOTICES.md` ("Experimental authentication data")
+  and `SECURITY.md`.
 
 # rigPlay 0.2.0-rc.1 — 2026-10-03
 
