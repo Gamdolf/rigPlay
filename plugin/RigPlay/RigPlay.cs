@@ -30,6 +30,7 @@ namespace RigPlayPlugin
         private bool iconLoaded;
         private PluginBridge bridge;
         private global::RigPlayPlugin.Audio.AudioGlue audioGlue;
+        private global::RigPlayPlugin.Audio.TalkPauser talkPauser;
         private global::RigPlayPlugin.Audio.MicGlue micGlue;
 
         /// <summary>Discovery, control server and tablet state; null before Init and after End.</summary>
@@ -95,6 +96,29 @@ namespace RigPlayPlugin
             Audio.LearnedBufferChanged += SaveSettings; // the depth learned from the network survives a restart
             AttachAudio();
             AttachMic();
+            AttachTalkPauser();
+        }
+
+        /// <summary>
+        /// The talk watch's pause mode (#58): while a watched program talks and the phone is playing, toggle play/pause on
+        /// the primary tablet, and toggle back when it is quiet again. Duck mode is handled inside the audio pipeline.
+        /// </summary>
+        private void AttachTalkPauser()
+        {
+            talkPauser = new global::RigPlayPlugin.Audio.TalkPauser(
+                () => Host?.Surface.Playing ?? false,
+                () => Host != null && Host.RunAction(global::RigPlayPlugin.SurfaceAction.PlayPause));
+            Audio.TalkingChanged += talking =>
+            {
+                var host = Host;
+                if (host == null) return;
+                if (Settings.TalkMode != RigPlaySettings.TalkModePause)
+                {
+                    talkPauser.Reset();
+                    return;
+                }
+                if (talkPauser.OnTalking(talking, host.Clock.NowMs)) Log.Info("Talk watch: " + (talking ? "a watched program talks, music paused" : "quiet again, music resumed"));
+            };
         }
 
         /// <summary>The PC microphone (#34): tablets with feature mic get it on micStart while "Microphone to the phone" is on.</summary>

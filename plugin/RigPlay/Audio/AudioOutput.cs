@@ -59,6 +59,7 @@ namespace RigPlayPlugin.Audio
 
         private volatile bool altActive;
         private volatile bool telephonyActive;
+        private volatile bool externalTalking;
         private volatile string status = "Idle";
         private volatile bool disposed;
 
@@ -80,6 +81,20 @@ namespace RigPlayPlugin.Audio
         public string Status()
         {
             return status;
+        }
+
+        /// <summary>
+        /// A watched program (CrewChief, #58) started or stopped talking: in duck mode the media chains lower themselves to
+        /// the settings' talk volume on their next buffer (ramped, so no click). Any thread.
+        /// </summary>
+        public void SetExternalTalking(bool talking)
+        {
+            externalTalking = talking;
+        }
+
+        public bool ExternalTalking
+        {
+            get { return externalTalking; }
         }
 
         /// <summary>The selected device changed in the settings: reopen on it if something is playing.</summary>
@@ -196,7 +211,14 @@ namespace RigPlayPlugin.Audio
             if (stream.Channels == 1) chain = new MonoToStereoSampleProvider(chain);
             if (stream.SampleRate != AudioMath.MixSampleRate) chain = new WdlResamplingSampleProvider(chain, AudioMath.MixSampleRate);
             var type = stream.Type;
-            return new GainSampleProvider(chain, () => AudioMath.StreamGain(type, altActive, telephonyActive));
+            return new GainSampleProvider(chain, () => AudioMath.StreamGain(type, altActive, telephonyActive, externalTalking, TalkDuckGain()));
+        }
+
+        private float TalkDuckGain()
+        {
+            var s = settings();
+            if (s == null || !s.TalkWatchEnabled || s.TalkMode != RigPlaySettings.TalkModeDuck) return 1f;
+            return AudioMath.TalkDuckGain(s.TalkDuckVolume);
         }
 
         private void UpdateDuckingLocked()
