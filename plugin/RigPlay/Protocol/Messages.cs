@@ -29,12 +29,18 @@ namespace RigPlayPlugin.Protocol
         public const string Error = "error";
         public const string AudioStart = "audioStart";
         public const string AudioStop = "audioStop";
+        public const string Artwork = "artwork";
+        public const string MicStart = "micStart";
+        public const string MicStop = "micStop";
 
         /// <summary>Types the tablet sends to the plugin on the control channel.</summary>
         public static readonly HashSet<string> TabletToPlugin = new HashSet<string>(StringComparer.Ordinal)
         {
-            Hello, PairRequest, Heartbeat, Status, Error, AudioStart, AudioStop,
+            Hello, PairRequest, Heartbeat, Status, Error, AudioStart, AudioStop, Artwork, MicStart, MicStop,
         };
+
+        /// <summary>Types only a session with feature <c>mic</c> may send (spec §6.13).</summary>
+        public static readonly HashSet<string> MicFeature = new HashSet<string>(StringComparer.Ordinal) { MicStart, MicStop };
     }
 
     /// <summary>Feature strings (spec §7.3).</summary>
@@ -119,9 +125,14 @@ namespace RigPlayPlugin.Protocol
         public const string PcmS16Le = "pcm_s16le";
         public const string Opus = "opus";
 
+        /// <summary>The datagram streamType of the PC microphone (spec §6.13, §10.4): the only value micStart / micStop allow.</summary>
+        public const int MicStreamType = 4;
+
         public static readonly HashSet<string> All = new HashSet<string>(StringComparer.Ordinal) { Media, Alt, Telephony };
         /// <summary>The audioStart formats (§6.11, §10.4); the receiver decides separately whether it accepts opus.</summary>
         public static readonly HashSet<string> Formats = new HashSet<string>(StringComparer.Ordinal) { PcmS16Le, Opus };
+        /// <summary>The micStart formats (§6.13, §10.5): the microphone is pcm_s16le only.</summary>
+        public static readonly HashSet<string> MicFormats = new HashSet<string>(StringComparer.Ordinal) { PcmS16Le };
     }
 
     /// <summary>Base of every message. <see cref="Type"/> is the wire <c>type</c>.</summary>
@@ -228,6 +239,12 @@ namespace RigPlayPlugin.Protocol
         public List<string> Formats { get; set; } = new List<string> { AudioStreams.PcmS16Le };
     }
 
+    /// <summary><c>state.mic</c> (spec §6.6): whether the plugin answers micStart with microphone audio.</summary>
+    public sealed class MicInfo
+    {
+        public bool Enabled { get; set; }
+    }
+
     public sealed class StateMessage : Message
     {
         public override string Type => MessageTypes.State;
@@ -238,6 +255,9 @@ namespace RigPlayPlugin.Protocol
         public string IdleDashboardUrl { get; set; }
         public DashboardServerInfo DashboardServer { get; set; }
         public AudioInfo Audio { get; set; } = new AudioInfo();
+
+        /// <summary>Optional; sent only to sessions with feature <c>mic</c> (spec §6.6).</summary>
+        public MicInfo Mic { get; set; }
     }
 
     public sealed class NowPlaying
@@ -252,6 +272,48 @@ namespace RigPlayPlugin.Protocol
         public long UpdatedAt { get; set; }
     }
 
+    /// <summary>CarPlay route guidance (spec §6.7 <c>status.nav</c>). Every member may be null.</summary>
+    public sealed class NavInfo
+    {
+        /// <summary>Next maneuver: the lowerCamel name of Apple's RouteGuidanceManeuverType (<see cref="NavManeuvers.Known"/>), or any other string.</summary>
+        public string Maneuver { get; set; }
+
+        /// <summary>Whole metres to the next maneuver, ≥ 0.</summary>
+        public int? DistanceM { get; set; }
+
+        /// <summary>Road after the next maneuver.</summary>
+        public string Road { get; set; }
+
+        /// <summary>Estimated arrival, seconds since the Unix epoch (UTC), from the phone.</summary>
+        public long? EtaEpochS { get; set; }
+    }
+
+    /// <summary>
+    /// <c>status.nav.maneuver</c> values (spec §6.7.1): the lowerCamel names of Apple's RouteGuidanceManeuverType, in
+    /// type order (0..53). Types newer than this table arrive as <c>noTurn</c>; receivers accept any string.
+    /// </summary>
+    public static class NavManeuvers
+    {
+        public static readonly string[] Known = BuildKnown();
+
+        public const int MaxLength = 64;
+
+        private static string[] BuildKnown()
+        {
+            var names = new List<string>
+            {
+                "noTurn", "leftTurn", "rightTurn", "straightAhead", "uTurn", "followRoad", "enterRoundabout", "exitRoundabout",
+                "offRamp", "onRamp", "arriveEndOfNavigation", "startRoute", "arriveAtDestination", "keepLeft", "keepRight",
+                "enterFerry", "exitFerry", "changeFerry", "startRouteWithUTurn", "uTurnAtRoundabout", "leftTurnAtEnd",
+                "rightTurnAtEnd", "highwayOffRampLeft", "highwayOffRampRight", "arriveAtDestinationLeft", "arriveAtDestinationRight",
+                "uTurnWhenPossible", "arriveEndOfDirections",
+            };
+            for (var i = 1; i <= 19; i++) names.Add("roundaboutExit" + i);
+            names.AddRange(new[] { "sharpLeftTurn", "sharpRightTurn", "slightLeftTurn", "slightRightTurn", "changeHighway", "changeHighwayLeft", "changeHighwayRight" });
+            return names.ToArray();
+        }
+    }
+
     public sealed class StatusMessage : Message
     {
         public override string Type => MessageTypes.Status;
@@ -261,6 +323,37 @@ namespace RigPlayPlugin.Protocol
 
         /// <summary>Required; null when nothing is known.</summary>
         public NowPlaying NowPlaying { get; set; }
+
+        /// <summary>Optional; null when no route guidance is active (spec §6.7).</summary>
+        public NavInfo Nav { get; set; }
+    }
+
+    /// <summary><c>artwork.mime</c> values the plugin shows (spec §6.14).</summary>
+    public static class ArtworkFormats
+    {
+        /// <summary>What the rigPlay tablet sends.</summary>
+        public const string Jpeg = "image/jpeg";
+
+        /// <summary>Also accepted.</summary>
+        public const string Png = "image/png";
+
+        public static readonly HashSet<string> All = new HashSet<string>(StringComparer.Ordinal) { Jpeg, Png };
+    }
+
+    /// <summary>Now-playing artwork from the tablet (spec §6.14). There is no "clear": the last image stays.</summary>
+    public sealed class ArtworkMessage : Message
+    {
+        public override string Type => MessageTypes.Artwork;
+        public string Mime { get; set; }
+        public string Base64 { get; set; }
+
+        /// <summary>The decoded image. Set by the decoder and by <see cref="Of"/>.</summary>
+        public byte[] Bytes { get; set; }
+
+        public static ArtworkMessage Of(string mime, byte[] bytes)
+        {
+            return new ArtworkMessage { Mime = mime, Bytes = bytes, Base64 = Convert.ToBase64String(bytes) };
+        }
     }
 
     public sealed class CommandMessage : Message
@@ -332,6 +425,24 @@ namespace RigPlayPlugin.Protocol
     {
         public override string Type => MessageTypes.AudioStop;
         public string Stream { get; set; }
+    }
+
+    /// <summary>Tablet → plugin (spec §6.13): send the PC microphone to the tablet's <see cref="Port"/>.</summary>
+    public sealed class MicStartMessage : Message
+    {
+        public override string Type => MessageTypes.MicStart;
+        public int StreamType { get; set; } = AudioStreams.MicStreamType;
+        public string Format { get; set; } = AudioStreams.PcmS16Le;
+        public int SampleRate { get; set; }
+        public int Channels { get; set; } = 1;
+        public int Port { get; set; }
+    }
+
+    /// <summary>Tablet → plugin (spec §6.13): the phone closed its microphone.</summary>
+    public sealed class MicStopMessage : Message
+    {
+        public override string Type => MessageTypes.MicStop;
+        public int StreamType { get; set; } = AudioStreams.MicStreamType;
     }
 
     /// <summary>Why a line did not decode to a valid message.</summary>
@@ -495,6 +606,7 @@ namespace RigPlayPlugin.Protocol
                         ["port"] = audio.Port,
                         ["formats"] = new JArray((audio.Formats ?? new List<string>()).Cast<object>().ToArray()),
                     };
+                    if (m.Mic != null) o["mic"] = new JObject { ["enabled"] = m.Mic.Enabled };
                     break;
                 case StatusMessage m:
                     o["phoneConnected"] = m.PhoneConnected;
@@ -519,6 +631,19 @@ namespace RigPlayPlugin.Protocol
                             ["updatedAt"] = np.UpdatedAt,
                         };
                     }
+                    if (m.Nav != null)
+                    {
+                        var nav = new JObject();
+                        Opt(nav, "maneuver", m.Nav.Maneuver);
+                        Opt(nav, "distanceM", m.Nav.DistanceM);
+                        Opt(nav, "road", m.Nav.Road);
+                        Opt(nav, "etaEpochS", m.Nav.EtaEpochS);
+                        o["nav"] = nav;
+                    }
+                    break;
+                case ArtworkMessage m:
+                    o["mime"] = m.Mime;
+                    o["base64"] = m.Base64;
                     break;
                 case CommandMessage m:
                     o["command"] = m.Command;
@@ -555,6 +680,16 @@ namespace RigPlayPlugin.Protocol
                     break;
                 case AudioStopMessage m:
                     o["stream"] = m.Stream;
+                    break;
+                case MicStartMessage m:
+                    o["streamType"] = m.StreamType;
+                    o["format"] = m.Format;
+                    o["sampleRate"] = m.SampleRate;
+                    o["channels"] = m.Channels;
+                    o["port"] = m.Port;
+                    break;
+                case MicStopMessage m:
+                    o["streamType"] = m.StreamType;
                     break;
                 default:
                     throw new ArgumentException("Unknown message class " + message.GetType().Name);
@@ -604,6 +739,9 @@ namespace RigPlayPlugin.Protocol
             [MessageTypes.Error] = DecodeError,
             [MessageTypes.AudioStart] = DecodeAudioStart,
             [MessageTypes.AudioStop] = o => new AudioStopMessage { Stream = ReqEnum(o, "stream", AudioStreams.All) },
+            [MessageTypes.Artwork] = DecodeArtwork,
+            [MessageTypes.MicStart] = DecodeMicStart,
+            [MessageTypes.MicStop] = o => new MicStopMessage { StreamType = (int)ReqInt(o, "streamType", AudioStreams.MicStreamType, AudioStreams.MicStreamType) },
         };
 
         private static Message DecodeBeacon(JObject o)
@@ -703,6 +841,8 @@ namespace RigPlayPlugin.Protocol
                 Port = (int)ReqInt(audio, "port", 1, 65535),
                 Formats = ReqStringArray(audio, "formats"),
             };
+            var mic = OptObject(o, "mic");
+            if (mic != null) m.Mic = new MicInfo { Enabled = ReqBool(mic, "enabled") };
             return m;
         }
 
@@ -729,7 +869,60 @@ namespace RigPlayPlugin.Protocol
                     UpdatedAt = ReqInt(np, "updatedAt", 0, long.MaxValue),
                 };
             }
+            m.Nav = DecodeNav(o);
             return m;
+        }
+
+        /// <summary>
+        /// status.nav, validated leniently like telemetry (spec §6.7): not an object means no route guidance; a member
+        /// with the wrong type or out of range is null; the rest of the status is used either way.
+        /// </summary>
+        private static NavInfo DecodeNav(JObject o)
+        {
+            var nav = Member(o, "nav") as JObject;
+            if (nav == null) return null;
+            var maneuver = LenientString(nav, "maneuver");
+            if (maneuver != null && (maneuver.Length == 0 || maneuver.Length > NavManeuvers.MaxLength)) maneuver = null;
+            var road = LenientString(nav, "road");
+            if (string.IsNullOrWhiteSpace(road)) road = null;
+            // Whole metres on the wire; a decimal is accepted and rounded.
+            var distance = LenientDecimal(nav, "distanceM", 0, int.MaxValue, true);
+            long? eta = null;
+            var etaToken = Member(nav, "etaEpochS");
+            if (etaToken != null && etaToken.Type == JTokenType.Integer)
+            {
+                try
+                {
+                    var value = Convert.ToInt64(((JValue)etaToken).Value, CultureInfo.InvariantCulture);
+                    if (value >= 0) eta = value;
+                }
+                catch (OverflowException) { }
+            }
+            return new NavInfo
+            {
+                Maneuver = maneuver,
+                DistanceM = distance.HasValue ? (int?)Math.Round(distance.Value, MidpointRounding.AwayFromZero) : null,
+                Road = road,
+                EtaEpochS = eta,
+            };
+        }
+
+        private static Message DecodeArtwork(JObject o)
+        {
+            var mime = ReqString(o, "mime", 1, 255);
+            var data = ReqString(o, "base64", 1, int.MaxValue);
+            if (!ArtworkFormats.All.Contains(mime)) throw new ProtocolException("mime value " + mime + " is not image/jpeg or image/png");
+            byte[] bytes;
+            try
+            {
+                bytes = Convert.FromBase64String(data);
+            }
+            catch (FormatException)
+            {
+                throw new ProtocolException("base64 is not valid base64");
+            }
+            if (bytes.Length == 0) throw new ProtocolException("base64 holds no data");
+            return new ArtworkMessage { Mime = mime, Base64 = data, Bytes = bytes };
         }
 
         private static Message DecodeCommand(JObject o)
@@ -797,6 +990,20 @@ namespace RigPlayPlugin.Protocol
         public static bool IsOpusRate(int hz)
         {
             return hz == 8000 || hz == 12000 || hz == 16000 || hz == 24000 || hz == 48000;
+        }
+
+        private static Message DecodeMicStart(JObject o)
+        {
+            var m = new MicStartMessage
+            {
+                StreamType = (int)ReqInt(o, "streamType", AudioStreams.MicStreamType, AudioStreams.MicStreamType),
+                Format = ReqEnum(o, "format", AudioStreams.MicFormats),
+                SampleRate = (int)ReqInt(o, "sampleRate", 8000, 48000),
+                Channels = (int)ReqInt(o, "channels", 1, 1),
+                Port = (int)ReqInt(o, "port", 1, 65535),
+            };
+            if (m.SampleRate % 100 != 0) throw new ProtocolException("sampleRate must be a multiple of 100");
+            return m;
         }
 
         // Member readers. Each throws ProtocolException with the member name when the member breaks the rules.

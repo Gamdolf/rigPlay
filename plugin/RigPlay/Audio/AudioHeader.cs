@@ -17,8 +17,20 @@ namespace RigPlayPlugin.Audio
         Alt = 2,
         /// <summary>Calls.</summary>
         Telephony = 3,
-        /// <summary>Reserved for the PC microphone (protocol 1: never sent tablet to plugin).</summary>
+        /// <summary>The PC microphone (spec §10.4): flows plugin to tablet only, never tablet to plugin.</summary>
         Mic = 4,
+    }
+
+    /// <summary>
+    /// Which way a datagram flows (spec §10.2): the streamType decides it. Tablet to plugin carries media, alt and
+    /// telephony; plugin to tablet carries the microphone only.
+    /// </summary>
+    public enum AudioDirection
+    {
+        /// <summary>CarPlay audio the plugin receives: streamType 1-3.</summary>
+        TabletToPc = 0,
+        /// <summary>The PC microphone the tablet receives: streamType 4.</summary>
+        PcToTablet = 1,
     }
 
     /// <summary>The <c>format</c> header byte.</summary>
@@ -37,7 +49,7 @@ namespace RigPlayPlugin.Audio
         TooShort,
         /// <summary>streamType 0 or 5-255.</summary>
         InvalidStreamType,
-        /// <summary>streamType 4 (mic), reserved in protocol 1.</summary>
+        /// <summary>streamType 4 (mic) from a tablet: the microphone flows plugin to tablet only.</summary>
         ReservedStreamType,
         /// <summary>format 0 or 3-255.</summary>
         InvalidFormat,
@@ -51,6 +63,10 @@ namespace RigPlayPlugin.Audio
         PartialFrame,
         /// <summary>An opus payload that is not one Opus packet: longer than 1275 bytes or with a TOC that describes no frame.</summary>
         BadOpusPacket,
+        /// <summary>streamType 1-3 read as plugin to tablet: only the microphone flows that way.</summary>
+        WrongDirection,
+        /// <summary>format 2 (opus) on the microphone stream: the microphone is pcm_s16le only (§10.5).</summary>
+        ReservedFormat,
     }
 
     public struct AudioHeader
@@ -128,6 +144,16 @@ namespace RigPlayPlugin.Audio
         /// </summary>
         public static AudioHeaderError TryParse(byte[] data, int offset, int length, out AudioHeader header)
         {
+            return TryParse(data, offset, length, AudioDirection.TabletToPc, out header);
+        }
+
+        /// <summary>
+        /// As <see cref="TryParse(byte[], int, int, out AudioHeader)"/>, for a datagram flowing <paramref name="direction"/>:
+        /// tablet to plugin accepts streamType 1-3 (4 is <see cref="AudioHeaderError.ReservedStreamType"/>), plugin to
+        /// tablet accepts 4 only (1-3 are <see cref="AudioHeaderError.WrongDirection"/>).
+        /// </summary>
+        public static AudioHeaderError TryParse(byte[] data, int offset, int length, AudioDirection direction, out AudioHeader header)
+        {
             header = default(AudioHeader);
             if (data == null || length < Size || offset < 0 || offset + length > data.Length) return AudioHeaderError.TooShort;
 
@@ -140,10 +166,12 @@ namespace RigPlayPlugin.Audio
             header.Format = (AudioFormat)data[offset + 11];
 
             var type = data[offset + 2];
-            if (type == (byte)AudioStreamType.Mic) return AudioHeaderError.ReservedStreamType;
-            if (type < 1 || type > 3) return AudioHeaderError.InvalidStreamType;
+            if (type < 1 || type > 4) return AudioHeaderError.InvalidStreamType;
+            if (direction == AudioDirection.TabletToPc && type == (byte)AudioStreamType.Mic) return AudioHeaderError.ReservedStreamType;
+            if (direction == AudioDirection.PcToTablet && type != (byte)AudioStreamType.Mic) return AudioHeaderError.WrongDirection;
             var format = data[offset + 11];
             if (format != (byte)AudioFormat.PcmS16le && format != (byte)AudioFormat.Opus) return AudioHeaderError.InvalidFormat;
+            if (direction == AudioDirection.PcToTablet && format == (byte)AudioFormat.Opus) return AudioHeaderError.ReservedFormat;
             if (header.Channels != 1 && header.Channels != 2) return AudioHeaderError.InvalidChannels;
             if (header.SampleRateField < MinSampleRateField || header.SampleRateField > MaxSampleRateField) return AudioHeaderError.InvalidSampleRate;
 
@@ -161,6 +189,17 @@ namespace RigPlayPlugin.Audio
         public static AudioHeaderError TryParse(byte[] data, out AudioHeader header)
         {
             return TryParse(data, 0, data == null ? 0 : data.Length, out header);
+        }
+
+        public static AudioHeaderError TryParse(byte[] data, AudioDirection direction, out AudioHeader header)
+        {
+            return TryParse(data, 0, data == null ? 0 : data.Length, direction, out header);
+        }
+
+        /// <summary>The direction a fixture vector names ("tabletToPc", the default, or "pcToTablet").</summary>
+        public static AudioDirection ParseDirection(string name)
+        {
+            return name == "pcToTablet" ? AudioDirection.PcToTablet : AudioDirection.TabletToPc;
         }
 
         /// <summary>Writes the 12 header bytes at <paramref name="offset"/>.</summary>

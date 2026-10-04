@@ -80,6 +80,14 @@ without reconnecting the phone.
    any Wi-Fi network by hand. Keep Wi-Fi and Bluetooth on, on both devices. The tablet's home Wi-Fi stays
    connected.
 
+**Choosing the wireless mode** (**Settings → Open connection setup → 1 · Choose your connection**):
+**Wi-Fi Direct** and **Tablet hotspot** have the tablet create a network for the phone while it stays on
+the home Wi-Fi, which only works if its Wi-Fi chip can do both at once. **Existing Wi-Fi network
+(experimental)** creates nothing: the iPhone joins the home Wi-Fi the tablet is already on. Enter that
+network's name and password when you pick it; the iPhone must be able to join the same network. It is
+untested with iOS, so use it only if the other two modes fail on your tablet, and report the result. See
+[Compatibility → Tablets](COMPATIBILITY.md#tablets).
+
 Allow CarPlay on the iPhone when it asks. Once paired, the phone connects whenever the PC is running SimHub
 and the phone is near the tablet.
 
@@ -98,7 +106,16 @@ CarPlay audio (music, navigation, Siri and calls) is sent from the tablet to the
 - **Opus compression** on the rigPlay page is off by default: the tablet sends uncompressed audio, which a
   home network carries without trouble. Turn it on if the tablet is on a weak or shared Wi-Fi link and
   audio cuts out while the Audio section shows underruns; the tablet then sends about a tenth of the data.
-- The microphone for Siri and calls is the tablet's in v1.
+- The microphone for Siri and calls is the tablet's unless you choose the PC's, below.
+
+**Using the PC's microphone.** To have Siri and callers hear the rig's microphone instead of the tablet's,
+set **Settings → Microphone** on the tablet to **PC via SimHub**, and on the rigPlay page, under
+**Microphone**, leave **Microphone to the phone** on and pick the **Input device** (the Windows default
+recording device unless you choose another; the **Level** meter moves while you speak during a Siri request
+or a call). The tablet falls back to its own microphone whenever the PC is not linked, the switch is off or
+the PC has no input device. There is no echo cancellation on the PC: with speakers, callers can hear
+themselves (and Siri may hear its own voice), so use headphones or a headset with the PC microphone, or keep
+the speaker volume low.
 
 ## 8. Wheel buttons and dashboard data
 
@@ -118,6 +135,15 @@ The phone is connected only while the PC runs SimHub with the plugin.
 - When SimHub is back, the tablet reconnects to it and the phone rejoins by itself. You do not need to
   touch the tablet or the phone.
 - **Connect phone** still works while SimHub is down, with a warning. Audio then plays on the tablet.
+
+**Idle screen.** With no phone connected, the tablet shows the SimHub idle dashboard while the PC is on
+(**Settings → When no iPhone is connected → Show**), or the rigPlay screen (clock and PC name) when you pick
+it there or when the PC is off. If you are on the home page or in the settings at that moment, they stay on
+screen while you use them: the rigPlay screen takes over only after **Go idle after** (default 3 minutes)
+without a touch, and a tap on it brings you back to where you were. **Immediately** switches the moment the
+PC goes away instead, and leaves you alone once you tap back. CarPlay and a dashboard you opened yourself
+are never replaced. When the tablet starts with **Auto-start on boot**, rigPlay goes straight to the idle
+screen.
 
 ## Display and start-up settings
 

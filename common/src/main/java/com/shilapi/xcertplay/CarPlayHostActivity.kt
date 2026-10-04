@@ -84,6 +84,14 @@ import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
 import com.shilapi.xcertplay.orchestration.isManualHotspotChannelCompatible
 import com.shilapi.xcertplay.transport.Iap2IdentificationConfig
 import com.shilapi.xcertplay.transport.Iap2LocationProvider
+import com.shilapi.xcertplay.transport.VehicleSpeedLocationProvider
+import com.shilapi.xcertplay.simhub.SimHubEndpoints
+import com.shilapi.xcertplay.simhub.SimHubLocationProvider
+import com.shilapi.xcertplay.simhub.SimHubNightMode
+import com.shilapi.xcertplay.simhub.SimHubTelemetryStore
+import com.shilapi.xcertplay.simhub.SimHubVehicleSpeedSource
+import com.shilapi.xcertplay.simhub.SimHubVehicleStatusProvider
+import com.shilapi.xcertplay.transport.VehicleStatusProvider
 import com.shilapi.xcertplay.transport.UsbDeviceId
 import java.io.File
 import java.text.SimpleDateFormat
@@ -126,10 +134,11 @@ class CarPlayHostActivity : ComponentActivity() {
             firmwareVersion = appVersionName(),
             hardwareVersion = "1.0",
             carPlayUsbInterfaceNumber = 3,
-            locationInformationEnabled = locationReportingEnabled,
-            // v2: SimHub telemetry will provide vehicle status (battery/range) and wheel speed.
-            vehicleStatusEnabled = false,
-            vehicleSpeedEnabled = false,
+            locationInformationEnabled = locationReportingEnabled || simHubLocationSelected(),
+            // Fuel % and range from SimHub (#46); declared only once a reading exists (withVehicleStatusFrom).
+            vehicleStatusEnabled = AirPlayPersistence.loadSimHubVehicleStatus(this),
+            // Wheel speed ($PASCD, selector 20) from SimHub telemetry (#41).
+            vehicleSpeedEnabled = simHubLocationSelected(),
         ),
         label = "rigPlay",
         hostName = "rigplay-" + RigPlayBootstrap.deviceId(airPlayIdentity).replace(":", "").lowercase(),
@@ -142,8 +151,24 @@ class CarPlayHostActivity : ComponentActivity() {
         manualHotspotBand = manualHotspotBand,
         manualHotspotChannel = manualHotspotChannel,
         manualHotspotSecurity = manualHotspotSecurity,
-        locationReportingEnabled = locationReportingEnabled,
+        existingNetworkSsid = AirPlayPersistence.loadExistingNetworkSsid(this),
+        existingNetworkPassphrase = AirPlayPersistence.loadExistingNetworkPassphrase(this),
+        locationReportingEnabled = locationReportingEnabled || simHubLocationSelected(),
     )
+
+    /** Settings → Location source → SimHub (#41): position and wheel speed come from `telemetry`. */
+    private fun simHubLocationSelected(): Boolean =
+        AirPlayPersistence.loadLocationSource(this) == LocationSource.SIMHUB
+
+    /** #46: fuel and range from SimHub telemetry, when the setting is on. */
+    private fun simHubVehicleStatusProvider(config: CarPlayRuntimeConfig): VehicleStatusProvider? =
+        if (config.identification.vehicleStatusEnabled) SimHubVehicleStatusProvider(SimHubEndpoints.telemetry) else null
+
+    /** GGA/RMC from the game car's position plus `$PASCD` when the iPhone asks for wheel speed (#41). */
+    private fun simHubLocationProvider(): Iap2LocationProvider {
+        val telemetry = SimHubEndpoints.telemetry
+        return VehicleSpeedLocationProvider(SimHubLocationProvider(telemetry), SimHubVehicleSpeedSource(telemetry))
+    }
 
     private val vpnConsent =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -299,6 +324,11 @@ class CarPlayHostActivity : ComponentActivity() {
     private var darkMode = false
     private var lastConfiguration: Configuration? = null
     private var activeAirPlaySession: AirPlaySession? = null
+    private val simHubNight = SimHubNightMode()
+    private val simHubNightTick = Runnable { refreshSimHubNight() }
+    private val simHubNightStaleCheck = Runnable { refreshSimHubNight() }
+    // Link thread, up to 10 Hz: decide on the main thread.
+    private val simHubNightListener: (SimHubTelemetryStore.Sample) -> Unit = { mainHandler.post(simHubNightTick) }
     private val activeScreenStreamTypes = mutableSetOf<Int>()
     private var handshakeResetInProgress = false
     private var startAfterHandshakeReset = false
@@ -386,6 +416,7 @@ class CarPlayHostActivity : ComponentActivity() {
         initializeSessionLog()
         lastConfiguration = Configuration(resources.configuration)
         darkMode = nightModeOrNull(resources.configuration.uiMode) ?: false
+        SimHubEndpoints.telemetry.addListener(simHubNightListener)
         advancedAudioChannelMappingSupported =
             resources.getBoolean(R.bool.config_advanced_audio_channel_mapping)
         airPlayIdentity = AirPlayPersistence.loadIdentity(this)
@@ -605,6 +636,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        stopSimHubNight()
         mainHandler.removeCallbacks(applyDisplaySize)
         mainHandler.removeCallbacks(expireOldLogLines)
         mainHandler.removeCallbacks(pollConfiguration)
@@ -2153,6 +2185,7 @@ class CarPlayHostActivity : ComponentActivity() {
         WirelessHotspotMode.WIFI_P2P -> getString(R.string.wi_fi_p2p_5_ghz)
         WirelessHotspotMode.LOCAL_ONLY_HOTSPOT -> getString(R.string.localonlyhotspot)
         WirelessHotspotMode.MANUAL -> getString(R.string.manual_hotspot)
+        WirelessHotspotMode.EXISTING_NETWORK -> getString(R.string.wireless_mode_existing_network_short)
     }
 
     private fun menuText(
@@ -2451,6 +2484,8 @@ class CarPlayHostActivity : ComponentActivity() {
             decodeAirPlayIcon(customBytes)?.let { return it }
             AirPlayPersistence.clearCustomAirPlayIcon(this)
         }
+        // No icon chosen by the user: SimHub's own, fetched from the PC (#52), else the placeholder.
+        simHubAirPlayIconBytes()?.let { bytes -> decodeAirPlayIcon(bytes)?.let { return it } }
         return decodeAirPlayIcon(defaultAirPlayIconBytes())
             ?: throw IllegalStateException("Packaged AirPlay icon is invalid")
     }
@@ -2464,6 +2499,12 @@ class CarPlayHostActivity : ComponentActivity() {
             return null
         }
         return AirPlayIcon(bounds.outWidth, bounds.outHeight, encoded)
+    }
+
+    private fun simHubAirPlayIconBytes(): ByteArray? = try {
+        RigSessionCoordinator.simHubIconFile(this)?.readBytes()
+    } catch (_: Exception) {
+        null
     }
 
     private fun defaultAirPlayIconBytes(): ByteArray =
@@ -2480,10 +2521,18 @@ class CarPlayHostActivity : ComponentActivity() {
                 AirPlayPersistence.clearCustomAirPlayIcon(this)
             }
         }
-        val bitmap = customBitmap ?: BitmapFactory.decodeResource(resources, R.raw.placeholder_icon)
+        val simHubBitmap = if (customBitmap == null) {
+            RigSessionCoordinator.simHubIconFile(this)?.let { BitmapFactory.decodeFile(it.absolutePath) }
+        } else {
+            null
+        }
+        val bitmap = customBitmap ?: simHubBitmap ?: BitmapFactory.decodeResource(resources, R.raw.placeholder_icon)
         preview.setImageBitmap(bitmap)
-        iconStatusView?.text =
-            if (customBitmap != null) getString(R.string.custom_1_1_icon) else getString(R.string.default_placeholder_icon)
+        iconStatusView?.text = when {
+            customBitmap != null -> getString(R.string.custom_1_1_icon)
+            simHubBitmap != null -> getString(R.string.rig_simhub_carplay_icon)
+            else -> getString(R.string.default_placeholder_icon)
+        }
     }
 
     private fun currentActivitySize(): DisplaySize? {
@@ -2773,7 +2822,8 @@ class CarPlayHostActivity : ComponentActivity() {
         val locationProvider: Iap2LocationProvider? =
             when {
                 !config.locationReportingEnabled -> null
-                // v2: SimHub telemetry as the VehicleSpeedSource for VehicleSpeedLocationProvider.
+                // Same decision as the identification built above (SimHub declares wheel speed).
+                config.identification.vehicleSpeedEnabled -> simHubLocationProvider()
                 else -> AndroidCarPlayLocationProvider(this)
             }
         appendLog(
@@ -2837,8 +2887,7 @@ class CarPlayHostActivity : ComponentActivity() {
             savePairRecord = { record -> AirPlayPersistence.saveLockdownRecord(this, record) },
             clearPairRecord = { AirPlayPersistence.clearLockdownRecord(this) },
             locationProvider = locationProvider,
-            // v2: SimHub telemetry as the VehicleStatusProvider.
-            vehicleStatusProvider = null,
+            vehicleStatusProvider = simHubVehicleStatusProvider(config),
         )
         controller = next
         CarPlayMediaKeys.attach(this, next)
@@ -2873,9 +2922,34 @@ class CarPlayHostActivity : ComponentActivity() {
         syncAirPlayDarkMode()
     }
 
+    /**
+     * #45: SimHub's `night` (debounced, on change only) overrides the tablet's day/night while
+     * "Night mode from SimHub" is on; [syncAirPlayDarkMode] sends [SimHubNightMode.effective].
+     */
+    private fun refreshSimHubNight() {
+        val telemetry = SimHubEndpoints.telemetry
+        // Re-check once the stream would be stale, so a stopped game falls back to the tablet's mode.
+        mainHandler.removeCallbacks(simHubNightStaleCheck)
+        if (telemetry.fresh() != null) mainHandler.postDelayed(simHubNightStaleCheck, telemetry.staleAfterMillis + 100)
+        val changed = simHubNight.update(
+            enabled = AirPlayPersistence.loadNightFromSimHub(this),
+            night = telemetry.fresh()?.night,
+            androidNight = darkMode,
+            nowMillis = telemetry.nowMillis(),
+        ) ?: return
+        appendLog("SimHub switched CarPlay to ${if (changed) "night" else "day"} mode")
+        syncAirPlayDarkMode()
+    }
+
+    private fun stopSimHubNight() {
+        SimHubEndpoints.telemetry.removeListener(simHubNightListener)
+        mainHandler.removeCallbacks(simHubNightTick)
+        mainHandler.removeCallbacks(simHubNightStaleCheck)
+    }
+
     private fun syncAirPlayDarkMode() {
         val session = activeAirPlaySession ?: return
-        val night = darkMode
+        val night = simHubNight.effective(darkMode)
         airPlayCommandExecutor.execute {
             try {
                 val sent = session.setNightMode(night)

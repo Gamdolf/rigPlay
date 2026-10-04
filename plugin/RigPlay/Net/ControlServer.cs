@@ -90,6 +90,9 @@ namespace RigPlayPlugin.Net
         public event Action<ClientSession, StatusMessage> StatusReceived;
         public event Action<ClientSession, AudioStartMessage> AudioStartReceived;
         public event Action<ClientSession, AudioStopMessage> AudioStopReceived;
+        public event Action<ClientSession, ArtworkMessage> ArtworkReceived;
+        public event Action<ClientSession, MicStartMessage> MicStartReceived;
+        public event Action<ClientSession, MicStopMessage> MicStopReceived;
 
         /// <summary>Starts listening. False (with Status.Error set) when the port cannot be bound.</summary>
         public bool Start()
@@ -268,11 +271,35 @@ namespace RigPlayPlugin.Net
                         try { startHandler(session, start); } catch (Exception ex) { PluginLog.Error("An audioStart handler failed", ex); }
                     }
                     break;
+                case ArtworkMessage artwork:
+                    session.LastArtwork = artwork;
+                    PluginLog.Debug(session + ": artwork " + (artwork.Mime + ", " + artwork.Bytes.Length + " bytes"));
+                    var artworkHandler = ArtworkReceived;
+                    if (artworkHandler != null)
+                    {
+                        try { artworkHandler(session, artwork); } catch (Exception ex) { PluginLog.Error("An artwork handler failed", ex); }
+                    }
+                    RaiseChanged();
+                    break;
                 case AudioStopMessage stop:
                     var stopHandler = AudioStopReceived;
                     if (stopHandler != null)
                     {
                         try { stopHandler(session, stop); } catch (Exception ex) { PluginLog.Error("An audioStop handler failed", ex); }
+                    }
+                    break;
+                case MicStartMessage micStart:
+                    var micStartHandler = MicStartReceived;
+                    if (micStartHandler != null)
+                    {
+                        try { micStartHandler(session, micStart); } catch (Exception ex) { PluginLog.Error("A micStart handler failed", ex); }
+                    }
+                    break;
+                case MicStopMessage micStop:
+                    var micStopHandler = MicStopReceived;
+                    if (micStopHandler != null)
+                    {
+                        try { micStopHandler(session, micStop); } catch (Exception ex) { PluginLog.Error("A micStop handler failed", ex); }
                     }
                     break;
             }

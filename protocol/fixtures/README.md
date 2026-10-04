@@ -29,15 +29,16 @@ either test. A change to a message in the spec changes its fixture in the same c
 | `pairRequest` | `pairRequest.json` (Start), `pairRequest.pin.json`, `pairRequest.token.json` |
 | `pairResult` | `pairResult.json` (ok), `pairResult.pinRequired.json`, `pairResult.wrongPin.json`, `pairResult.denied.json`, `pairResult.tokenInvalid.json` |
 | `heartbeat` | `heartbeat.json` |
-| `state` | `state.json`, `state.minimal.json` (required members only), `state.serverDown.json`, `state.opus.json` (Opus preferred) |
-| `status` | `status.json`, `status.idle.json` (no phone), `status.liveStream.json` (null duration) |
+| `state` | `state.json`, `state.minimal.json` (required members only), `state.serverDown.json`, `state.opus.json` (Opus preferred), `state.mic.json` (PC microphone available) |
+| `status` | `status.json`, `status.idle.json` (no phone), `status.liveStream.json` (null duration), `status.nav.json` (route guidance) |
 | `command` | `command.json` (media next), `command.playPause.json`, `command.previous.json`, `command.siri.json`, `command.showDashboard.json`, `command.showCarPlay.json` |
 | `telemetry` | `telemetry.json` (every field), `telemetry.partial.json` (absent and null fields) |
 | `error` | `error.json` (unsupportedProtocol), `error.notPaired.json`, `error.shutdown.json` |
 | `audioStart` | `audioStart.json` (media 48 kHz stereo), `audioStart.telephony.json` (16 kHz mono), `audioStart.opus.json` (Opus) |
 | `audioStop` | `audioStop.json` |
-
-`micStart` and `micStop` are reserved and have no fixtures.
+| `artwork` | `artwork.json` (a tiny JPEG) |
+| `micStart` | `micStart.json` (16 kHz mono to port 23713) |
+| `micStop` | `micStop.json` |
 
 ## Audio header vectors (`audio-header.json`)
 
@@ -54,6 +55,10 @@ tests read it.
   exactly `datagramHex`, decode it back to the same fields and payload, and derive `frames` from the
   packet without an Opus decoder.
 - `invalid[]`: each entry has a `datagramHex` and a `reason`. A test MUST reject each one.
+- `direction` (optional on every entry): `tabletToPc` (the default) for datagrams a plugin receives, which
+  carry `streamType` 1–3; `pcToTablet` for datagrams a tablet receives on its microphone port, which carry
+  `streamType` 4 only (spec §10.4). A test decodes each vector in its direction: `streamType-mic-from-tablet`
+  and `media-to-tablet` are the same kind of header read the wrong way.
 - Header fields are big-endian; the PCM payload is little-endian. `media-44k1-midstream` exists to
   catch a codec that gets the header byte order wrong.
 
@@ -87,6 +92,15 @@ the line and keeps going, as in spec §14.2. `truncated.json` is deliberately no
 | `audioStart-unknown-stream.json` | `stream` value `navigation` is not defined. | §6.11 |
 | `audioStart-sampleRate-22050.json` | `sampleRate` must be a multiple of 100. | §6.11 |
 | `error-missing-code.json` | Required `code` missing. | §6.10 |
+| `artwork-mime-without-base64.json` | Required `base64` is `null`. | §6.14 |
+| `micStart-streamType-media.json` | `streamType` must be 4 (`mic`). | §6.13 |
+| `micStart-stereo.json` | `channels` must be 1: the microphone is mono. | §6.13 |
+| `micStart-format-opus.json` | `format` must be `pcm_s16le`: the microphone is PCM only; Opus flows tablet → plugin. | §6.13, §10.5 |
+| `micStart-missing-port.json` | Required `port` missing. | §6.13 |
+| `micStart-sampleRate-11025.json` | `sampleRate` must be a multiple of 100. | §6.13 |
+| `micStop-missing-streamType.json` | Required `streamType` missing. | §6.13 |
+| `state-mic-enabled-string.json` | `mic.enabled` must be a boolean. | §6.6 |
 
 There is no invalid `telemetry` sample: telemetry is validated field by field and a bad field becomes
-`null` rather than rejecting the message (§6.9).
+`null` rather than rejecting the message (§6.9). The plugin is also lenient with `status.nav` (§6.7.1), so
+there is no invalid `nav` sample.

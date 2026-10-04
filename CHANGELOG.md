@@ -10,6 +10,22 @@
   faster instead of skipping, and only skips a full second above the target. A pause on the phone no
   longer counts as a stall. The page shows the longest stall per stream, and the tablet logs every 10 s
   whether its Wi-Fi held the datagrams back or it produced them late.
+- Idle dashboard (v2): the plugin's "Idle dashboard" selector pushes a dashboard the tablet shows while
+  no iPhone is connected, with a built-in offline idle screen when the PC is off and after a period of
+  inactivity (#38, #39, #53).
+- Data to CarPlay (v2): SimHub telemetry goes to the phone as the car's position, speed, heading,
+  gear, night mode and vehicle status, at up to 10 Hz with per-field switches; the position comes from
+  one of three fake-GPS strategies (fixed origin, dead reckoning, or the real circuit via the shipped
+  track table and a recorded lap), chosen in the "Data to CarPlay" section and off by default
+  (#40–#46). Route guidance and now-playing artwork are exposed as SimHub properties (#47).
+- Microphone to the phone (v2): with the tablet's Microphone setting on "PC via SimHub", Siri and
+  callers hear the PC's input device chosen in the Microphone section (#34), with an automatic boost
+  (on by default, up to +20 dB, cap adjustable 0–30 dB; or a fixed boost with Automatic off) so your
+  voice reaches a level Siri hears well; the level meter shows the boost in effect.
+- Dashboard screen: SimHub's web dash toolbar and swipe help are hidden, so the dashboard fills
+  the tablet without tapping Fullscreen (#50); the page loads as soon as SimHub names a dashboard and
+  stays loaded between opens (#51); SimHub's own icon is used on the SimHub button and the CarPlay
+  car icon, fetched once from the web dash server (#52).
 
 # rigPlay 0.2.0-rc.1 — 2026-10-03
 

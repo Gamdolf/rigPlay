@@ -6,6 +6,10 @@ The report includes:
 
 | Field or event | Meaning |
 | --- | --- |
+| `mode`, `iface`, `channel`, `frequency` | Repeated on every startup line: the wireless mode (`WIFI_P2P`, `LOCAL_ONLY_HOTSPOT`, `MANUAL` for the tablet hotspot, `EXISTING_NETWORK`), the interface the iPhone reaches rigPlay on, and the channel handed to it (0 when Android did not expose one). |
+| `networkNameReadable` | Existing-network mode only: whether Android exposed the Wi-Fi name (`false` without the Location permission on Android 10+, in which case the name typed in Settings was used). `not_applicable` when rigPlay creates the network. The SSID itself is never logged. |
+| `wireless radio` | Logged once per start: `p2pSupported`, `staApConcurrency` (Android 11+), `staLocalOnlyConcurrency` (Android 12+) and `band5GHz` as Android reports them, or `unknown`. |
+| `Existing network` | Existing-network mode: station interface, address family, channel, whether the network name and router address were readable, and the security type. `station=lost` in later samples means the home Wi-Fi dropped. |
 | `authenticated`, `wifiConfigs`, `startRequests` | Completed Bluetooth authentication and sent Wi-Fi/start-session messages. Sending does not prove the iPhone accepted the configuration. |
 | `ipv4Usable`, `ipv6LinkLocal`, `ipv6Scoped` | Addresses currently available on the hotspot interface; address literals are omitted. |
 | `wireless endpoint` | Address count, chosen family, actual listener port, channel and security sent in the wireless start request. |
@@ -30,6 +34,6 @@ The report includes:
 
 Wireless CarPlay's local Wi-Fi transport can coexist with cellular internet. A missing Wi-Fi indicator/checkmark is not proof of failed association, and manually joining the hotspot is not required for normal CarPlay.
 
-The public Android P2P client list may omit legacy Wi-Fi stations. Therefore the report explicitly keeps `association=unknown` and `legacyClients=not_exposed`, even when the list is empty. Manual and local-only hotspots report `association=not_exposed`. Conclusive association or raw multicast diagnosis may still need device-side AP diagnostics or a packet capture supplied separately; this logger does not claim to capture packets.
+The public Android P2P client list may omit legacy Wi-Fi stations. Therefore the report explicitly keeps `association=unknown` and `legacyClients=not_exposed`, even when the list is empty. Manual and local-only hotspots report `association=not_exposed`; so does existing-network mode, where the iPhone associates with the router rather than with the tablet. Conclusive association or raw multicast diagnosis may still need device-side AP diagnostics or a packet capture supplied separately; this logger does not claim to capture packets.
 
 All new report events use counts, fixed categories and exception classes. The existing credential/payload redaction remains enabled.

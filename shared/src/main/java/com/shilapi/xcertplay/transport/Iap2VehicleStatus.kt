@@ -49,6 +49,11 @@ object Iap2VehicleStatus {
     const val STOP_VEHICLE_STATUS_UPDATES = 0xA102
     const val UPDATE_INTERVAL_MILLIS = 30_000L
 
+    // Open question (#46): the only EngineType value this codebase knows is 2 (electric), and nothing in
+    // it says which values mean gasoline, diesel or hybrid, so a fuel car (the SimHub rig) is declared as
+    // an EV. Before adding other values, confirm them against Apple's iAP2 spec (VehicleInformation,
+    // EngineType) and check on an iPhone that Maps accepts them, and what it shows with only the
+    // non-electric Range/RangeWarning fields of group 21. Until then the vehicle plane stays opt-in.
     private const val ENGINE_TYPE_ELECTRIC = 2
 
     /** IdentificationInformation params 20 (VehicleInformation) and 21 (VehicleStatus). */

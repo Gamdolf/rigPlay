@@ -80,7 +80,7 @@ class SimHubLinkAudioTransportTest {
         assertTrue(transport.sendDatagram(padded, datagram.size))
         val packet = DatagramPacket(ByteArray(2048), 2048)
         receiver.receive(packet)
-        val received = SimHubAudioCodec.decode(packet.data, 0, packet.length)
+        val received = SimHubAudioCodec.decode(packet.data, AudioDirection.TABLET_TO_PC, 0, packet.length)
         assertNotNull(received)
         assertEquals(header, received!!.header)
         assertEquals(960, received.payload.size)

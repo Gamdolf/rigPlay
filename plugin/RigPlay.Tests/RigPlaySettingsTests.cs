@@ -168,6 +168,21 @@ namespace RigPlayPlugin.Tests
             Assert.Equal(expected, new RigPlaySettings { Volume = volume }.Normalize().Volume);
         }
 
+        [Theory]
+        [InlineData(-5, 0)]
+        [InlineData(0, 0)]
+        [InlineData(12, 12)]
+        [InlineData(30, 30)]
+        [InlineData(99, 30)]
+        public void TheMicrophoneBoostIsClampedToZeroToThirtyDecibels(int boost, int expected)
+        {
+            Assert.Equal(expected, new RigPlaySettings { MicBoostDb = boost }.Normalize().MicBoostDb);
+            var defaults = new RigPlaySettings();
+            Assert.Equal(RigPlayPlugin.Audio.MicGainControl.DefaultBoostDb, defaults.MicBoostDb);
+            Assert.Equal(20, defaults.MicBoostDb);
+            Assert.True(defaults.MicAutoBoost);
+        }
+
         [Fact]
         public void NullStringsBecomeEmptyAndNamesAreTrimmed()
         {

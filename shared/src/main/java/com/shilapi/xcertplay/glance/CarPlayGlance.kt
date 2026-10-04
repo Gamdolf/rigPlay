@@ -3,6 +3,7 @@ package com.shilapi.xcertplay.glance
 import com.shilapi.xcertplay.guidance.NowPlayingSongState
 import com.shilapi.xcertplay.guidance.RouteGuidanceState
 import com.shilapi.xcertplay.iap2.wire.Iap2Frame
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * What CarPlay is doing, at a glance, for widgets and other screens outside CarPlay: the next
@@ -32,10 +33,26 @@ object CarPlayGlance {
     /** Called with each new snapshot, on the thread that changed it. */
     @Volatile var listener: ((Snapshot) -> Unit)? = null
 
+    private val listeners = CopyOnWriteArrayList<(Snapshot) -> Unit>()
+
+    /** Further observers besides [listener] (the widget's), e.g. `status.nav` for SimHub (#47). */
+    fun addListener(observer: (Snapshot) -> Unit) {
+        listeners.add(observer)
+    }
+
+    fun removeListener(observer: (Snapshot) -> Unit) {
+        listeners.remove(observer)
+    }
+
+    private fun notifyListeners(snapshot: Snapshot) {
+        listener?.invoke(snapshot)
+        for (observer in listeners) observer(snapshot)
+    }
+
     /** Refresh time-dependent guidance even when no new metadata frame has arrived. */
     fun snapshot(): Snapshot {
         val (changed, current) = synchronized(this) { publishLocked() to last }
-        changed?.let { listener?.invoke(it) }
+        changed?.let(::notifyListeners)
         return current
     }
 
@@ -49,7 +66,7 @@ object CarPlayGlance {
             }
             publishLocked()
         }
-        changed?.let { listener?.invoke(it) }
+        changed?.let(::notifyListeners)
     }
 
     fun setConnected(next: Boolean) {
@@ -62,7 +79,7 @@ object CarPlayGlance {
             }
             publishLocked()
         }
-        changed?.let { listener?.invoke(it) }
+        changed?.let(::notifyListeners)
     }
 
     private fun publishLocked(): Snapshot? {

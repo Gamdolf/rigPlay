@@ -49,6 +49,8 @@ object AirPlayPersistence {
     private const val KEY_WIRELESS_HOTSPOT_MODE = "wireless_hotspot_mode"
     private const val KEY_MANUAL_HOTSPOT_SSID = "manual_hotspot_ssid"
     private const val KEY_MANUAL_HOTSPOT_PASSPHRASE = "manual_hotspot_passphrase"
+    private const val KEY_EXISTING_NETWORK_SSID = "existing_network_ssid"
+    private const val KEY_EXISTING_NETWORK_PASSPHRASE = "existing_network_passphrase"
     private const val KEY_MANUAL_HOTSPOT_BAND = "manual_hotspot_band"
     private const val KEY_MANUAL_HOTSPOT_CHANNEL = "manual_hotspot_channel"
     private const val KEY_MANUAL_HOTSPOT_SECURITY = "manual_hotspot_security"
@@ -68,7 +70,11 @@ object AirPlayPersistence {
     private const val KEY_SAFE_AREA_DRAW_OUTSIDE = "safe_area_draw_outside"
     private const val KEY_AUTO_START_ON_BOOT = "auto_start_on_boot"
     private const val KEY_LOCATION_REPORTING_ENABLED = "location_reporting_enabled"
+    private const val KEY_LOCATION_SOURCE = "location_source"
+    private const val KEY_NIGHT_FROM_SIMHUB = "night_from_simhub"
+    private const val KEY_SIMHUB_VEHICLE_STATUS = "simhub_vehicle_status"
     private const val KEY_AUDIO_OUTPUT_TARGET = "audio_output_target"
+    private const val KEY_MIC_SOURCE = "mic_source"
     private const val KEY_SIMHUB_HOST_ID = "simhub_host_id"
     private const val KEY_SIMHUB_HOST = "simhub_host"
     private const val KEY_SIMHUB_PORT = "simhub_port"
@@ -77,6 +83,9 @@ object AirPlayPersistence {
     private const val KEY_SIMHUB_CONTROL_PORT = "simhub_control_port"
     private const val KEY_SIMHUB_DISCOVERY_PORT = "simhub_discovery_port"
     private const val KEY_SIMHUB_TABLET_ID = "simhub_tablet_id"
+    private const val KEY_IDLE_MODE = "idle_mode"
+    private const val KEY_IDLE_SCREEN_OFF_MINUTES = "idle_screen_off_minutes"
+    private const val KEY_IDLE_AFTER_MINUTES = "idle_after_minutes"
     private const val SAFE_AREA_KEY_PREFIX = "safe_area_"
     private const val CUSTOM_ICON_FILE = "airplay-icon.png"
 
@@ -168,6 +177,18 @@ object AirPlayPersistence {
             .apply()
     }
 
+    /** Where the phone's microphone comes from (#34); the tablet's own by default. */
+    fun loadMicrophoneSource(context: Context): com.shilapi.xcertplay.media.MicrophoneSource =
+        com.shilapi.xcertplay.media.MicrophoneSource.fromKey(
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_MIC_SOURCE, null),
+        )
+
+    fun saveMicrophoneSource(context: Context, source: com.shilapi.xcertplay.media.MicrophoneSource) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_MIC_SOURCE, source.key)
+            .apply()
+    }
+
     fun loadMediaAudioChannel(context: Context): Int =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getInt(KEY_MEDIA_AUDIO_CHANNEL, 0)
@@ -240,6 +261,30 @@ object AirPlayPersistence {
     fun saveManualHotspotPassphrase(context: Context, passphrase: String) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(KEY_MANUAL_HOTSPOT_PASSPHRASE, passphrase)
+            .apply()
+    }
+
+    /** Existing Wi-Fi network mode (#33): kept apart from the tablet-hotspot details so switching keeps both. */
+    fun loadExistingNetworkSsid(context: Context): String =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_EXISTING_NETWORK_SSID, null)
+            .orEmpty()
+
+    fun saveExistingNetworkSsid(context: Context, ssid: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_EXISTING_NETWORK_SSID, ssid)
+            .apply()
+    }
+
+    /** The home Wi-Fi password, handed to the iPhone over iAP2 only; never logged. */
+    fun loadExistingNetworkPassphrase(context: Context): String =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_EXISTING_NETWORK_PASSPHRASE, null)
+            .orEmpty()
+
+    fun saveExistingNetworkPassphrase(context: Context, passphrase: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_EXISTING_NETWORK_PASSPHRASE, passphrase)
             .apply()
     }
 
@@ -393,6 +438,41 @@ object AirPlayPersistence {
 
     private fun sanitizePort(port: Int, fallback: Int): Int = if (port in 1..65535) port else fallback
 
+    /** Settings → "When no iPhone is connected" (#39). */
+    fun loadIdleMode(context: Context): IdleMode = IdleMode.fromKey(
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_IDLE_MODE, null),
+    )
+
+    fun saveIdleMode(context: Context, mode: IdleMode) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_IDLE_MODE, mode.key)
+            .apply()
+    }
+
+    /** Minutes before the rigPlay idle screen goes dark; 0 = never (#39). */
+    fun loadIdleScreenOffMinutes(context: Context): Int = IdleScreenOff.sanitize(
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt(KEY_IDLE_SCREEN_OFF_MINUTES, IdleScreenOff.DEFAULT),
+    )
+
+    fun saveIdleScreenOffMinutes(context: Context, minutes: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_IDLE_SCREEN_OFF_MINUTES, IdleScreenOff.sanitize(minutes))
+            .apply()
+    }
+
+    /** Minutes without a touch before the rigPlay idle screen takes over the home page; 0 = immediately (#53). */
+    fun loadIdleAfterMinutes(context: Context): Int = IdleAfter.sanitize(
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt(KEY_IDLE_AFTER_MINUTES, IdleAfter.DEFAULT),
+    )
+
+    fun saveIdleAfterMinutes(context: Context, minutes: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_IDLE_AFTER_MINUTES, IdleAfter.sanitize(minutes))
+            .apply()
+    }
+
     fun loadLocationReportingEnabled(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean(KEY_LOCATION_REPORTING_ENABLED, false)
@@ -400,6 +480,53 @@ object AirPlayPersistence {
     fun saveLocationReportingEnabled(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_LOCATION_REPORTING_ENABLED, enabled)
+            .apply()
+    }
+
+    /**
+     * Where CarPlay's position comes from (#41). "This tablet" stays stored as
+     * [KEY_LOCATION_REPORTING_ENABLED], which the permission flows clear when precise location is denied,
+     * so only the SimHub choice needs its own key.
+     */
+    fun loadLocationSource(context: Context): LocationSource {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (LocationSource.fromKey(prefs.getString(KEY_LOCATION_SOURCE, null)) == LocationSource.SIMHUB) {
+            return LocationSource.SIMHUB
+        }
+        return if (prefs.getBoolean(KEY_LOCATION_REPORTING_ENABLED, false)) LocationSource.TABLET else LocationSource.NONE
+    }
+
+    fun saveLocationSource(context: Context, source: LocationSource) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_LOCATION_SOURCE, source.key)
+            .putBoolean(KEY_LOCATION_REPORTING_ENABLED, source == LocationSource.TABLET)
+            .apply()
+    }
+
+    /** "Night mode from SimHub" (#45); until chosen, on exactly when the location source is SimHub. */
+    fun loadNightFromSimHub(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return if (prefs.contains(KEY_NIGHT_FROM_SIMHUB)) {
+            prefs.getBoolean(KEY_NIGHT_FROM_SIMHUB, false)
+        } else {
+            loadLocationSource(context) == LocationSource.SIMHUB
+        }
+    }
+
+    fun saveNightFromSimHub(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_NIGHT_FROM_SIMHUB, enabled)
+            .apply()
+    }
+
+    /** "Fuel and range to CarPlay" (#46). Off by default: CarPlay is told the rig is an electric car. */
+    fun loadSimHubVehicleStatus(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_SIMHUB_VEHICLE_STATUS, false)
+
+    fun saveSimHubVehicleStatus(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_SIMHUB_VEHICLE_STATUS, enabled)
             .apply()
     }
 
