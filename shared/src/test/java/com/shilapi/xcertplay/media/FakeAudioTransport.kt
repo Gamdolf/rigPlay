@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.media
 
 import com.shilapi.xcertplay.simhub.AudioDatagram
+import com.shilapi.xcertplay.simhub.AudioDirection
 import com.shilapi.xcertplay.simhub.AudioFormat as WireFormat
 import com.shilapi.xcertplay.simhub.AudioStream
 import com.shilapi.xcertplay.simhub.SimHubAudioCodec
@@ -40,7 +41,7 @@ class FakeAudioTransport : SimHubAudioTransport {
     }
 
     override fun sendDatagram(bytes: ByteArray, length: Int): Boolean {
-        val decoded = SimHubAudioCodec.decode(bytes, 0, length) ?: error("sender produced an invalid datagram")
+        val decoded = SimHubAudioCodec.decode(bytes, AudioDirection.TABLET_TO_PC, 0, length) ?: error("sender produced an invalid datagram")
         events.add(Event.Datagram(decoded))
         return true
     }

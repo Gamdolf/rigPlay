@@ -25,7 +25,7 @@ namespace RigPlayPlugin.Tests.Audio
 
         private AudioReceiver NewReceiver(bool opus)
         {
-            return new AudioReceiver(0, sink, 20, 200, () => 1000) { OpusEnabled = opus };
+            return new AudioReceiver(0, sink, 20, 200, 180, () => 1000) { OpusEnabled = opus };
         }
 
         /// <summary>Sends <paramref name="packets"/> 20 ms Opus packets of a 440 Hz tone (or silence) at the rate, as the tablet would.</summary>

@@ -5,6 +5,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -42,9 +43,10 @@ namespace RigPlayPlugin.Tests.Audio
         private long now = 1000;
         private readonly FakeSink sink = new FakeSink();
 
+        /// <summary>Target 20 ms, learning up to 200 ms, skip-ahead 180 ms above the target (200 ms at the start).</summary>
         private AudioReceiver NewReceiver()
         {
-            return new AudioReceiver(0, sink, 20, 200, () => now);
+            return new AudioReceiver(0, sink, 20, 200, 180, () => now);
         }
 
         private static byte[] Datagram(AudioStreamType type, int seq, bool start, int rate = 48000, int channels = 2, int frames = 240)
@@ -221,7 +223,8 @@ namespace RigPlayPlugin.Tests.Audio
             Assert.True(media.BufferMs > 0);
             Assert.Equal(20, media.TargetMs, 6);
             Assert.Equal(0, media.Underruns);
-            Assert.True(media.Skips >= 1); // nothing pulled the 500 ms pushed: the buffer passed its 200 ms maximum
+            Assert.True(media.Skips >= 1); // nothing pulled the 500 ms pushed: the buffer passed its 200 ms skip ceiling
+            Assert.Equal(0, media.LongestStallMs, 6);
             Assert.Equal("48 kHz stereo pcm_s16le", media.FormatText);
             Assert.False(stats.Find(AudioStreamType.Alt).Started);
             Assert.Equal("stopped", stats.Find(AudioStreamType.Telephony).ToDisplayString());
@@ -230,28 +233,73 @@ namespace RigPlayPlugin.Tests.Audio
         [Fact]
         public void ARestartedStreamStartsFromTheTargetTheLastOneLearned()
         {
-            var r = NewReceiver(); // target 20 ms, max 200 ms
+            var r = NewReceiver(); // target 20 ms, learning up to 200 ms
+            var learned = new List<double>();
+            r.TargetLearned += learned.Add;
             r.OnAudioStart("media", "pcm_s16le", 48000, 2);
             for (var i = 0; i < 5; i++) Feed(r, Datagram(AudioStreamType.Media, i, i == 0));
             var first = r.GetStream(AudioStreamType.Media).Buffer;
             Assert.True(first.IsPlaying);
-            first.Read(new byte[48000 * 4], 0, 48000 * 4); // a second of play-out: underrun, the target grows to 30 ms
+            // A 100 ms stall: the 25 ms of audio held (five datagrams) drained and 75 ms of silence followed.
+            first.Read(new byte[4800 * 4], 0, 4800 * 4);
             Assert.Equal(1, first.Counters.Underruns);
-            Assert.Equal(30, first.TargetMs, 6);
+            for (var i = 5; i < 30; i++) Feed(r, Datagram(AudioStreamType.Media, i, false));
+            Assert.True(first.IsPlaying);
+            // The target becomes a quarter more than the 100 ms stall.
+            Assert.Equal(125, first.TargetMs, 2);
+            r.Tick(now);
+            Assert.Equal(new[] { 125.0 }, learned.Select(l => Math.Round(l, 2)));
+            Assert.Equal(125, r.LearnedTargetMs, 2);
 
             // The tablet stops the stream (a pause longer than its idle timeout) and starts it again, at another rate.
             r.OnAudioStop("media");
             r.OnAudioStart("media", "pcm_s16le", 44100, 2);
             var second = r.GetStream(AudioStreamType.Media).Buffer;
             Assert.NotSame(first, second);
-            Assert.Equal(30, second.TargetMs, 6);
+            Assert.InRange(second.TargetMs, 124.9, 125); // 44.1 kHz rounds to whole frames
             Assert.Equal(0, second.Counters.Underruns);
 
-            // A restart with a new format (audioStart while started) keeps it as well; another type starts fresh.
+            // A restart with a new format (audioStart while started) keeps it as well, and so does another type:
+            // the network is the same for every stream.
             r.OnAudioStart("media", "pcm_s16le", 48000, 1);
-            Assert.Equal(30, r.GetStream(AudioStreamType.Media).Buffer.TargetMs, 6);
+            Assert.InRange(r.GetStream(AudioStreamType.Media).Buffer.TargetMs, 124.9, 125);
             r.OnAudioStart("alt", "pcm_s16le", 24000, 1);
-            Assert.Equal(20, r.GetStream(AudioStreamType.Alt).Buffer.TargetMs, 6);
+            Assert.InRange(r.GetStream(AudioStreamType.Alt).Buffer.TargetMs, 124.9, 125);
+
+            // Forgetting puts the streams back to the minimum, the playing ones included.
+            r.ForgetLearnedTarget();
+            Assert.Equal(0, r.LearnedTargetMs);
+            Assert.Equal(20, r.GetStream(AudioStreamType.Media).Buffer.TargetMs, 6);
+            r.OnAudioStart("telephony", "pcm_s16le", 16000, 1);
+            Assert.Equal(20, r.GetStream(AudioStreamType.Telephony).Buffer.TargetMs, 6);
+        }
+
+        [Fact]
+        public void TheLearnedDepthIsSeededFromTheLastRunUnderEachStreamsCap()
+        {
+            var r = new AudioReceiver(0, sink, 80, 2000, 1000, () => now);
+            r.InheritLearnedTarget(1800);
+            Assert.Equal(1800, r.LearnedTargetMs);
+            r.OnAudioStart("media", "pcm_s16le", 48000, 2);
+            r.OnAudioStart("alt", "pcm_s16le", 24000, 1);
+            r.OnAudioStart("telephony", "pcm_s16le", 16000, 1);
+            Assert.Equal(1800, r.GetStream(AudioStreamType.Media).Buffer.TargetMs, 6);
+            Assert.Equal(AudioReceiver.AltMaxTargetMs, r.GetStream(AudioStreamType.Alt).Buffer.TargetMs, 6);
+            Assert.Equal(AudioReceiver.TelephonyMaxTargetMs, r.GetStream(AudioStreamType.Telephony).Buffer.TargetMs, 6);
+
+            // Seeding never lowers, and what was seeded is not reported as newly learned.
+            var learned = new List<double>();
+            r.TargetLearned += learned.Add;
+            r.InheritLearnedTarget(500);
+            Assert.Equal(1800, r.LearnedTargetMs);
+            r.Tick(now);
+            Assert.Empty(learned);
+
+            // The minimum from the settings applies to streams started afterwards.
+            r.SetTargetMs(120);
+            r.ForgetLearnedTarget();
+            r.OnAudioStart("media", "pcm_s16le", 48000, 2);
+            Assert.Equal(120, r.GetStream(AudioStreamType.Media).Buffer.TargetMs, 6);
         }
 
         [Fact]

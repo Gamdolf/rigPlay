@@ -59,15 +59,21 @@ namespace RigPlayPlugin.Tests.Audio
             return Fixture.Value[section].Single(v => (string)v["name"] == name);
         }
 
+        /// <summary>The vector's direction (fixtures README): tablet to plugin unless it says pcToTablet.</summary>
+        private static AudioDirection DirectionOf(JToken vector)
+        {
+            return AudioHeader.ParseDirection((string)vector["direction"]);
+        }
+
         [Fact]
         public void FixtureDescribesTheSameLayout()
         {
             Assert.Equal(AudioHeader.Size, (int)Fixture.Value["headerSize"]);
             Assert.Equal("big-endian", (string)Fixture.Value["byteOrder"]["header"]);
             Assert.Equal("little-endian", (string)Fixture.Value["byteOrder"]["payload"]);
-            Assert.Equal(4, Fixture.Value["valid"].Count());
+            Assert.Equal(6, Fixture.Value["valid"].Count());
             Assert.Equal(4, Fixture.Value["opus"].Count());
-            Assert.Equal(13, Fixture.Value["invalid"].Count());
+            Assert.Equal(15, Fixture.Value["invalid"].Count());
         }
 
         [Theory]
@@ -79,7 +85,7 @@ namespace RigPlayPlugin.Tests.Audio
             var datagram = Hex((string)v["datagramHex"]);
 
             AudioHeader header;
-            Assert.Equal(AudioHeaderError.Ok, AudioHeader.TryParse(datagram, out header));
+            Assert.Equal(AudioHeaderError.Ok, AudioHeader.TryParse(datagram, DirectionOf(v), out header));
             Assert.Equal((int)h["seq"], header.Seq);
             Assert.Equal((int)h["streamType"], (int)header.StreamType);
             Assert.Equal((string)h["stream"], AudioHeader.StreamName(header.StreamType));
@@ -174,9 +180,10 @@ namespace RigPlayPlugin.Tests.Audio
         [MemberData(nameof(ValidNames))]
         public void DecodeThenEncodeIsIdentity(string name)
         {
-            var datagram = Hex((string)Vector("valid", name)["datagramHex"]);
+            var v = Vector("valid", name);
+            var datagram = Hex((string)v["datagramHex"]);
             AudioHeader header;
-            Assert.Equal(AudioHeaderError.Ok, AudioHeader.TryParse(datagram, out header));
+            Assert.Equal(AudioHeaderError.Ok, AudioHeader.TryParse(datagram, DirectionOf(v), out header));
             var samples = AudioHeader.DecodeSamples(datagram, AudioHeader.Size, datagram.Length - AudioHeader.Size);
             Assert.Equal(datagram, header.Encode(samples));
         }
@@ -185,16 +192,32 @@ namespace RigPlayPlugin.Tests.Audio
         [MemberData(nameof(InvalidNames))]
         public void RejectsInvalidVector(string name)
         {
-            var datagram = Hex((string)Vector("invalid", name)["datagramHex"]);
+            var v = Vector("invalid", name);
+            var datagram = Hex((string)v["datagramHex"]);
             AudioHeader header;
-            Assert.NotEqual(AudioHeaderError.Ok, AudioHeader.TryParse(datagram, out header));
+            Assert.NotEqual(AudioHeaderError.Ok, AudioHeader.TryParse(datagram, DirectionOf(v), out header));
+        }
+
+        [Theory]
+        [MemberData(nameof(ValidNames))]
+        public void AValidVectorIsRejectedTheOtherWay(string name)
+        {
+            // streamType fixes the direction (spec §10.2): a microphone datagram is invalid to a plugin, and CarPlay
+            // audio is invalid to a tablet's microphone receiver.
+            var v = Vector("valid", name);
+            var other = DirectionOf(v) == AudioDirection.PcToTablet ? AudioDirection.TabletToPc : AudioDirection.PcToTablet;
+            AudioHeader header;
+            var expected = other == AudioDirection.TabletToPc ? AudioHeaderError.ReservedStreamType : AudioHeaderError.WrongDirection;
+            Assert.Equal(expected, AudioHeader.TryParse(Hex((string)v["datagramHex"]), other, out header));
         }
 
         [Theory]
         [InlineData("too-short", AudioHeaderError.TooShort)]
         [InlineData("header-only", AudioHeaderError.NoPayload)]
         [InlineData("streamType-zero", AudioHeaderError.InvalidStreamType)]
-        [InlineData("streamType-mic-reserved", AudioHeaderError.ReservedStreamType)]
+        [InlineData("streamType-mic-from-tablet", AudioHeaderError.ReservedStreamType)]
+        [InlineData("media-to-tablet", AudioHeaderError.WrongDirection)]
+        [InlineData("mic-format-opus", AudioHeaderError.ReservedFormat)]
         [InlineData("format-zero", AudioHeaderError.InvalidFormat)]
         [InlineData("format-three", AudioHeaderError.InvalidFormat)]
         [InlineData("channels-three", AudioHeaderError.InvalidChannels)]
@@ -206,9 +229,10 @@ namespace RigPlayPlugin.Tests.Audio
         [InlineData("opus-code3-truncated", AudioHeaderError.BadOpusPacket)]
         public void RejectsInvalidVectorForItsReason(string name, AudioHeaderError expected)
         {
-            var datagram = Hex((string)Vector("invalid", name)["datagramHex"]);
+            var v = Vector("invalid", name);
+            var datagram = Hex((string)v["datagramHex"]);
             AudioHeader header;
-            Assert.Equal(expected, AudioHeader.TryParse(datagram, out header));
+            Assert.Equal(expected, AudioHeader.TryParse(datagram, DirectionOf(v), out header));
         }
 
         [Fact]

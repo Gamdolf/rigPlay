@@ -11,6 +11,17 @@ Protocol version: **1**. Revision: 2026-10-03.
 > as fatal are fatal without the flag; an incompatible `welcome.protocol`; `streamType` 4 from a tablet;
 > `\/` escapes; `hostId` and line-length details; SimHub property names ([§16](#16-simhub-surface));
 > firewall notes ([§15](#15-security)); `state.audio.enabled` without an output device.
+>
+> **Additions 2026-10-03** (no version change, [§7.2](#72-what-needs-a-new-version)): telemetry rate, stop
+> and staleness rules and field sources ([§6.9.1](#691-rate-start-and-stop)–[§6.9.3](#693-position-strategies-informative));
+> optional `status.nav` route guidance ([§6.7.1](#671-statusnav)); the tablet → plugin `artwork` message
+> ([§6.14](#614-artwork)); SimHub properties `RigPlay.Nav.*` and `RigPlay.NowPlaying.ArtworkPath`
+> ([§16.1](#161-properties)).
+>
+> **Additions 2026-10-03, microphone** (no version change, behind feature `mic`): the PC microphone to the
+> phone (#34). `micStart` and `micStop` ([§6.13](#613-micstart-and-micstop)), the optional `state.mic`
+> ([§6.6](#66-state)), microphone datagrams from the plugin to the tablet and the direction rule for
+> `streamType` ([§10.2](#102-datagram-layout), [§10.5](#105-microphone-plugin--tablet)).
 
 This document is the contract between the rigPlay Android app (the *tablet*) and the rigPlay SimHub
 plugin running on the Windows PC (the *plugin*). Both implementations follow it; where an
@@ -46,7 +57,7 @@ Contents
 
 | Term | Meaning |
 |---|---|
-| plugin | The rigPlay SimHub plugin on the PC. It is the server: it broadcasts the beacon, listens for TCP control connections and receives audio. |
+| plugin | The rigPlay SimHub plugin on the PC. It is the server: it broadcasts the beacon, listens for TCP control connections, receives audio and, on request, sends the PC microphone. |
 | tablet | The rigPlay Android app. It is the client: it listens for beacons, connects to the plugin, and sends status and audio. |
 | phone | The iPhone connected to the tablet over CarPlay. It never talks to the plugin. |
 | host | One plugin installation, identified by `hostId`. |
@@ -62,7 +73,7 @@ Contents
 | Discovery beacon | UDP broadcast | plugin → LAN | **23710** | No. Both sides always use 23710. |
 | Control channel | TCP | tablet connects to plugin | **23711** | Yes, on the plugin. Advertised in the beacon. |
 | Audio | UDP unicast | tablet → plugin | **23712** | Yes, on the plugin. Advertised in the beacon and in `state.audio.port`. |
-| Microphone (reserved) | UDP unicast | plugin → tablet | **23713** (on the tablet) | Reserved for [`micStart`/`micStop`](#613-reserved-micstart-and-micstop). Not used in protocol 1. |
+| Microphone | UDP unicast | plugin → tablet | **23713** (on the tablet) | Yes, on the tablet: announced in [`micStart.port`](#613-micstart-and-micstop). Only with feature `mic`. |
 
 The ports were chosen to stay clear of:
 
@@ -221,14 +232,16 @@ Fixture names follow `<type>.json` or `<type>.<variant>.json` ([§17](#17-fixtur
 | [`pairRequest`](#63-pairrequest) | tablet → plugin | after `welcome`; again to submit a PIN | `pairRequest`, `.pin`, `.token` |
 | [`pairResult`](#64-pairresult) | plugin → tablet | answer to each `pairRequest`; `denied` also unprompted | `pairResult`, `.pinRequired`, `.wrongPin`, `.denied`, `.tokenInvalid` |
 | [`heartbeat`](#65-heartbeat) | both | every 1 s after `welcome` | `heartbeat` |
-| [`state`](#66-state) | plugin → tablet | after pairing, then on every change | `state`, `.minimal`, `.serverDown` |
-| [`status`](#67-status) | tablet → plugin | after pairing, then on every change | `status`, `.idle`, `.liveStream` |
+| [`state`](#66-state) | plugin → tablet | after pairing, then on every change | `state`, `.minimal`, `.serverDown`, `.mic` |
+| [`status`](#67-status) | tablet → plugin | after pairing, then on every change | `status`, `.idle`, `.liveStream`, `.nav` |
 | [`command`](#68-command) | plugin → tablet | on a SimHub action | `command`, `.playPause`, `.previous`, `.siri`, `.showDashboard`, `.showCarPlay` |
 | [`telemetry`](#69-telemetry) | plugin → tablet | ≤ 10 Hz while enabled | `telemetry`, `.partial` |
 | [`error`](#610-error) | both | see [§14](#14-error-handling) | `error`, `.notPaired`, `.shutdown` |
 | [`audioStart`](#611-audiostart) | tablet → plugin | before the first datagram of a stream | `audioStart`, `.telephony` |
 | [`audioStop`](#612-audiostop) | tablet → plugin | after the last datagram of a stream | `audioStop` |
-| [`micStart`, `micStop`](#613-reserved-micstart-and-micstop) | reserved | not used in protocol 1 | none |
+| [`micStart`](#613-micstart-and-micstop) | tablet → plugin | the phone opened its microphone and the tablet takes it from the PC (feature `mic`) | `micStart` |
+| [`micStop`](#613-micstart-and-micstop) | tablet → plugin | the phone closed its microphone (feature `mic`) | `micStop` |
+| [`artwork`](#614-artwork) | tablet → plugin | when the now-playing artwork changes (at most every 2 s), and again on link up | `artwork` |
 
 ## 6. Messages
 
@@ -362,7 +375,7 @@ Plugin → tablet. A complete snapshot, never a delta. Sent immediately after `p
 |---|---|---|---|
 | `type` | string | yes | `"state"` |
 | `dashboardUrl` | string (absolute `http` or `https` URL) or `null` | yes | Dashboard shown in `dashboard` mode (the SimHub button in CarPlay). `null`: none selected on the PC. |
-| `idleDashboardUrl` | string (absolute `http` or `https` URL) or `null` | no | Dashboard shown while no phone is connected. Absent or `null`: none, the tablet shows its home screen. Only sent when the session has feature `idleDashboard`. |
+| `idleDashboardUrl` | string (absolute `http` or `https` URL) or `null` | no | Dashboard shown while no phone is connected (`screen: idle`), chosen on the plugin page as "Idle dashboard (no phone connected)" from the same list as `dashboardUrl` and built the same way ([§11](#11-dashboard-urls)). Absent or `null`: none; the tablet then shows `dashboardUrl` instead, else its built-in idle screen. Only sent when the session has feature `idleDashboard`; a plugin leaves the member out (rather than sending `null`) for other sessions. A change of the choice alone is a change of `state` and is pushed within 1 s. |
 | `dashboardServer` | object | no | State of SimHub's web dash server. Absent: unknown, the tablet assumes it is reachable. |
 | `dashboardServer.reachable` | boolean | yes, in the object | `false`: the plugin could not reach the web dash server; the URLs will not load. The tablet shows "Enable the web dash server in SimHub" instead of a browser error. |
 | `dashboardServer.port` | integer 1–65535 | yes, in the object | Port the plugin probed. |
@@ -370,6 +383,8 @@ Plugin → tablet. A complete snapshot, never a delta. Sent immediately after `p
 | `audio.enabled` | boolean | yes | `true`: the plugin's audio receiver is listening on `audio.port` and takes audio from this session. It is `true` even when the PC has no usable output device: the plugin keeps receiving and the settings page says why nothing plays. `false` (the port could not be bound, or audio is off): the tablet MUST NOT send audio and plays it locally. |
 | `audio.port` | integer 1–65535 | yes | UDP port for audio datagrams, sent to the IP address of this TCP connection: the port the receiver is bound to, which is the configured audio port. A changed port is pushed in a new `state`. |
 | `audio.formats` | array of string | yes | Formats the receiver accepts, most preferred first: `pcm_s16le` (always listed) and, when the plugin's **Opus** setting is on, `opus` ([§10.4](#104-opus)). The tablet sends the first format it supports and ignores names it does not know. A changed list is pushed in a new `state`; the tablet then restarts its streams in the new format. |
+| `mic` | object | no | The PC microphone ([§6.13](#613-micstart-and-micstop)). Only sent when the session has feature `mic`; a plugin leaves it out for other sessions. Absent: the tablet treats the PC microphone as unavailable. Fixture: [`state.mic.json`](../protocol/fixtures/state.mic.json). |
+| `mic.enabled` | boolean | yes, in the object | `true`: the plugin answers `micStart` with microphone audio: "Microphone to the phone" is on on the plugin page and it found an input device. `false`: the tablet MUST NOT send `micStart` and uses its own microphone. A change is pushed in a new `state` like any other. |
 
 ### 6.7 `status`
 
@@ -412,6 +427,7 @@ advance of `nowPlaying.position` during playback is not a change; a seek is.
 | `nowPlaying.position` | decimal ≥ 0, seconds | yes | Playback position at the moment the message was serialised. `0` when unknown. |
 | `nowPlaying.duration` | decimal > 0, seconds, or `null` | yes | `null` for live streams or unknown length. |
 | `nowPlaying.updatedAt` | timestamp (ms) | yes | Tablet clock when `position` was taken. For ordering and diagnostics only ([§3](#3-encoding-conventions)). |
+| `nav` | object or `null` | no | CarPlay route guidance ([§6.7.1](#671-statusnav)). Absent or `null`: no route guidance is active. |
 
 `screen` values:
 
@@ -419,12 +435,50 @@ advance of `nowPlaying.position` during playback is not a change; a seek is.
 |---|---|
 | `carplay` | The CarPlay projection is in the foreground. |
 | `dashboard` | `state.dashboardUrl` is shown. |
-| `idle` | No phone is connected; the idle dashboard or the rigPlay home screen is shown. |
+| `idle` | No phone is connected; the idle dashboard, the built-in rigPlay idle screen or the rigPlay home screen is shown. |
 | `off` | The tablet display is off, or rigPlay is not in the foreground. |
 
 Position extrapolation on the plugin: while `playing`, `position_now = position + (now − receivedAt)`,
 clamped to `duration` when it is not `null`, where `receivedAt` is the plugin's own clock when the
 line arrived. LAN latency is ignored.
+
+#### 6.7.1 `status.nav`
+
+Route guidance the phone shows in CarPlay (the next maneuver), for SimHub dashboards
+([§16.1](#161-properties)). Fixture: [`status.nav.json`](../protocol/fixtures/status.nav.json).
+
+```json
+{"type":"status","phoneConnected":true,"phoneName":"Tim's iPhone","screen":"carplay","nowPlaying":null,"nav":{"maneuver":"slightRightTurn","distanceM":350,"road":"B258","etaEpochS":1791044100}}
+```
+
+`nav` is omitted when no route guidance is active (a phone is connected and CarPlay reports a current
+maneuver otherwise). When guidance ends, the next `status` has no `nav`.
+
+| Member | Type | Required | Description |
+|---|---|---|---|
+| `maneuver` | string, 1–64 characters | yes, in the object | The next maneuver: the lowerCamel name of Apple's `RouteGuidanceManeuverType`, see below. |
+| `distanceM` | integer ≥ 0, metres | no | Distance to the next maneuver. |
+| `road` | string | no | The road the maneuver leads onto. Omitted when blank. |
+| `etaEpochS` | integer ≥ 1, seconds | no | Estimated time of arrival, in **seconds** since the Unix epoch (UTC), from the phone. Omitted when unknown. It is a wall-clock time for display, not a `...At` timestamp: receivers show it and do not compare it with their own clock. |
+
+`maneuver` values, in `RouteGuidanceManeuverType` order (0–53): `noTurn`, `leftTurn`, `rightTurn`,
+`straightAhead`, `uTurn`, `followRoad`, `enterRoundabout`, `exitRoundabout`, `offRamp`, `onRamp`,
+`arriveEndOfNavigation`, `startRoute`, `arriveAtDestination`, `keepLeft`, `keepRight`, `enterFerry`,
+`exitFerry`, `changeFerry`, `startRouteWithUTurn`, `uTurnAtRoundabout`, `leftTurnAtEnd`,
+`rightTurnAtEnd`, `highwayOffRampLeft`, `highwayOffRampRight`, `arriveAtDestinationLeft`,
+`arriveAtDestinationRight`, `uTurnWhenPossible`, `arriveEndOfDirections`, `roundaboutExit1` …
+`roundaboutExit19`, `sharpLeftTurn`, `sharpRightTurn`, `slightLeftTurn`, `slightRightTurn`,
+`changeHighway`, `changeHighwayLeft`, `changeHighwayRight`. The tablet sends a type newer than this
+table as `noTurn`.
+
+Receiving rules (the plugin):
+
+- `nav` is validated leniently, like `telemetry`: a `nav` that is not an object is treated as absent,
+  and a member with the wrong JSON type or out of range is treated as absent. A bad `nav` never makes
+  the `status` invalid; the rest of the `status` is used.
+- Any `maneuver` string is accepted and passed on unchanged (shown as is), including names not in the
+  table. A decimal `distanceM` is rounded to whole metres; a blank `road` counts as absent.
+- `nav` changes are `status` changes, coalesced as above (at most one `status` per 250 ms).
 
 ### 6.8 `command`
 
@@ -492,6 +546,79 @@ does not publish it or the user disabled it. Each message is a complete sample, 
 Validation is per field: a field with the wrong JSON type, out of range, or with an unknown enum value
 is treated as `null` and the rest of the message is used.
 
+#### 6.9.1 Rate, start and stop
+
+- The plugin samples SimHub's game data on every frame (`IDataPlugin.DataUpdate`, 60 Hz) and sends the
+  latest sample every **100 ms** (10 Hz) while a game runs and the conditions above hold. It does not
+  send while no game runs.
+- `gameRunning` is present in every message the rigPlay plugin sends. When the game stops (SimHub
+  reports no running game, or no game frame has arrived for 3 s) the plugin sends **one** last message
+  `{"type":"telemetry","gameRunning":false}` to the sessions that were receiving telemetry, then
+  nothing until a game runs again. The same happens when a session stops qualifying (its phone
+  disconnects, the user switches the section off): it simply receives no more messages.
+- **Staleness**: the tablet treats telemetry as stale **3 s** after the last `telemetry` it received,
+  and from then on behaves as if it had never received any (fake GPS stops, speed and gear are no
+  longer reported to the phone, night mode returns to the tablet's own source). `gameRunning: false`
+  has the same effect at once.
+- A message with `gameRunning: true` and no data field is valid: the game runs but every field is
+  unknown or switched off.
+
+#### 6.9.2 Where the plugin takes each field (informative)
+
+| Field | Source in SimHub | Precision on the wire |
+|---|---|---|
+| `speedMps` | `SpeedKmh` ÷ 3.6, negative values sent as 0 | 2 decimals |
+| `gear` | `Gear` mapped as in the table above; "in the pits" is `IsInPit` or `IsInPitLane`. `"R"`/`"-1"` → `R`, `"N"`/`"0"` → `P` or `N`, `"1"`… → `D`, a game's own `"P"`/`"D"` pass through | |
+| `heading` | `OrientationYaw` (degrees, normalised to 0 ≤ h < 360), once a frame of the session has shown a non-zero value (games without yaw report 0 forever). Otherwise the direction of the last movement of at least 1 m in `CarCoordinates` (x, z), and with neither, `0` when a position is sent and absent otherwise | 1 decimal |
+| `lat`, `lon`, `alt` | The GPS strategy chosen on the page; absent when it is off | 7 decimals; 1 for `alt` |
+| `night` | Page setting "Night mode": *Always day* → `false`, *Always night* → `true`. *Auto* (default): the user's own SimHub property when one is set on the page and readable (non-zero or `true` → `true`); else the in-game time of day (`DataCorePlugin.GameRawData.Telemetry.SessionTimeOfDay` for iRacing, `...Graphics.Clock` for ACC; night from 19:00 to 07:00); else the headlights (`...Graphics.LightsStage` for ACC, `mHeadlights` for rFactor 2 / Le Mans Ultimate); else absent | |
+| `fuelPercent` | `FuelPercent`; `Fuel` ÷ `MaxFuel` × 100 when that is missing; absent when the game publishes no fuel (all zero). Clamped to 0…100 | 1 decimal |
+| `rangeKm` | SimHub's `EstimatedFuelRemaingLaps` × `TrackLength` (else `ReportedTrackLength`, metres) ÷ 1000; absent when either is unknown | 1 decimal |
+| `rpm` | `Rpms` | integer value |
+| `trackName` | `TrackNameWithConfig`, else `TrackName` | |
+| `sessionType` | `SessionTypeName` | |
+
+The yaw and coordinate axes are whatever the game reports, so `heading` is consistent within a session
+but is not a true compass direction; it only has to agree with the made-up position.
+
+#### 6.9.3 Position strategies (informative)
+
+Sims publish no GPS position, so the plugin makes one up; the user picks how on the plugin page. The
+tablet cannot tell the strategies apart and does not need to.
+
+| Strategy | `lat`, `lon`, `alt` |
+|---|---|
+| Off (default) | Absent. |
+| Fixed position (#42) | Always the origin entered on the page (default 50.3356, 6.9475, 617 m). Speed, gear and heading still come from the sim, so the phone's map shows the car at the origin with the real speed. |
+| Drive around the origin (#43) | Dead reckoning: starts at the origin and, on every game frame, moves `speed × Δt` along `heading` on a great circle (spherical earth, radius 6 371 008.8 m; frames more than 0.25 s apart are not integrated). Back to the origin when the game starts, on a session restart or a new track or session type, when the car leaves the pit lane, after standing still (< 0.5 m/s) for a set time (default 30 s, 0 = never), and when it is further than the drift radius (default 20 km) from the origin. `alt` is the origin's. |
+| Real track (#44) | The car on the real circuit, from a per-track calibration (below). `alt` is the page origin's. |
+
+A reset makes the position jump back to the origin between two messages; the tablet passes positions
+on as they come and does not smooth or reject jumps.
+
+**Real track (strategy C).** Each track is identified by a key: SimHub's `TrackCode`, else the track
+name, lower-cased, accents removed and every run of other characters than `a-z`/`0-9` turned into one
+space (`spa gp`, `ks nurburgring layout gp a`). Its calibration is the user's (saved by the plugin),
+else an entry of a shipped table of start/finish-line coordinates (`approximate`, see
+[TRACK_CALIBRATION.md](TRACK_CALIBRATION.md)), else none (the page's origin). The position is, in this
+order of preference:
+
+1. *centreline*: when the track has a recorded lap — samples of (lap fraction → lat, lon) every 0.5 %
+   of the lap — and the game publishes `TrackPositionPercent`, linear interpolation between the two
+   samples around the current fraction, and across the start/finish line between the last and the first;
+2. *affine*: when the game publishes `CarCoordinates` (counted once they have moved 5 m in the session,
+   so a frozen or zero value is ignored), with (u, v) = (x − x₀, z − z₀) swapped and/or
+   negated as the calibration's axes say (default per game: Assetto Corsa x east and z south, others
+   x east and z north), east = s·(u cos θ + v sin θ), north = s·(−u sin θ + v cos θ) metres from the
+   origin, θ the rotation clockwise and s the scale; metres become degrees on the tangent plane at the
+   origin;
+3. *dead reckoning* as above, starting at the track's origin, the heading turned by θ and the speed
+   multiplied by s.
+
+`heading` then follows the position: along the centreline (bearing from 0.25 % behind to 0.25 % ahead),
+the direction between successive affine positions at least 1 m apart (the sim's heading turned by θ
+until the car has moved), or the turned sim heading for dead reckoning.
+
 ### 6.10 `error`
 
 Both directions. [§14](#14-error-handling) lists the codes and when each is sent.
@@ -545,19 +672,103 @@ stops that stream's output.
 | `type` | string | yes | `"audioStop"` |
 | `stream` | string enum | yes | As in `audioStart`. An `audioStop` for a stream that is not started is ignored. |
 
-### 6.13 Reserved: `micStart` and `micStop`
+### 6.13 `micStart` and `micStop`
 
-Reserved for routing the PC microphone to the phone (#34). In protocol 1 they are not sent, and a
-receiver ignores them as it ignores any unknown type. The intended shape, to be specified with #34:
+Tablet → plugin, Paired only, and only in a session with feature `mic` ([§7.3](#73-features)). They route
+the PC microphone to the phone for Siri and calls (#34): while a microphone stream is started, the plugin
+captures an input device of the PC and sends it to the tablet as UDP datagrams
+([§10.5](#105-microphone-plugin--tablet)), and the tablet feeds that audio to the phone instead of its
+own microphone. Fixtures: [`micStart.json`](../protocol/fixtures/micStart.json),
+[`micStop.json`](../protocol/fixtures/micStop.json).
 
-- `micStart`, tablet → plugin, when the phone opens the microphone (Siri, a call), with `format`,
-  `sampleRate`, `channels` and the tablet's UDP `port` (default 23713); `micStop` when it closes.
-- The plugin sends datagrams with the header of [§10.2](#102-datagram-layout), `streamType` 4
-  (`mic`), to the tablet's address. `mic` flows PC → tablet only: the plugin drops (and counts) a
-  datagram with `streamType` 4 from a tablet, and an `audioStart` cannot name it.
-- Feature `mic` gates both messages.
+```json
+{"type":"micStart","streamType":4,"format":"pcm_s16le","sampleRate":16000,"channels":1,"port":23713}
+{"type":"micStop","streamType":4}
+```
 
-There are no fixtures for them until they are specified.
+`micStart`:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | yes | `"micStart"` |
+| `streamType` | integer | yes | The datagram `streamType` ([§10.2](#102-datagram-layout)). MUST be `4` (`mic`); any other value is a `badMessage`. |
+| `format` | string enum | yes | `pcm_s16le`. |
+| `sampleRate` | integer | yes | Hz, a multiple of 100 from 8000 to 48000: the rate of the phone's microphone stream (CarPlay asks for 16000 or 24000 in practice). The plugin resamples its capture to it, so the tablet does not resample. |
+| `channels` | integer | yes | MUST be `1`: the microphone is mono. A tablet whose phone wants stereo duplicates the channel itself. |
+| `port` | integer 1–65535 | yes | UDP port on the tablet that receives the datagrams, at the tablet's address of this TCP connection. The rigPlay app uses **23713**. |
+
+`micStop`:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | yes | `"micStop"` |
+| `streamType` | integer | yes | MUST be `4`. |
+
+Tablet rules:
+
+- The tablet sends `micStart` when the phone opens its microphone (a Siri request, a call) if all of these
+  hold: its setting "Microphone" is "PC via SimHub", the link is up, the session has feature `mic`, and
+  the latest `state.mic.enabled` is `true`. Otherwise it uses its own microphone and sends nothing.
+- It sends `micStop` when the phone closes the microphone. Link loss stops the stream without a message.
+- After link loss and a new Paired session it sends `micStart` again if the phone still has the microphone
+  open; the plugin starts a new stream (sequence numbers and timestamps from 0, start flag).
+- While a stream runs it listens on `port` and accepts datagrams only from the IP address of the paired host
+  (the remote address of its control connection), as [§10.5](#105-microphone-plugin--tablet) describes.
+
+Plugin rules:
+
+- A `micStart` or `micStop` in a session without feature `mic` is answered with `error`
+  `unexpectedMessage`. In Unpaired it is answered `notPaired` like any other message ([§5.2](#52-session-states)).
+- On `micStart` the plugin opens its input device and sends datagrams to the session's remote IP address and
+  `port`. With "Microphone to the phone" off it ignores the message (logged, no reply). A new `micStart`
+  while a stream runs restarts it with the new parameters. The plugin runs one microphone stream at a
+  time: a `micStart` from another tablet takes it over.
+- The plugin stops capturing and sending within 1 s of any of these: `micStop` from the session that owns
+  the stream (a `micStop` from another session, or with no stream, is ignored); that session closing (link
+  loss, replaced, forgotten, shutdown); **2 s** without any line received from that session (heartbeats
+  arrive every 1 s, so this is two missed heartbeats: shorter than the 5 s link-loss watchdog, so that a
+  tablet that vanished does not keep the PC microphone open); the user switching "Microphone to the phone"
+  off.
+- When the plugin has no usable input device it logs it once, sends nothing and keeps answering normally;
+  the tablet then hears silence. It reports `state.mic.enabled: false` from then on, so the next request
+  uses the tablet's microphone.
+
+### 6.14 `artwork`
+
+Tablet → plugin, Paired only. The now-playing artwork, so SimHub dashboards can show it
+([§16.1](#161-properties), `RigPlay.NowPlaying.ArtworkPath`). Fixture:
+[`artwork.json`](../protocol/fixtures/artwork.json).
+
+```json
+{"type":"artwork","mime":"image/jpeg","base64":"/9j/4AAQSkZJRgABAgAAAQABAAD..."}
+```
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `type` | string | yes | `"artwork"` |
+| `mime` | string | yes | `image/jpeg`. The rigPlay tablet sends JPEG only; the plugin also accepts `image/png`. |
+| `base64` | string, non-empty | yes | The image file, standard base64 (RFC 4648 §4, `+` and `/`, with `=` padding, no line breaks). |
+
+Rules:
+
+- **Size**: the whole line MUST fit the 65 536-byte line limit of [§5.1](#51-framing) (an image of
+  about 48 KiB at most). The tablet scales the artwork to at most 256 pixels on its longer side and
+  encodes it as JPEG quality 80, lowering the quality (60, then 40) until the line fits; if it still
+  does not fit, it sends nothing.
+- **When**: only when the now-playing artwork changes, at most once per **2 s** (a newer image
+  replaces one not yet sent, and the last one is always sent: trailing edge), and the latest artwork
+  again each time the link comes up (after `pairResult ok`).
+- **No clear**: there is no message that removes the artwork. The plugin keeps showing the last image
+  until a new one arrives or the session closes.
+- **No feature string**: the tablet sends `artwork` to any paired plugin. A plugin that does not know
+  the type ignores it as an unknown type without reply ([§14.2](#142-rules)).
+- **Validation** (plugin): a missing or non-string `mime` or `base64`, a `mime` other than
+  `image/jpeg` or `image/png`, or `base64` that is not valid base64 or decodes to nothing is
+  `badMessage`, and the previous artwork stays. The plugin does not check that the bytes really are a
+  JPEG or PNG; a dashboard simply fails to show a broken image.
+- Artwork belongs to its session: when the session closes, it is gone.
+- The plugin writes the artwork of the primary tablet ([§12](#12-several-tablets)) to
+  `%TEMP%\rigPlay\artwork.jpg` (or `artwork.png` for PNG), replacing the previous file atomically.
 
 ## 7. Version negotiation
 
@@ -599,9 +810,9 @@ plugin accepts, so the list is its gate and a plugin that does not list `opus` i
 
 | Feature | Effect when listed in `welcome.features` |
 |---|---|
-| `telemetry` | The plugin may send `telemetry`. |
+| `telemetry` | The plugin may send `telemetry` ([§6.9](#69-telemetry)). The rigPlay plugin offers it from #40. |
 | `idleDashboard` | The plugin includes `state.idleDashboardUrl`. |
-| `mic` | Reserved ([§6.13](#613-reserved-micstart-and-micstop)). |
+| `mic` | The tablet may send `micStart` and `micStop` ([§6.13](#613-micstart-and-micstop)); the plugin includes `state.mic` and sends microphone datagrams ([§10.5](#105-microphone-plugin--tablet)). The rigPlay plugin offers it from #34. |
 
 Unknown feature strings are ignored. `welcome.features` lists only features both sides named.
 
@@ -671,7 +882,8 @@ Tablet reconnection:
 The tablet sends the audio it decodes from the phone's AirPlay audio streams to the plugin, which plays
 it on the PC: as PCM by default, or as Opus packets when the plugin asks for them ([§10.4](#104-opus)).
 Datagrams go to the IP address the tablet's TCP connection is connected to and to port
-`state.audio.port`.
+`state.audio.port`. In the other direction the plugin sends the PC microphone to the tablet with the same
+datagram layout ([§10.5](#105-microphone-plugin--tablet)).
 
 ### 10.1 Stream lifecycle
 
@@ -712,9 +924,9 @@ are tested against them.
 
 | Offset | Size | Field | Description |
 |---|---|---|---|
-| 0 | 2 | `seq` (u16) | Datagram counter per stream: 0 for the first datagram after `audioStart`, +1 per datagram, 65535 wraps to 0. Compared with serial-number arithmetic (RFC 1982). |
-| 2 | 1 | `streamType` (u8) | 1 = `media`, 2 = `alt`, 3 = `telephony`, 4 = reserved for `mic` (PC → tablet only; rejected from a tablet). 0 and 5–255 are invalid. |
-| 3 | 1 | `flags` (u8) | Bit 0 (0x01) `start`: first datagram after `audioStart`; the receiver resets that stream's jitter buffer. Bits 1–7 are reserved: senders set 0, receivers ignore them. |
+| 0 | 2 | `seq` (u16) | Datagram counter per stream: 0 for the first datagram after `audioStart` (`micStart` for `mic`), +1 per datagram, 65535 wraps to 0. Compared with serial-number arithmetic (RFC 1982). |
+| 2 | 1 | `streamType` (u8) | 1 = `media`, 2 = `alt`, 3 = `telephony`, 4 = `mic`. 0 and 5–255 are invalid. The value also fixes the direction: 1–3 flow tablet → plugin only and 4 flows plugin → tablet only, so a plugin drops a datagram with `streamType` 4 and a tablet's microphone receiver drops one with 1–3 (both counted). |
+| 3 | 1 | `flags` (u8) | Bit 0 (0x01) `start`: first datagram after `audioStart` (or, for `mic`, after `micStart`); the receiver resets that stream's jitter buffer. Bits 1–7 are reserved: senders set 0, receivers ignore them. |
 | 4 | 4 | `timestamp` (u32) | Sample clock: number of sample frames (one sample per channel) sent on this stream before the first frame of this datagram, at the header's `sampleRate`; for `opus` a datagram covers the frames its packet decodes to. 0 at `audioStart`; 4294967295 wraps to 0. A jump larger than the previous datagram's frame count means the sender skipped audio; the receiver plays silence for the gap. The sender MUST advance the clock over audio it did not send (lost before it, dropped from a queue, refused by its decoder): a stream that stays contiguous while short of real time drains the receiver's buffer into underruns. |
 | 8 | 2 | `sampleRate` (u16) | Sample rate in units of 100 Hz: 48000 Hz → 480, 44100 Hz → 441, 24000 Hz → 240, 16000 Hz → 160. Valid values 80–480. Rates that are not a multiple of 100 Hz (11025, 22050) are resampled by the sender. |
 | 10 | 1 | `channels` (u8) | 1 or 2. |
@@ -744,13 +956,21 @@ lock); power save and background scans hold datagrams back and release them in b
 
 - Reorder by `seq` within a small window, drop datagrams that arrive after their play-out time, fill
   gaps with silence, and count losses per stream for the settings page.
-- Start with a jitter buffer of 60–120 ms, which is enough on a quiet LAN, and let it grow: an underrun
+- Start with a jitter buffer of 60–120 ms, which is enough on a quiet LAN, and let it learn: an underrun
   means the link stalled for longer than the depth held, and a link that stalled once stalls again. The
-  plugin starts at 80 ms, raises the target by half on every underrun up to 250 ms, and only skips ahead
-  (dropping audio) above 500 ms. After a stall the buffer is naturally as deep as the stall was, which is
-  the protection for the next one; skipping that depth away to recover latency trades a silent gap for
-  an audible jump and the next dropout.
-- Show underruns and skips, not only loss: a Wi-Fi stall loses nothing and still cuts the audio.
+  plugin starts at 80 ms and, when the held-back datagrams arrive after an underrun, measures the stall
+  (the depth that drained plus the silence played, less any gap the sender declared) and raises the target
+  to a quarter more than that, up to 2 s for `media` (1.5 s for `alt`, 1 s for `telephony`, where delay
+  hurts more than a dropout); play-out resumes once the new target is buffered, so the depth really is
+  that much. The learned depth is kept in the settings across restarts. An underrun whose datagrams come
+  back at their normal pace, or with the timestamp jumped over the silence, is the source pausing, not a
+  stall, and teaches nothing.
+- Trim excess quietly: depth above the target protects nothing, so the plugin plays 1.5 % faster while
+  the buffer is more than 100 ms above its target (a third of a semitone, unnoticed under engine noise)
+  and only skips ahead, audibly, a full second above the target.
+- Show underruns, the longest stall and skips, not only loss: a Wi-Fi stall loses nothing and still cuts
+  the audio. A sender SHOULD log how long its sends block and how long the gaps between them get, so a
+  stall can be placed on the radio or on the sender.
 - `alt` and `telephony` are mixed with `media`; the plugin ducks `media` while either is active.
 
 ### 10.4 Opus
@@ -774,6 +994,31 @@ where 50 small datagrams per second survive what 200 large ones do not.
 - When the plugin's setting changes it pushes a new `state`; the tablet sends `audioStart` again in the
   format now preferred and the stream restarts. When the tablet cannot encode Opus (no encoder on the
   device) it falls back to `pcm_s16le`, which the plugin always lists.
+
+### 10.5 Microphone (plugin → tablet)
+
+With feature `mic`, after a `micStart` ([§6.13](#613-micstart-and-micstop)), the plugin sends the PC
+microphone to the tablet: UDP datagrams with the header of [§10.2](#102-datagram-layout), from any source
+port of the PC, to the session's remote IP address and `micStart.port`
+(vectors `mic-16k-first-datagram` and `mic-24k-midstream` in
+[`audio-header.json`](../protocol/fixtures/audio-header.json)).
+
+- Header: `streamType` 4, `format` 1 (`pcm_s16le`), `channels` 1 and the `sampleRate` of the `micStart`.
+  `seq` and `timestamp` start at 0 and the first datagram carries the `start` flag, for every `micStart`.
+- Size: **5 ms** per datagram (`sampleRate` ÷ 200 frames: 80 frames, 160 bytes of payload at 16 kHz), sent
+  as the capture produces them. The plugin sends nothing while its capture delivers nothing; it does not
+  pad with silence.
+- Capture (informative, the rigPlay plugin): WASAPI shared mode on the chosen input device (the Windows
+  default recording device unless the user picked one), mixed down to mono and resampled
+  to `sampleRate`. There is no echo cancellation: with PC speakers, a caller can hear themselves. Headphones
+  or a headset avoid it.
+- The tablet accepts a datagram only when its source IP address is the paired host's (the remote address
+  of its control connection) and a microphone stream is started; it decodes the header in the plugin →
+  tablet direction (`streamType` 4 only) and drops a datagram whose `sampleRate`, `channels` or `format`
+  differ from its `micStart`. It counts what it drops.
+- The tablet plays the stream through a jitter buffer (about 40 ms) at the rate the phone consumes it,
+  reorders by `timestamp`, fills gaps and underruns with silence and skips ahead when more than about
+  200 ms is buffered (the PC's and the tablet's clocks drift). A datagram with the `start` flag resets it.
 
 ## 11. Dashboard URLs
 
@@ -987,12 +1232,16 @@ Protocol 1 assumes a trusted home LAN.
   PC only and typed on the tablet, so a passive listener cannot see it before it is used.
 - **What someone on the LAN can do.** Without a token: see beacons and request pairing, which needs the
   PIN shown on the PC. With a sniffed token: impersonate that tablet, read its `state`, and send
-  `status` and audio to the plugin. By forging a beacon or answering with a known `hostId`: obtain the
-  tablet's token. The plugin executes nothing on the PC for a tablet beyond updating SimHub properties
-  and playing audio, so the impact is wrong dashboard data and unwanted sound. TLS would close all
+  `status` and audio to the plugin, and, while "Microphone to the phone" is on, have the PC microphone
+  sent to its own address with `micStart` ([§6.13](#613-micstart-and-micstop)). By forging a beacon or
+  answering with a known `hostId`: obtain the tablet's token. The plugin executes nothing on the PC for a
+  tablet beyond updating SimHub properties, playing audio and capturing the microphone on request, so the
+  impact is wrong dashboard data, unwanted sound and an eavesdropped PC microphone; the settings page
+  shows when the microphone is being sent and to which tablet. TLS would close all
   three; it is out of scope for protocol 1.
 - **Audio spoofing** needs the source IP of a Paired session with a started stream; audio is not
-  authenticated beyond that.
+  authenticated beyond that. The same holds for the microphone in the other direction: the tablet takes
+  microphone datagrams only from the paired host's address, while it has a microphone stream started.
 
 ## 16. SimHub surface
 
@@ -1009,7 +1258,7 @@ NCalc formulas and control mappings use the prefixed names below (`RigPlay.Table
 |---|---|---|---|
 | `RigPlay.TabletConnected` | bool | At least one Paired session exists. | `false` |
 | `RigPlay.PhoneConnected` | bool | `status.phoneConnected` | `false` |
-| `RigPlay.Screen` | string | `status.screen`: `carplay`, `dashboard`, `idle` or `off` | `off` |
+| `RigPlay.Screen` | string | `status.screen`: `carplay`, `dashboard`, `idle` (no phone: the idle dashboard or the tablet's home screen is shown) or `off` | `off` |
 | `RigPlay.NowPlaying.Title` | string | `status.nowPlaying.title` | `""` |
 | `RigPlay.NowPlaying.Artist` | string | `status.nowPlaying.artist` | `""` |
 | `RigPlay.NowPlaying.Album` | string | `status.nowPlaying.album` | `""` |
@@ -1017,9 +1266,16 @@ NCalc formulas and control mappings use the prefixed names below (`RigPlay.Table
 | `RigPlay.NowPlaying.Playing` | bool | `status.nowPlaying.playing` | `false` |
 | `RigPlay.NowPlaying.Position` | double, seconds | Extrapolated as in [§6.7](#67-status) | `0` |
 | `RigPlay.NowPlaying.Duration` | double, seconds | `status.nowPlaying.duration` | `0` |
+| `RigPlay.NowPlaying.ArtworkPath` | string | Full path of the file holding the primary tablet's last `artwork` ([§6.14](#614-artwork)): `%TEMP%\rigPlay\artwork.jpg` or `artwork.png` | `""` |
+| `RigPlay.Nav.Active` | bool | `status.nav` is present (route guidance active) | `false` |
+| `RigPlay.Nav.Maneuver` | string | `status.nav.maneuver` | `""` |
+| `RigPlay.Nav.Distance` | double, metres | `status.nav.distanceM` | `0` |
+| `RigPlay.Nav.Road` | string | `status.nav.road` | `""` |
+| `RigPlay.Nav.Eta` | string | `status.nav.etaEpochS` as local time on the PC, `HH:mm` (24 h) | `""` |
 
 "Without data" means no Paired session, or, for `RigPlay.NowPlaying.*`, `nowPlaying: null` or the
-individual member `null`.
+individual member `null`; for `RigPlay.Nav.*`, no `nav` or the member absent; for `ArtworkPath`, no
+artwork received from the primary tablet on its current session.
 
 ### 16.2 Actions
 
@@ -1033,7 +1289,9 @@ individual member `null`.
 | `RigPlay.ShowCarPlay` | `command` `showCarPlay` |
 | `RigPlay.ToggleScreen` | `command` `showCarPlay` if the primary tablet's last `status.screen` is `dashboard`, otherwise `command` `showDashboard` |
 
-With no primary tablet an action does nothing, and the plugin logs it at debug level.
+With no primary tablet an action does nothing, and the plugin logs it at debug level. The screen actions work
+from every screen: from `idle`, `RigPlay.ShowDashboard` (and `RigPlay.ToggleScreen`) bring up `state.dashboardUrl`,
+and `RigPlay.ShowCarPlay` is answered `commandUnavailable` while no phone is connected ([§6.8](#68-command)).
 
 ## 17. Fixtures and conformance tests
 

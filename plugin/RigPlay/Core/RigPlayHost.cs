@@ -10,6 +10,7 @@ using RigPlayPlugin.Dashboards;
 using RigPlayPlugin.Net;
 using RigPlayPlugin.Pairing;
 using RigPlayPlugin.Protocol;
+using RigPlayPlugin.Telemetry;
 
 namespace RigPlayPlugin
 {
@@ -45,6 +46,8 @@ namespace RigPlayPlugin
             Timings = timings ?? SessionTimings.Default;
             Pairing = new PairingService(settings, () => this.env.SaveSettings(), this.clock);
             Pairing.Changed += RaiseChanged;
+            TelemetrySampler = new TelemetrySampler();
+            TelemetrySender = new TelemetrySender(TelemetrySampler, () => Server, () => Settings);
             Probe = new WebDashProbe(() => EffectiveWebDashPort);
             Probe.Changed += () =>
             {
@@ -52,6 +55,21 @@ namespace RigPlayPlugin
                 RaiseChanged();
             };
         }
+
+        /// <summary>SimHub frames in, the telemetry message out (spec §6.9). RigPlay.DataUpdate feeds it.</summary>
+        public TelemetrySampler TelemetrySampler { get; }
+
+        /// <summary>The 10 Hz telemetry timer.</summary>
+        public TelemetrySender TelemetrySender { get; }
+
+        /// <summary>Tests turn the telemetry timer off and call TelemetrySender.Tick themselves.</summary>
+        public bool TelemetryTimerEnabled { get; set; } = true;
+
+        /// <summary>Features this plugin offers in welcome (spec §7.3).</summary>
+        public static readonly string[] OfferedFeatures = { Features.Telemetry, Features.IdleDashboard, Features.Mic };
+
+        /// <summary>The primary tablet's artwork as a file for dashboards (RigPlay.NowPlaying.ArtworkPath, spec §16.1).</summary>
+        public ArtworkFile Artwork { get; set; } = new ArtworkFile();
 
         /// <summary>Tests turn the periodic web dash probe off.</summary>
         public bool ProbeEnabled { get; set; } = true;
@@ -79,6 +97,15 @@ namespace RigPlayPlugin
 
         /// <summary>The receiver's formats for state.audio.formats, most preferred first; null means pcm_s16le.</summary>
         public Func<List<string>> AudioFormats { get; set; }
+
+        /// <summary>
+        /// state.mic.enabled for sessions with feature mic (spec §6.6, §6.13): the plugin answers micStart. MicGlue sets it
+        /// to "Microphone to the phone is on and an input device was found". Call <see cref="PushState"/> after a change.
+        /// </summary>
+        public Func<bool> MicEnabled { get; set; } = () => false;
+
+        /// <summary>The monotonic clock the sessions use (the microphone watchdog compares against LastLineAtMs).</summary>
+        public IClock Clock => clock;
 
         /// <summary>Tests: listen on this port instead of Settings.ControlPort (0 picks a free one).</summary>
         public int? ControlPortOverride { get; set; }
@@ -150,6 +177,7 @@ namespace RigPlayPlugin
             }));
             var primary = paired.FirstOrDefault(s => s.Id == primaryId);
             var status = primary?.LastStatus;
+            var artworkPath = Artwork.Show(primary?.LastArtwork);
             surface = new SurfaceSnapshot
             {
                 TabletConnected = paired.Count > 0,
@@ -158,6 +186,9 @@ namespace RigPlayPlugin
                 Screen = status?.Screen ?? Screens.Off,
                 NowPlaying = status?.NowPlaying,
                 StatusReceivedAtMs = primary?.LastStatusAtMs ?? 0,
+                Nav = status?.Nav,
+                NavEta = SurfaceSnapshot.FormatEta(status?.Nav?.EtaEpochS),
+                ArtworkPath = artworkPath,
             };
         }
 
@@ -178,6 +209,7 @@ namespace RigPlayPlugin
             RefreshDashboards();
             PluginLog.Info(Dashboards.Count + " dashboard(s) in " + (env.SimHubDir ?? "(SimHub folder not found)") + ", web dash port " + EffectiveWebDashPort);
             if (ProbeEnabled) Probe.Start();
+            if (TelemetryTimerEnabled) TelemetrySender.Start();
             RaiseChanged();
         }
 
@@ -188,6 +220,7 @@ namespace RigPlayPlugin
                 if (!started) return;
                 started = false;
             }
+            try { TelemetrySender.Stop(); } catch (Exception ex) { PluginLog.Error("Stopping the telemetry sender failed", ex); }
             try { Probe.Stop(); } catch (Exception ex) { PluginLog.Error("Stopping the web dash probe failed", ex); }
             try { Beacon?.Stop(); } catch (Exception ex) { PluginLog.Error("Stopping the beacon failed", ex); }
             try { Server?.Stop(); } catch (Exception ex) { PluginLog.Error("Stopping the control server failed", ex); }
@@ -259,7 +292,13 @@ namespace RigPlayPlugin
                 IdleDashboardUrl = session.HasFeature(Features.IdleDashboard) ? DashboardUrls.Build(local, port, Settings.IdleDashboard) : null,
                 DashboardServer = Probe.Current,
                 Audio = new AudioInfo { Enabled = audio, Port = audioPort.Value, Formats = formats },
+                Mic = session.HasFeature(Features.Mic) ? new MicInfo { Enabled = SafeMicEnabled() } : null,
             };
+        }
+
+        private bool SafeMicEnabled()
+        {
+            try { return MicEnabled != null && MicEnabled(); } catch (Exception) { return false; }
         }
 
         // Dashboards (spec §11)
@@ -318,6 +357,7 @@ namespace RigPlayPlugin
             {
                 StateFactory = BuildState,
                 Pairing = Pairing,
+                PluginFeatures = OfferedFeatures,
             };
             server.SessionsChanged += () =>
             {
@@ -329,7 +369,10 @@ namespace RigPlayPlugin
             server.SessionClosed += s =>
             {
                 if (s.PairedOrder > 0) RaiseAudio(SessionLost, h => h(s.Remote.Address));
+                if (s.PairedOrder > 0) RaiseAudio(PairedSessionClosed, h => h(s));
             };
+            server.MicStartReceived += (s, m) => RaiseAudio(MicStart, h => h(s, m));
+            server.MicStopReceived += (s, m) => RaiseAudio(MicStop, h => h(s));
             Server = server;
             server.Start();
         }
@@ -344,6 +387,15 @@ namespace RigPlayPlugin
 
         /// <summary>A Paired session closed (link loss, replaced, forgotten, shutdown): every stream from that IP stops.</summary>
         public event Action<IPAddress> SessionLost;
+
+        /// <summary>A Paired session with feature mic sent micStart (spec §6.13). Raised on a network thread.</summary>
+        public event Action<ClientSession, MicStartMessage> MicStart;
+
+        /// <summary>A Paired session with feature mic sent micStop.</summary>
+        public event Action<ClientSession> MicStop;
+
+        /// <summary>A Paired session closed; the session itself, for owners keyed by session (the microphone).</summary>
+        public event Action<ClientSession> PairedSessionClosed;
 
         /// <summary>Remote IPs of the Paired sessions: the only sources audio is accepted from (spec §10.1).</summary>
         public List<IPAddress> PairedAddresses

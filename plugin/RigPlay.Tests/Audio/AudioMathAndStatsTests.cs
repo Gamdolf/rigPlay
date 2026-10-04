@@ -172,7 +172,14 @@ namespace RigPlayPlugin.Tests.Audio
                 Late = 1,
                 Skips = 2,
             };
-            Assert.Equal("200 pkt/s · loss 5.0 % · buffer 82 ms (target 120) · 48 kHz stereo pcm_s16le · underruns 3 · late 1 · skips 2", s.ToDisplayString());
+            Assert.Equal("200 pkt/s · loss 5.0 % · buffer 82 ms (target 120) · 48 kHz stereo pcm_s16le · underruns 3 · longest stall 0 ms · late 1 · skips 2", s.ToDisplayString());
+            s.LongestStallMs = 618.4;
+            s.CatchingUp = true;
+            Assert.Equal("200 pkt/s · loss 5.0 % · buffer 82 ms (target 120, trimming) · 48 kHz stereo pcm_s16le · underruns 3 · longest stall 618 ms · late 1 · skips 2", s.ToDisplayString());
+            s.Underruns = 0;
+            s.CatchingUp = false;
+            Assert.DoesNotContain("longest stall", s.ToDisplayString());
+            s.Underruns = 3;
             s.Active = false;
             s.AutoStarted = true;
             Assert.StartsWith("idle · ", s.ToDisplayString());

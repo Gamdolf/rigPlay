@@ -117,6 +117,9 @@ namespace RigPlayPlugin.Net
         /// <summary>The tablet's last valid status, or null.</summary>
         public StatusMessage LastStatus { get; internal set; }
 
+        /// <summary>The tablet's last artwork (spec §6.14), or null before the first.</summary>
+        public ArtworkMessage LastArtwork { get; internal set; }
+
         /// <summary>Monotonic time the last status arrived.</summary>
         public long LastStatusAtMs { get; internal set; }
 
@@ -134,6 +137,9 @@ namespace RigPlayPlugin.Net
 
         /// <summary>Why the session closed, once it has.</summary>
         public string CloseReason { get; private set; }
+
+        /// <summary>Monotonic time the last line (any line, an empty one included) arrived from the tablet.</summary>
+        public long LastLineAtMs => Interlocked.Read(ref lastLineAt);
 
         public bool HasFeature(string feature)
         {
@@ -418,6 +424,12 @@ namespace RigPlayPlugin.Net
             if (message is PairRequestMessage)
             {
                 SendError(ErrorCodes.UnexpectedMessage, "already paired", message.Type);
+                return;
+            }
+            if (MessageTypes.MicFeature.Contains(message.Type) && !HasFeature(global::RigPlayPlugin.Protocol.Features.Mic))
+            {
+                // micStart / micStop need feature mic (spec §6.13).
+                SendError(ErrorCodes.UnexpectedMessage, message.Type + " requires feature mic", message.Type);
                 return;
             }
             server.OnPairedMessage(this, message);

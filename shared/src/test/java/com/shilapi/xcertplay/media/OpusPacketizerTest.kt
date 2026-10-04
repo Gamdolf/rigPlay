@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.media
 
 import com.shilapi.xcertplay.simhub.AudioDatagram
+import com.shilapi.xcertplay.simhub.AudioDirection
 import com.shilapi.xcertplay.simhub.AudioFormat
 import com.shilapi.xcertplay.simhub.AudioStream
 import com.shilapi.xcertplay.simhub.SimHubAudioCodec
@@ -12,7 +13,7 @@ import org.junit.Test
 class OpusPacketizerTest {
     private fun collect(packetizer: OpusPacketizer, block: (OpusPacketizer, (ByteArray, Int) -> Unit) -> Unit): List<AudioDatagram> {
         val out = mutableListOf<AudioDatagram>()
-        block(packetizer) { bytes, length -> out.add(SimHubAudioCodec.decode(bytes, 0, length) ?: error("invalid opus datagram")) }
+        block(packetizer) { bytes, length -> out.add(SimHubAudioCodec.decode(bytes, AudioDirection.TABLET_TO_PC, 0, length) ?: error("invalid opus datagram")) }
         return out
     }
 

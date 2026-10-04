@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // AudioSection.cs: the Audio section of the rigPlay page (#24), built in code with the Ui helpers like the other
 // sections: the output device picker (friendly names, refresh), the volume slider, mute, and the receiver's
-// Opus toggle (off by default: offers tablets Opus before PCM, docs/protocol.md §10.4), and the receiver's
+// buffer depth (the minimum, what the network taught, a Forget button), the Opus toggle (off by default:
+// offers tablets Opus before PCM, docs/protocol.md §10.4), and the receiver's
 // live stats (port, output state, packets/s, loss, buffer depth and format per stream, last error), refreshed
 // every 500 ms while the page is visible. Changes apply to the playing audio at once; the volume is saved
 // shortly after the slider stops moving so dragging does not rewrite the settings file on every step.
@@ -20,6 +21,7 @@ namespace RigPlayPlugin.Audio
         private readonly ComboBox devices = new ComboBox { MinWidth = 320, MaxWidth = 420 };
         private readonly TextBlock volumeText = Ui.Text("");
         private readonly TextBlock portText = Ui.Text("");
+        private readonly TextBlock bufferText = Ui.Text("");
         private readonly TextBlock opusText = Ui.Text("");
         private readonly TextBlock outputText = Ui.Text("");
         private readonly TextBlock mediaText = Ui.Text("");
@@ -128,12 +130,36 @@ namespace RigPlayPlugin.Audio
                 RefreshStats();
             });
 
+            var buffer = PageKit.CommitTextBox(Settings.AudioBufferMs.ToString(), 70, box =>
+            {
+                int value;
+                if (!int.TryParse(box.Text, out value) || value < RigPlaySettings.MinAudioBufferMs || value > RigPlaySettings.MaxAudioBufferMs)
+                {
+                    box.Text = Settings.AudioBufferMs.ToString();
+                    return;
+                }
+                if (value == Settings.AudioBufferMs) return;
+                Settings.AudioBufferMs = value;
+                plugin.SaveSettings();
+                Log.Info("Audio buffer minimum set to " + value + " ms from the settings page");
+                plugin.Audio?.ApplyBufferSetting();
+                RefreshStats();
+            });
+            var forget = SecondaryButton("Forget", (s, e) =>
+            {
+                plugin.Audio?.ForgetLearnedBuffer();
+                RefreshStats();
+            });
+            forget.ToolTip = "Start again from the minimum: the next streams begin shallow and the buffer learns the network's stalls anew.";
+
             RefreshStats();
             return Ui.Section("Audio",
-                "Plays the tablet's CarPlay audio (music, Siri, calls) on an output device of this PC. Siri and calls lower the music while they play.",
+                "Plays the tablet's CarPlay audio (music, Siri, calls) on an output device of this PC. Siri and calls lower the music while they play. "
+                + "The buffer learns how long this network stalls and holds that much audio ahead; every underrun is a dropout you heard.",
                 Ui.Row("Output device", Ui.HStack(8, devices, refresh)),
                 Ui.Row("Volume", Ui.HStack(12, slider, volumeText)),
                 Ui.Row("Mute", mute),
+                Ui.Row("Buffer (ms)", Ui.HStack(12, buffer, bufferText, forget)),
                 Ui.Row("Audio port (UDP)", Ui.HStack(12, port, portText)),
                 Ui.Row("Opus compression", Ui.HStack(12, opus, opusText)),
                 Ui.Row("Output", outputText),
@@ -220,6 +246,10 @@ namespace RigPlayPlugin.Audio
                 portText.Text = stats.Listening ? "listening on " + (stats.Port == 0 ? Settings.AudioPort : stats.Port) + ", paired tablets only" : "not listening (see Last error)";
             }
             outputText.Text = stats.Output;
+            var learned = Settings.LearnedAudioBufferMs;
+            bufferText.Text = learned > Settings.AudioBufferMs
+                ? "minimum · streams start with the " + learned + " ms this network taught"
+                : "minimum · nothing deeper learned on this network yet";
             mediaText.Text = Line(stats, AudioStreamType.Media);
             altText.Text = Line(stats, AudioStreamType.Alt);
             telephonyText.Text = Line(stats, AudioStreamType.Telephony);

@@ -34,6 +34,10 @@ namespace RigPlayPlugin.Audio
         public long Underruns;
         /// <summary>Times the buffer grew past its maximum and skipped ahead: each one is a jump.</summary>
         public long Skips;
+        /// <summary>The longest stall measured at an underrun (the depth drained plus the silence played), in ms.</summary>
+        public double LongestStallMs;
+        /// <summary>The buffer is playing slightly faster to trim depth above its target.</summary>
+        public bool CatchingUp;
         /// <summary>Opus packets the decoder could not decode (opus streams only).</summary>
         public long DecodeFailures;
 
@@ -44,7 +48,8 @@ namespace RigPlayPlugin.Audio
 
         /// <summary>
         /// E.g. "200 pkt/s · loss 5.0 % · buffer 82 ms (target 80) · 48 kHz stereo pcm_s16le · underruns 0 · late 0 · skips 0",
-        /// or "stopped". The last three are cumulative: a rising underrun count is audio cutting out.
+        /// with "(target 750, trimming)" while excess depth is being trimmed and "· longest stall 620 ms" once there was
+        /// an underrun, or "stopped". The counters are cumulative: a rising underrun count is audio cutting out.
         /// </summary>
         public string ToDisplayString()
         {
@@ -54,10 +59,11 @@ namespace RigPlayPlugin.Audio
             return state
                 + PacketsPerSecond.ToString("0", inv) + " pkt/s · loss "
                 + LossPercent.ToString("0.0", inv) + " % · buffer "
-                + BufferMs.ToString("0", inv) + " ms (target " + TargetMs.ToString("0", inv) + ") · "
+                + BufferMs.ToString("0", inv) + " ms (target " + TargetMs.ToString("0", inv) + (CatchingUp ? ", trimming" : "") + ") · "
                 + FormatText
                 + (AutoStarted ? " (auto-started)" : "")
                 + " · underruns " + Underruns.ToString(inv)
+                + (Underruns > 0 ? " · longest stall " + LongestStallMs.ToString("0", inv) + " ms" : "")
                 + " · late " + Late.ToString(inv)
                 + " · skips " + Skips.ToString(inv)
                 + (Format == AudioFormat.Opus ? " · undecodable " + DecodeFailures.ToString(inv) : "");

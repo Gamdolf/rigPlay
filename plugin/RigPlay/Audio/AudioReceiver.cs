@@ -38,7 +38,7 @@ namespace RigPlayPlugin.Audio
     /// <summary>One started stream: its announced format and its play-out buffer. A format change makes a new one.</summary>
     public sealed class AudioStream
     {
-        internal AudioStream(AudioStreamType type, int sampleRate, int channels, AudioFormat format, bool autoStarted, int targetMs, int maxMs, IPAddress source = null)
+        internal AudioStream(AudioStreamType type, int sampleRate, int channels, AudioFormat format, bool autoStarted, int targetMs, int maxTargetMs, int skipSlackMs, IPAddress source = null)
         {
             Source = source;
             Type = type;
@@ -46,7 +46,7 @@ namespace RigPlayPlugin.Audio
             Channels = channels;
             Format = format;
             AutoStarted = autoStarted;
-            Buffer = new JitterBuffer(sampleRate, channels, targetMs, maxMs);
+            Buffer = new JitterBuffer(sampleRate, channels, targetMs, maxTargetMs, skipSlackMs);
             if (format == AudioFormat.Opus)
             {
                 // Throws when Concentus is missing or the rate is not an Opus rate; OnAudioStart checks both first.
@@ -98,6 +98,14 @@ namespace RigPlayPlugin.Audio
 
         public const int StatsIntervalMs = 500;
 
+        /// <summary>
+        /// Caps on the learned buffer depth per stream (ms), below the receiver's own cap. Music tolerates any delay;
+        /// Siri's answers may come a little later; a call with more than a second of delay stops being a conversation,
+        /// so telephony trades the longest stalls for latency it can live with.
+        /// </summary>
+        public const int AltMaxTargetMs = 1500;
+        public const int TelephonyMaxTargetMs = 1000;
+
         private static readonly AudioStreamType[] StreamTypes = { AudioStreamType.Media, AudioStreamType.Alt, AudioStreamType.Telephony };
 
         private readonly object gate = new object();
@@ -106,8 +114,11 @@ namespace RigPlayPlugin.Audio
         private readonly Dictionary<AudioStreamType, double> learnedTargetMs = new Dictionary<AudioStreamType, double>();
         private readonly IAudioSink sink;
         private readonly Func<long> clockMs;
-        private readonly int targetMs;
-        private readonly int maxMs;
+        private int targetMs;
+        private readonly int maxTargetMs;
+        private readonly int skipSlackMs;
+        // The highest target any stream learned (ms), reported once through TargetLearned and seeded from the saved value.
+        private double learnedMaxMs;
         private readonly RateMeter datagramMeter = new RateMeter();
         private readonly HashSet<string> loggedOnce = new HashSet<string>();
 
@@ -124,18 +135,81 @@ namespace RigPlayPlugin.Audio
         private volatile string lastError = "";
         private volatile AudioStats stats = AudioStats.Empty;
 
-        public AudioReceiver(int port, IAudioSink sink, int targetMs = JitterBuffer.DefaultTargetMs, int maxMs = JitterBuffer.DefaultMaxMs)
-            : this(port, sink, targetMs, maxMs, null)
+        /// <param name="targetMs">The depth every stream starts with (the settings' minimum buffer).</param>
+        /// <param name="maxTargetMs">The most a stream's depth may learn to; per-stream caps apply below it.</param>
+        public AudioReceiver(int port, IAudioSink sink, int targetMs = JitterBuffer.DefaultTargetMs, int maxTargetMs = JitterBuffer.DefaultMaxTargetMs)
+            : this(port, sink, targetMs, maxTargetMs, JitterBuffer.DefaultSkipSlackMs, null)
         {
         }
 
-        internal AudioReceiver(int port, IAudioSink sink, int targetMs, int maxMs, Func<long> clockMs)
+        internal AudioReceiver(int port, IAudioSink sink, int targetMs, int maxTargetMs, int skipSlackMs, Func<long> clockMs)
         {
             Port = port;
             this.sink = sink;
             this.targetMs = targetMs;
-            this.maxMs = maxMs;
+            this.maxTargetMs = maxTargetMs;
+            this.skipSlackMs = skipSlackMs;
             this.clockMs = clockMs ?? StopwatchMs;
+        }
+
+        /// <summary>The cap on the learned depth of <paramref name="type"/>, under <paramref name="receiverCap"/>.</summary>
+        public static int MaxTargetMsFor(AudioStreamType type, int receiverCap)
+        {
+            switch (type)
+            {
+                case AudioStreamType.Alt: return Math.Min(receiverCap, AltMaxTargetMs);
+                case AudioStreamType.Telephony: return Math.Min(receiverCap, TelephonyMaxTargetMs);
+                default: return receiverCap;
+            }
+        }
+
+        /// <summary>
+        /// Raised (on the stats thread) when a stream learned a deeper buffer than any before: the value in ms, for
+        /// the settings to keep so the next SimHub start does not have to learn it again through dropouts.
+        /// </summary>
+        public event Action<double> TargetLearned;
+
+        /// <summary>The highest depth learned so far (ms), or the seeded value; 0 when none.</summary>
+        public double LearnedTargetMs
+        {
+            get { lock (gate) return learnedMaxMs; }
+        }
+
+        /// <summary>
+        /// Seeds the learned depth (ms) from the last run: every stream of every type starts from it, each under its cap.
+        /// A value at or below what is known changes nothing.
+        /// </summary>
+        public void InheritLearnedTarget(double ms)
+        {
+            if (ms <= 0 || double.IsNaN(ms) || double.IsInfinity(ms)) return;
+            lock (gate)
+            {
+                if (ms <= learnedMaxMs) return;
+                learnedMaxMs = ms;
+                foreach (var type in StreamTypes) learnedTargetMs[type] = ms;
+                foreach (var stream in streams.Values) stream.Buffer.InheritTarget(ms);
+            }
+        }
+
+        /// <summary>The settings' minimum depth changed (ms): streams started from now on begin there.</summary>
+        public void SetTargetMs(int ms)
+        {
+            if (ms < 0) return;
+            lock (gate) targetMs = ms;
+        }
+
+        /// <summary>
+        /// Forgets what was learned: the streams playing go back to the configured depth (trimming what they hold above
+        /// it) and the ones started from now on begin there.
+        /// </summary>
+        public void ForgetLearnedTarget()
+        {
+            lock (gate)
+            {
+                learnedMaxMs = 0;
+                learnedTargetMs.Clear();
+                foreach (var stream in streams.Values) stream.Buffer.ResetTarget(targetMs);
+            }
         }
 
         /// <summary>The configured audio port (0 binds an ephemeral port, for tests).</summary>
@@ -455,6 +529,7 @@ namespace RigPlayPlugin.Audio
                     LastError = lastError,
                 };
                 var seconds = now / 1000.0;
+                double learned = 0;
                 lock (gate)
                 {
                     datagramMeter.Add(seconds, snapshot.Datagrams, 0);
@@ -474,6 +549,12 @@ namespace RigPlayPlugin.Audio
                         }
                         var c = stream.Buffer.Counters;
                         stream.Meter.Add(seconds, c.Received, c.Lost);
+                        var targetMsNow = c.TargetFrames * 1000.0 / stream.SampleRate;
+                        if (targetMsNow > learnedMaxMs + 0.5)
+                        {
+                            learnedMaxMs = targetMsNow;
+                            learned = targetMsNow;
+                        }
                         snapshot.Streams.Add(new AudioStreamStats
                         {
                             Stream = type,
@@ -492,9 +573,16 @@ namespace RigPlayPlugin.Audio
                             Late = c.Late,
                             Underruns = c.Underruns,
                             Skips = c.Overflows,
+                            LongestStallMs = c.LongestStallFrames * 1000.0 / stream.SampleRate,
+                            CatchingUp = c.CatchingUp,
                             DecodeFailures = stream.DecodeFailures,
                         });
                     }
+                }
+                if (learned > 0)
+                {
+                    AudioLog.Info("Audio buffer learned: streams now start with " + learned.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + " ms of depth on this network");
+                    try { TargetLearned?.Invoke(learned); } catch (Exception ex) { AudioLog.Warn("A buffer listener failed: " + ex.Message); }
                 }
                 try
                 {
@@ -544,9 +632,10 @@ namespace RigPlayPlugin.Audio
                 learnedTargetMs[type] = old.Buffer.TargetMs;
                 StopLockedDispose(old);
             }
-            var stream = new AudioStream(type, sampleRate, channels, format, auto, targetMs, maxMs, source);
+            var stream = new AudioStream(type, sampleRate, channels, format, auto, targetMs, MaxTargetMsFor(type, maxTargetMs), skipSlackMs, source);
             double learned;
             if (learnedTargetMs.TryGetValue(type, out learned)) stream.Buffer.InheritTarget(learned);
+            else if (learnedMaxMs > 0) stream.Buffer.InheritTarget(learnedMaxMs);
             stream.Meter.Add(clockMs() / 1000.0, 0, 0); // so the first snapshot already has a rate
             streams[type] = stream;
             AudioLog.Info("Audio stream " + stream + (old == null ? "" : " (restarted)") + " started" + (auto ? " by its first datagram (no control channel)" : source != null ? " by " + source : ""));
