@@ -138,10 +138,24 @@ Anyone you give this APK to can extract the private key from it.
 
 ### CI builds
 
-`ci.yml` and `release.yml` never set `RIGPLAY_AUTH_ASSETS_DIR`. Their APKs, including the ones attached to
-GitHub releases, contain no identity and **cannot connect to an iPhone**. `release.yml` signs its APK only
-when the `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and
-`ANDROID_KEY_PASSWORD` repository secrets are set.
+`ci.yml` (pull requests and pushes to `main`) never sets `RIGPLAY_AUTH_ASSETS_DIR`: its debug APK contains no
+identity and **cannot connect to an iPhone**.
+
+`release.yml` (tags) builds the APK it attaches to the GitHub release from repository secrets, decoded only
+inside the runner and deleted after the build:
+
+| Secret | Content |
+|---|---|
+| `ANDROID_KEYSTORE_BASE64` | The release keystore, base64 |
+| `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` | As for a local build |
+| `RIGPLAY_IDENTITY_PK8_BASE64` | `offline-mfi/identity.pk8`, base64 |
+| `RIGPLAY_CERTIFICATE_P7B_BASE64` | `offline-mfi/certificate.p7b`, base64 |
+
+`scripts/set-release-secrets.sh` uploads all six from the local files and variables a local release build
+uses (`source ~/rigplay-release/env.sh && bash scripts/set-release-secrets.sh`). With them set, the release
+carries `rigPlay-<version>.apk`: signed, identity inside, verified by the workflow the same way
+`build-release.sh` verifies a local build. Without the keystore the APK is named `-unsigned`; without the
+identity, `-no-identity`; such APKs cannot be installed or cannot connect, and the name says so.
 
 ## SimHub plugin
 
@@ -167,5 +181,5 @@ workflow refuses a tag other than `v<VERSION>`. The Android `versionCode` lives 
 ## Releases from CI
 
 Pushing a tag `v<VERSION>` runs `.github/workflows/release.yml`, which publishes the APK and
-`rigPlay-plugin.zip` on a GitHub release. The CI APK is identity-less and cannot connect to an
-iPhone; see [CI builds](#ci-builds).
+`rigPlay-plugin.zip` on a GitHub release, with `SHA256SUMS.txt`. The APK is signed and carries the
+identity when the repository secrets are set; see [CI builds](#ci-builds).

@@ -71,5 +71,7 @@ ships with; leave it empty while undecided.
 
 `VERSION` holds the version. Pushing a tag `v<VERSION>` (for example `v0.1.0`, or `v0.1.0-rc.1`
 for a pre-release) runs `.github/workflows/release.yml`. It refuses the tag unless it matches
-`VERSION` and `CHANGELOG.md` has a section for it, then publishes the APK and `rigPlay-plugin.zip`.
+`VERSION` and `CHANGELOG.md` has a section for it, then publishes the APK, `rigPlay-plugin.zip` and
+`SHA256SUMS.txt`. The APK is signed and carries the accessory identity when the repository secrets
+described in [docs/BUILD.md](docs/BUILD.md#ci-builds) are set (`scripts/set-release-secrets.sh`).
 A tag on a commit that is not on `main` produces a draft release, which is how to test the workflow.
