@@ -2,9 +2,12 @@
 # the SimHub plugin, then publishes a GitHub release carrying the APK and rigPlay-plugin.zip.
 # - A version with a pre-release suffix (v0.1.0-rc.1) publishes as a pre-release.
 # - A tag whose commit is not on main (a test tag on a branch) publishes as a draft.
-# - The APK is identity-less (no accessory authentication assets) and unsigned unless the
-#   ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD
-#   secrets are set.
+# - The APK is signed when the ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_ALIAS /
+#   ANDROID_KEY_PASSWORD secrets are set, and carries the accessory identity (so it can connect to an
+#   iPhone) when RIGPLAY_IDENTITY_PK8_BASE64 and RIGPLAY_CERTIFICATE_P7B_BASE64 are set. Missing secrets
+#   give an APK named -unsigned and/or -no-identity. scripts/set-release-secrets.sh uploads all six from
+#   the local files a release build uses (docs/BUILD.md).
+# - SHA256SUMS.txt lists every attached file.
 # Only the final job holds a token that can write to the repository.
 name: Release
 on:
@@ -78,8 +81,33 @@ jobs:
           if [ -n "${KEYSTORE_BASE64}" ]; then
             printf '%s' "${KEYSTORE_BASE64}" | base64 --decode > "${RUNNER_TEMP}/release.jks"
             echo "ANDROID_KEYSTORE_PATH=${RUNNER_TEMP}/release.jks" >> "$GITHUB_ENV"
+            echo "signed=true" >> "$GITHUB_ENV"
           else
-            echo "::notice::No ANDROID_KEYSTORE_BASE64 secret; building an unsigned APK"
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret; building an unsigned APK that Android will not install"
+            echo "signed=false" >> "$GITHUB_ENV"
+          fi
+      # mobile/build.gradle.kts bundles the identity from RIGPLAY_AUTH_ASSETS_DIR, outside the checkout, exactly
+      # as a local release build does (docs/BUILD.md, "Accessory identity"). Both files or neither.
+      - name: Provide the accessory identity when configured
+        env:
+          IDENTITY_PK8_BASE64: ${{ secrets.RIGPLAY_IDENTITY_PK8_BASE64 }}
+          CERTIFICATE_P7B_BASE64: ${{ secrets.RIGPLAY_CERTIFICATE_P7B_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -n "${IDENTITY_PK8_BASE64}" ] && [ -n "${CERTIFICATE_P7B_BASE64}" ]; then
+            dir="${RUNNER_TEMP}/identity/offline-mfi"
+            mkdir -p "${dir}"
+            printf '%s' "${IDENTITY_PK8_BASE64}" | base64 --decode > "${dir}/identity.pk8"
+            printf '%s' "${CERTIFICATE_P7B_BASE64}" | base64 --decode > "${dir}/certificate.p7b"
+            [ -s "${dir}/identity.pk8" ] && [ -s "${dir}/certificate.p7b" ] || { echo "::error::Decoded identity files are empty"; exit 1; }
+            echo "RIGPLAY_AUTH_ASSETS_DIR=${RUNNER_TEMP}/identity" >> "$GITHUB_ENV"
+            echo "identity=true" >> "$GITHUB_ENV"
+          elif [ -n "${IDENTITY_PK8_BASE64}${CERTIFICATE_P7B_BASE64}" ]; then
+            echo "::error::Set both RIGPLAY_IDENTITY_PK8_BASE64 and RIGPLAY_CERTIFICATE_P7B_BASE64, or neither"
+            exit 1
+          else
+            echo "::warning::No RIGPLAY_IDENTITY_*_BASE64 secrets; the APK carries no accessory identity and cannot connect to an iPhone"
+            echo "identity=false" >> "$GITHUB_ENV"
           fi
       - name: Unit tests and release build
         env:
@@ -87,19 +115,34 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: ./gradlew :shared:testDebugUnitTest :common:testDebugUnitTest :mobile:assembleRelease --stacktrace
-      - name: Name the APK
+      # rigPlay-<version>.apk is the real thing: signed and able to connect. Anything less says so in its name.
+      - name: Check and name the APK
         env:
           VERSION: ${{ needs.check.outputs.version }}
         run: |
           set -euo pipefail
-          mkdir -p dist
           out=mobile/build/outputs/apk/release
-          if [ -f "${out}/mobile-release.apk" ]; then
-            cp "${out}/mobile-release.apk" "dist/rigPlay-${VERSION}.apk"
+          name="rigPlay-${VERSION}"
+          if [ "${signed}" = "true" ]; then
+            apk="${out}/mobile-release.apk"
+            [ -f "${apk}" ] || { echo "::error::Gradle did not produce a signed APK"; exit 1; }
+            "${ANDROID_HOME}/build-tools/36.0.0/apksigner" verify --print-certs "${apk}" | grep 'certificate DN'
           else
-            cp "${out}/mobile-release-unsigned.apk" "dist/rigPlay-${VERSION}-unsigned.apk"
+            apk="${out}/mobile-release-unsigned.apk"
+            name="${name}-unsigned"
           fi
-          rm -f "${RUNNER_TEMP}/release.jks"
+          if [ "${identity}" = "true" ]; then
+            for f in identity.pk8 certificate.p7b; do
+              inside="$(unzip -p "${apk}" "assets/offline-mfi/${f}" | sha256sum | cut -d' ' -f1)"
+              outside="$(sha256sum < "${RIGPLAY_AUTH_ASSETS_DIR}/offline-mfi/${f}" | cut -d' ' -f1)"
+              [ "${inside}" = "${outside}" ] || { echo "::error::assets/offline-mfi/${f} is missing from the APK or differs"; exit 1; }
+            done
+          else
+            name="${name}-no-identity"
+          fi
+          mkdir -p dist
+          cp "${apk}" "dist/${name}.apk"
+          rm -rf "${RUNNER_TEMP}/release.jks" "${RUNNER_TEMP}/identity"
           ls -l dist
       - uses: actions/upload-artifact@v4
         with:
@@ -148,8 +191,11 @@ jobs:
         with:
           name: rigplay-plugin
           path: dist/
-      - name: List release files
-        run: ls -l dist/
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum -- * > SHA256SUMS.txt)
+          ls -l dist/ && cat dist/SHA256SUMS.txt
       # The release body is the changelog's own section for this version.
       - name: Take the release notes from the changelog
         run: python3 scripts/changelog_section.py "${GITHUB_REF_NAME}" --out release-body.md
@@ -160,6 +206,7 @@ jobs:
           files: |
             dist/*.apk
             dist/rigPlay-plugin.zip
+            dist/SHA256SUMS.txt
           body_path: release-body.md
           fail_on_unmatched_files: true
           draft: ${{ needs.check.outputs.draft == 'true' }}
