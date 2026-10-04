@@ -24,8 +24,9 @@ Wireless CarPlay on a tablet that is also connected to home Wi-Fi has not been v
 ([#33](https://github.com/xorob0/rigPlay/issues/33)). Wired USB is the fallback. See
 [Compatibility](docs/COMPATIBILITY.md).
 
-APKs built by CI contain no accessory identity and cannot connect to an iPhone. See
-[Accessory identity](docs/BUILD.md#accessory-identity-required-to-connect-to-an-iphone).
+The APK on a [release](https://github.com/xorob0/rigPlay/releases) is signed and carries the experimental
+accessory identity, so it connects to an iPhone; see [Accessory identity](docs/BUILD.md#accessory-identity-required-to-connect-to-an-iphone)
+for what that identity is. APKs built for pull requests contain no identity and cannot connect.
 
 ## Install
 

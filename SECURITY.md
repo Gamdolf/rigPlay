@@ -17,9 +17,12 @@ The public Git tree and source archives contain no accessory keys and no Android
 `scripts/check_public_tree.py` fails CI on credential containers and private-key blocks in tracked files.
 Tests generate synthetic identities at runtime. A build includes the identity only when you point
 `RIGPLAY_AUTH_ASSETS_DIR` at it, and then only the two expected files (see
-[docs/BUILD.md](docs/BUILD.md#accessory-identity-required-to-connect-to-an-iphone)).
+[docs/BUILD.md](docs/BUILD.md#accessory-identity-required-to-connect-to-an-iphone)). The release workflow
+takes the identity and the signing key from encrypted GitHub repository secrets, decodes them only inside its
+runner and deletes them after the build; pull-request builds never see them.
 
-The Android signing key is separate, stays with whoever builds the release, and is never bundled.
+The Android signing key is separate, stays with the repository owner and in those secrets, and is never
+bundled.
 
 ## PC ↔ tablet link
 

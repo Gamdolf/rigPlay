@@ -34,9 +34,9 @@ server is off" instead of the dashboard.
 
 ## 3. Install the app on the tablet
 
-1. Get the APK. APKs built by GitHub Actions contain no accessory identity and cannot connect to an iPhone.
-   Until a release says otherwise, build your own with the identity:
-   [Accessory identity](BUILD.md#accessory-identity-required-to-connect-to-an-iphone).
+1. Get `rigPlay-<version>.apk` from the [latest release](https://github.com/xorob0/rigPlay/releases). An
+   APK named `-no-identity` or `-unsigned` cannot connect to an iPhone or cannot be installed; build your
+   own instead: [Accessory identity](BUILD.md#accessory-identity-required-to-connect-to-an-iphone).
 2. Install it with the tablet's file manager (allow installs from that app when asked), or from a computer:
 
    ```sh

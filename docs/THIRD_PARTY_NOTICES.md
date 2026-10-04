@@ -70,8 +70,9 @@ its own authors; rigPlay is not affiliated with it.
 Connecting to an iPhone needs an accessory certificate and key pair. rigPlay uses the same pair DiPlay
 ships: one recovered from public Carlinkit C2Air Allwinner V821 firmware during the DiPlay maintainer's local
 investigation. These data are not Apple-issued credentials for rigPlay or DiPlay and are not relicensed as
-project source code. They are not in this repository or its source archives, and CI builds do not contain
-them; a local build adds them only from an explicit directory (see
-[BUILD.md](BUILD.md#accessory-identity-required-to-connect-to-an-iphone)). Any APK that bundles them makes
+project source code. They are not in this repository or its source archives, and pull-request CI builds do
+not contain them; a local build adds them only from an explicit directory, and a release build only from
+repository secrets (see [BUILD.md](BUILD.md#accessory-identity-required-to-connect-to-an-iphone)). Any APK
+that bundles them makes
 the private key extractable. Continued acceptance after iOS updates and suitability for general
 distribution are unresolved. The separate Android APK-signing key is never distributed.
