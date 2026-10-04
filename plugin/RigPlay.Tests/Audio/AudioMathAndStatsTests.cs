@@ -59,6 +59,21 @@ namespace RigPlayPlugin.Tests.Audio
         }
 
         [Fact]
+        public void AnotherProgramTalkingLowersMediaToTheTalkVolume()
+        {
+            // 25 % on the square-law curve is -24 dB; 50 % is -12 dB, the same as Siri's ducking.
+            Assert.Equal(0.0625, AudioMath.TalkDuckGain(25), 4);
+            Assert.Equal(0.0625, AudioMath.StreamGain(AudioStreamType.Media, false, false, true, AudioMath.TalkDuckGain(25)), 4);
+            Assert.Equal(1.0, AudioMath.StreamGain(AudioStreamType.Media, false, false, false, AudioMath.TalkDuckGain(25)), 4);
+            // With Siri at the same time the lower of the two applies.
+            Assert.Equal(0.0625, AudioMath.StreamGain(AudioStreamType.Media, true, false, true, AudioMath.TalkDuckGain(25)), 4);
+            Assert.Equal(0.2512, AudioMath.StreamGain(AudioStreamType.Media, true, false, true, AudioMath.TalkDuckGain(80)), 4);
+            // Siri and calls themselves are never lowered by another program.
+            Assert.Equal(1.0, AudioMath.StreamGain(AudioStreamType.Alt, false, false, true, 0f), 4);
+            Assert.Equal(0.0, AudioMath.StreamGain(AudioStreamType.Media, false, false, true, AudioMath.TalkDuckGain(0)), 4);
+        }
+
+        [Fact]
         public void AConstantGainScalesEverySample()
         {
             var buffer = new float[] { 1, -1, 0.5f, -0.5f };

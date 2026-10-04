@@ -51,6 +51,34 @@ namespace RigPlayPlugin.Tests
         }
 
         [Fact]
+        public void TheTalkWatchDefaultsToCrewChiefLoweringTheMusicToAQuarter()
+        {
+            var settings = new RigPlaySettings();
+            Assert.True(settings.TalkWatchEnabled);
+            Assert.Equal(new[] { "CrewChiefV4" }, settings.TalkProcesses);
+            Assert.Equal(RigPlaySettings.TalkModeDuck, settings.TalkMode);
+            Assert.Equal(25, settings.TalkDuckVolume);
+        }
+
+        [Fact]
+        public void TalkWatchValuesAreRepaired()
+        {
+            var settings = new RigPlaySettings
+            {
+                TalkProcesses = new List<string> { " CrewChiefV4.exe ", "discord", "DISCORD.EXE", "", "  ", null },
+                TalkMode = "mute",
+                TalkDuckVolume = 140,
+            }.Normalize();
+            Assert.Equal(new[] { "CrewChiefV4", "discord" }, settings.TalkProcesses);
+            Assert.Equal(RigPlaySettings.TalkModeDuck, settings.TalkMode);
+            Assert.Equal(100, settings.TalkDuckVolume);
+            Assert.Equal(RigPlaySettings.TalkModePause, new RigPlaySettings { TalkMode = "pause", TalkDuckVolume = -3 }.Normalize().TalkMode);
+            Assert.Equal(0, new RigPlaySettings { TalkDuckVolume = -3 }.Normalize().TalkDuckVolume);
+            Assert.Empty(new RigPlaySettings { TalkProcesses = null }.Normalize().TalkProcesses);
+            Assert.Equal("CrewChiefV4", RigPlaySettings.NormalizeProcessName("  crewchiefv4.EXE ".Replace("crewchiefv4", "CrewChiefV4")));
+        }
+
+        [Fact]
         public void TheThreeDefaultPortsAreDistinctAndUnprivileged()
         {
             var ports = new[] { ProtocolDefaults.ControlPort, ProtocolDefaults.DiscoveryPort, ProtocolDefaults.AudioPort };

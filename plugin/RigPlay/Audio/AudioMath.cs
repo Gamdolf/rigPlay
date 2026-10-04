@@ -41,8 +41,26 @@ namespace RigPlayPlugin.Audio
         /// <summary>The gain for one stream: media is ducked while alt or telephony is active; the others play at 1.</summary>
         public static float StreamGain(AudioStreamType type, bool altActive, bool telephonyActive)
         {
-            if (type == AudioStreamType.Media && (altActive || telephonyActive)) return DuckGain;
-            return 1f;
+            return StreamGain(type, altActive, telephonyActive, false, 1f);
+        }
+
+        /// <summary>
+        /// As above, and while another program on the PC talks (<paramref name="externalTalking"/>, #58) media is lowered to
+        /// <paramref name="externalGain"/>; with Siri or a call at the same time the lower of the two gains applies.
+        /// </summary>
+        public static float StreamGain(AudioStreamType type, bool altActive, bool telephonyActive, bool externalTalking, float externalGain)
+        {
+            if (type != AudioStreamType.Media) return 1f;
+            var gain = 1f;
+            if (altActive || telephonyActive) gain = DuckGain;
+            if (externalTalking && externalGain < gain) gain = externalGain < 0 ? 0f : externalGain;
+            return gain;
+        }
+
+        /// <summary>The media gain for the talk watch's volume setting (percent of normal): the same square-law curve as the master volume.</summary>
+        public static float TalkDuckGain(int percent)
+        {
+            return VolumeToGain(percent, false);
         }
 
         /// <summary>

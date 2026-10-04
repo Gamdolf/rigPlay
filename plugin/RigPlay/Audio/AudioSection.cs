@@ -2,7 +2,8 @@
 // AudioSection.cs: the Audio section of the rigPlay page (#24), built in code with the Ui helpers like the other
 // sections: the output device picker (friendly names, refresh), the volume slider, mute, and the receiver's
 // buffer depth (the minimum, what the network taught, a Forget button), the Opus toggle (off by default:
-// offers tablets Opus before PCM, docs/protocol.md §10.4), and the receiver's
+// offers tablets Opus before PCM, docs/protocol.md §10.4), the talk watch (#58: programs whose speech lowers or
+// pauses the music, the mode and the lowered volume, what is talking now), and the receiver's
 // live stats (port, output state, packets/s, loss, buffer depth and format per stream, last error), refreshed
 // every 500 ms while the page is visible. Changes apply to the playing audio at once; the volume is saved
 // shortly after the slider stops moving so dragging does not rewrite the settings file on every step.
@@ -23,6 +24,8 @@ namespace RigPlayPlugin.Audio
         private readonly TextBlock portText = Ui.Text("");
         private readonly TextBlock bufferText = Ui.Text("");
         private readonly TextBlock opusText = Ui.Text("");
+        private readonly TextBlock talkText = Ui.Text("");
+        private readonly TextBlock talkVolumeText = Ui.Text("");
         private readonly TextBlock outputText = Ui.Text("");
         private readonly TextBlock mediaText = Ui.Text("");
         private readonly TextBlock altText = Ui.Text("");
@@ -152,9 +155,72 @@ namespace RigPlayPlugin.Audio
             });
             forget.ToolTip = "Start again from the minimum: the next streams begin shallow and the buffer learns the network's stalls anew.";
 
+            // The talk watch (#58): other programs whose speech lowers or pauses the music.
+            var talkToggle = Ui.Toggle(Settings.TalkWatchEnabled, on =>
+            {
+                Settings.TalkWatchEnabled = on;
+                plugin.SaveSettings();
+                Log.Info("Talk watch " + (on ? "on" : "off") + " from the settings page");
+                RefreshStats();
+            });
+            var processes = PageKit.CommitTextBox(string.Join(", ", Settings.TalkProcesses), 260, box =>
+            {
+                var names = box.Text.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
+                Settings.TalkProcesses = new System.Collections.Generic.List<string>(names);
+                plugin.SaveSettings(); // Normalize trims, drops .exe and duplicates
+                box.Text = string.Join(", ", Settings.TalkProcesses);
+                Log.Info("Talk watch processes set to [" + box.Text + "] from the settings page");
+                RefreshStats();
+            });
+            processes.ToolTip = "Process names as Task Manager shows them, without .exe, separated by commas. CrewChiefV4 is the default.";
+            var mode = new ComboBox { Width = 170 };
+            mode.Items.Add(new ComboBoxItem { Content = "Lower the music", Tag = RigPlaySettings.TalkModeDuck });
+            mode.Items.Add(new ComboBoxItem { Content = "Pause the music", Tag = RigPlaySettings.TalkModePause });
+            mode.SelectedIndex = Settings.TalkMode == RigPlaySettings.TalkModePause ? 1 : 0;
+            var talkVolume = new Slider
+            {
+                Minimum = RigPlaySettings.MinVolume,
+                Maximum = RigPlaySettings.MaxVolume,
+                Value = Settings.TalkDuckVolume,
+                Width = 160,
+                SmallChange = 1,
+                LargeChange = 10,
+                TickFrequency = 1,
+                IsSnapToTickEnabled = true,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            talkVolumeText.MinWidth = 150;
+            Action refreshTalkVolume = () =>
+            {
+                var pause = Settings.TalkMode == RigPlaySettings.TalkModePause;
+                talkVolume.IsEnabled = !pause;
+                talkVolumeText.Text = pause ? "play/pause is toggled on the phone" : Settings.TalkDuckVolume + " % of the normal volume while they talk";
+            };
+            refreshTalkVolume();
+            mode.SelectionChanged += (s, e) =>
+            {
+                var item = mode.SelectedItem as ComboBoxItem;
+                var value = item?.Tag as string ?? RigPlaySettings.TalkModeDuck;
+                if (value == Settings.TalkMode) return;
+                Settings.TalkMode = value;
+                plugin.SaveSettings();
+                Log.Info("Talk watch mode set to " + value + " from the settings page");
+                refreshTalkVolume();
+            };
+            talkVolume.ValueChanged += (s, e) =>
+            {
+                var v = (int)Math.Round(e.NewValue);
+                if (v == Settings.TalkDuckVolume) return;
+                Settings.TalkDuckVolume = v; // the media chains read it on every buffer
+                refreshTalkVolume();
+                saveTimer.Stop();
+                saveTimer.Start();
+            };
+
             RefreshStats();
             return Ui.Section("Audio",
-                "Plays the tablet's CarPlay audio (music, Siri, calls) on an output device of this PC. Siri and calls lower the music while they play. "
+                "Plays the tablet's CarPlay audio (music, Siri, calls) on an output device of this PC. Siri and calls lower the music while they play, "
+                + "and so can other programs on this PC (CrewChief by default): their audio sessions are watched for speech. "
                 + "The buffer learns how long this network stalls and holds that much audio ahead; every underrun is a dropout you heard.",
                 Ui.Row("Output device", Ui.HStack(8, devices, refresh)),
                 Ui.Row("Volume", Ui.HStack(12, slider, volumeText)),
@@ -162,6 +228,9 @@ namespace RigPlayPlugin.Audio
                 Ui.Row("Buffer (ms)", Ui.HStack(12, buffer, bufferText, forget)),
                 Ui.Row("Audio port (UDP)", Ui.HStack(12, port, portText)),
                 Ui.Row("Opus compression", Ui.HStack(12, opus, opusText)),
+                Ui.Row("Other voices", Ui.HStack(12, talkToggle, processes)),
+                Ui.Row("While they talk", Ui.HStack(12, mode, talkVolume, talkVolumeText)),
+                Ui.Row("Talking now", talkText),
                 Ui.Row("Output", outputText),
                 Ui.Row("Music and media", mediaText),
                 Ui.Row("Siri", altText),
@@ -246,6 +315,7 @@ namespace RigPlayPlugin.Audio
                 portText.Text = stats.Listening ? "listening on " + (stats.Port == 0 ? Settings.AudioPort : stats.Port) + ", paired tablets only" : "not listening (see Last error)";
             }
             outputText.Text = stats.Output;
+            talkText.Text = audio == null ? "not started" : audio.TalkStatus();
             var learned = Settings.LearnedAudioBufferMs;
             bufferText.Text = learned > Settings.AudioBufferMs
                 ? "minimum · streams start with the " + learned + " ms this network taught"

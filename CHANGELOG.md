@@ -10,6 +10,11 @@
   faster instead of skipping, and only skips a full second above the target. A pause on the phone no
   longer counts as a stall. The page shows the longest stall per stream, and the tablet logs every 10 s
   whether its Wi-Fi held the datagrams back or it produced them late.
+- Other voices lower or pause the music (#58): the plugin watches the audio sessions of the programs
+  listed in the Audio section ("Other voices", CrewChiefV4 by default) and, while one of them talks,
+  lowers the CarPlay music to the chosen volume (25 % by default, the same ramp as for Siri) or, in
+  "Pause the music" mode, toggles play/pause on the phone and toggles back when it is quiet again. The
+  page shows which program is talking.
 - Idle dashboard (v2): the plugin's "Idle dashboard" selector pushes a dashboard the tablet shows while
   no iPhone is connected, with a built-in offline idle screen when the PC is off and after a period of
   inactivity (#38, #39, #53).

@@ -38,6 +38,8 @@
     <Compile Include="../RigPlay/Audio/AudioHeader.cs" Link="Plugin/Audio/AudioHeader.cs" />
     <Compile Include="../RigPlay/Audio/JitterBuffer.cs" Link="Plugin/Audio/JitterBuffer.cs" />
     <Compile Include="../RigPlay/Audio/AudioMath.cs" Link="Plugin/Audio/AudioMath.cs" />
+    <Compile Include="../RigPlay/Audio/TalkGate.cs" Link="Plugin/Audio/TalkGate.cs" />
+    <Compile Include="../RigPlay/Audio/TalkPauser.cs" Link="Plugin/Audio/TalkPauser.cs" />
     <Compile Include="../RigPlay/Audio/AudioStats.cs" Link="Plugin/Audio/AudioStats.cs" />
     <Compile Include="../RigPlay/Audio/AudioReceiver.cs" Link="Plugin/Audio/AudioReceiver.cs" />
     <Compile Include="../RigPlay/Audio/AudioGlue.cs" Link="Plugin/Audio/AudioGlue.cs" />

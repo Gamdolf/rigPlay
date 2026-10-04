@@ -101,7 +101,9 @@ CarPlay audio (music, navigation, Siri and calls) is sent from the tablet to the
 
 - On the rigPlay page, under **Audio**, choose the **Output device** (Windows default unless you pick
   another), the volume, and mute.
-- Siri and calls lower the music while they play.
+- Siri and calls lower the music while they play. So does CrewChief: **Other voices** on the rigPlay page
+  lists the programs (process names, CrewChiefV4 by default) whose speech lowers the music to the volume
+  you set, or pauses it on the phone if you prefer; **Talking now** shows what the plugin hears.
 - On the tablet, **Settings → Audio output** chooses between the PC (default) and the tablet's own speaker.
 - **Opus compression** on the rigPlay page is off by default: the tablet sends uncompressed audio, which a
   home network carries without trouble. Turn it on if the tablet is on a weak or shared Wi-Fi link and

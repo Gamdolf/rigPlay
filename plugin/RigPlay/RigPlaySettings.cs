@@ -26,6 +26,12 @@ namespace RigPlayPlugin
         public const int MaxVolume = 100;
         public const int DefaultVolume = 100;
 
+        /// <summary>The talk watch (#58): what happens to the music while a watched program talks.</summary>
+        public const string TalkModeDuck = "duck";
+        public const string TalkModePause = "pause";
+        public const int DefaultTalkDuckVolume = 25;
+        public static readonly string[] DefaultTalkProcesses = { "CrewChiefV4" };
+
         /// <summary>Bounds of the audio buffer settings (ms).</summary>
         public const int MinAudioBufferMs = 20;
         public const int MaxAudioBufferMs = 2000;
@@ -68,6 +74,21 @@ namespace RigPlayPlugin
         public int Volume { get; set; } = DefaultVolume;
 
         public bool Muted { get; set; }
+
+        /// <summary>
+        /// Lower or pause the music while another program on this PC talks (#58): CrewChief, a spotter, Discord. The
+        /// plugin watches the WASAPI sessions of the processes in <see cref="TalkProcesses"/>.
+        /// </summary>
+        public bool TalkWatchEnabled { get; set; } = true;
+
+        /// <summary>Process names (without .exe) whose audio counts as talking.</summary>
+        public List<string> TalkProcesses { get; set; } = new List<string>(DefaultTalkProcesses);
+
+        /// <summary><see cref="TalkModeDuck"/>: lower the media mix to <see cref="TalkDuckVolume"/>; <see cref="TalkModePause"/>: toggle play/pause on the phone.</summary>
+        public string TalkMode { get; set; } = TalkModeDuck;
+
+        /// <summary>The media volume while a watched program talks, in percent of the normal volume (duck mode).</summary>
+        public int TalkDuckVolume { get; set; } = DefaultTalkDuckVolume;
 
         /// <summary>
         /// The depth (ms) every audio stream starts with and never goes below: the latency on a quiet LAN. The buffer
@@ -151,6 +172,13 @@ namespace RigPlayPlugin
             MicBoostDb = Math.Min(Audio.MicGainControl.MaxBoostDb, Math.Max(Audio.MicGainControl.MinBoostDb, MicBoostDb));
 
             Volume = Math.Min(MaxVolume, Math.Max(MinVolume, Volume));
+            TalkDuckVolume = Math.Min(MaxVolume, Math.Max(MinVolume, TalkDuckVolume));
+            if (TalkMode != TalkModeDuck && TalkMode != TalkModePause) TalkMode = TalkModeDuck;
+            TalkProcesses = (TalkProcesses ?? new List<string>())
+                .Select(NormalizeProcessName)
+                .Where(n => n.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
             AudioBufferMs = Math.Min(MaxAudioBufferMs, Math.Max(MinAudioBufferMs, AudioBufferMs));
             LearnedAudioBufferMs = LearnedAudioBufferMs <= 0 ? 0 : Math.Min(MaxAudioBufferMs, LearnedAudioBufferMs);
 
@@ -192,6 +220,14 @@ namespace RigPlayPlugin
         private static int ValidPort(int port, int fallback)
         {
             return port >= ProtocolDefaults.MinPort && port <= ProtocolDefaults.MaxPort ? port : fallback;
+        }
+
+        /// <summary>A process name as the list keeps it: trimmed, without a trailing ".exe"; "" for nothing.</summary>
+        public static string NormalizeProcessName(string value)
+        {
+            var name = Clean(value);
+            if (name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) name = name.Substring(0, name.Length - 4).Trim();
+            return name;
         }
 
         internal static string Clean(string value)
