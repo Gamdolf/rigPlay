@@ -139,6 +139,7 @@ class RigPlayActivity : ComponentActivity() {
 
     override fun onPause() {
         handler.removeCallbacks(tick)
+        stopTestTone()
         RigSessionCoordinator.removeObserver(simhubObserver)
         RigSessionCoordinator.setOnboardingVisible(false)
         super.onPause()
@@ -1370,11 +1371,16 @@ class RigPlayActivity : ComponentActivity() {
     private fun openSystem(intent: Intent) { runCatching { startActivity(intent) }.onFailure { toast(getString(R.string.open_this_setting_from_the_tablet_settings_app)) } }
     private fun toast(message: String) { Toast.makeText(this, message, Toast.LENGTH_LONG).show() }
 
-    private fun playTestTone(streamType: Int) {
+    /** Cancels the pending auto-stop and releases the test-tone track. Safe to call when nothing is active. */
+    private fun stopTestTone() {
         toneStop?.let { handler.removeCallbacks(it) }
         toneStop = null
         testToneTrack?.let { runCatching { it.stop(); it.release() } }
         testToneTrack = null
+    }
+
+    private fun playTestTone(streamType: Int) {
+        stopTestTone()
         var candidate: AudioTrack? = null
         val track = try {
             val pcm = assets.open("navigation_test.pcm").use { it.readBytes() }
