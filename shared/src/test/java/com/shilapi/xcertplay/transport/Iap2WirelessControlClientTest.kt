@@ -119,7 +119,25 @@ class Iap2WirelessControlClientTest {
         assertTrue(0x4300 in u16Values(parameters.single { it.id == 7 }.payload))
     }
 
-    private fun endpoint(): Iap2WirelessCarPlayEndpoint = Iap2WirelessCarPlayEndpoint(
+    @Test fun theApHintIsTheFirstFieldOfTheWiFiConfigurationOnlyWhenKnown() {
+        val bssid = byteArrayOf(0xaa.toByte(), 0xbb.toByte(), 0xcc.toByte(), 0xdd.toByte(), 0xee.toByte(), 0xff.toByte())
+        val withHint = parameters(Iap2WirelessControlClient.accessoryWiFiConfiguration(endpoint(bssid)).payload)
+        assertArrayEquals(bssid, withHint.single { it.id == 0 }.payload)
+        val without = parameters(Iap2WirelessControlClient.accessoryWiFiConfiguration(endpoint()).payload)
+        assertNull(without.firstOrNull { it.id == 0 })
+    }
+
+    @Test fun anOpenNetworkStartsASessionWithAnEmptyPassword() {
+        val open = Iap2WirelessCarPlayEndpoint(
+            ssid = "Home", passphrase = "", channel = 36, security = Iap2WirelessSecurity.NONE,
+            ipAddresses = listOf("fe80::1"), airPlayPort = 7000, deviceIdentifier = "dev-1",
+            publicKey = "aabbcc", sourceVersion = "1.0",
+        )
+        Iap2WirelessControlClient.carPlayStartSession(open)
+        Iap2WirelessControlClient.accessoryWiFiConfiguration(open)
+    }
+
+    private fun endpoint(accessPointBssid: ByteArray? = null): Iap2WirelessCarPlayEndpoint = Iap2WirelessCarPlayEndpoint(
         ssid = "LIVI",
         passphrase = "secret123",
         channel = 36,
@@ -129,6 +147,7 @@ class Iap2WirelessControlClientTest {
         deviceIdentifier = "dev-1",
         publicKey = "aabbcc",
         sourceVersion = "1.0",
+        accessPointBssid = accessPointBssid,
     )
 
     private fun u16Values(bytes: ByteArray): List<Int> =

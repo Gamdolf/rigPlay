@@ -12,6 +12,12 @@
   on the tablet from Display and performance → Picture adjustments.
 - Wi-Fi Direct: a Preferred channel setting (Auto, 5 GHz 36–48/149–165, or 2.4 GHz 1–11). A channel the
   tablet refuses fails with a message instead of silently using another one.
+- Existing Wi-Fi network mode (#33) follows upstream DiPlay's vehicle-tested Same LAN mode: the iPhone
+  is given the tablet's IPv6 link-local address (IPv4 when there is none), Bonjour and the AirPlay
+  listener serve both IPv4 and IPv6 on the same port, the router's BSSID goes to the iPhone as a hint,
+  open networks work (StartSession no longer rejects an empty password), a password that does not
+  match the network's security is reported on Android 12+, and losing the network or a change of its
+  addresses restarts the wireless session.
 - Wireless: when the iPhone receives StartSession but never opens the CarPlay connection, rigPlay gives
   up after 30 s and reconnects, instead of waiting for the much longer control timeout.
 - Fixes taken from upstream DiPlay (0.2.11–0.2.12), only where they touch code rigPlay still has:

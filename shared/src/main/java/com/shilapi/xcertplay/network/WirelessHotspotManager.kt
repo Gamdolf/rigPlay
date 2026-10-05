@@ -28,6 +28,10 @@ class WirelessHotspotInfo(
      * network it does not own (existing-network mode); null for the modes that create the network.
      */
     val ssidReadable: Boolean? = null,
+    /** Addresses on the interface that discovery and the AirPlay listener both serve (one per family). */
+    val hostAddresses: List<InetAddress> = listOfNotNull(hostAddress),
+    /** Router BSSID hint for 0x5703; independent of the receiver's AirPlay identity in [bssid]. */
+    val accessPointBssid: ByteArray? = null,
 ) {
     override fun toString(): String =
         "WirelessHotspotInfo(backend=${backend.label}, ssid='$ssid', " +

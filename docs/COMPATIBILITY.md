@@ -26,7 +26,7 @@ setup → 1 · Choose your connection**.
 | --- | --- | --- | --- |
 | **Wi-Fi Direct** | Creates a Wi-Fi Direct group for the iPhone and stays on the home Wi-Fi. | Android 10+, and STA + P2P concurrency: the chip must run a Wi-Fi client and a Wi-Fi Direct group owner at the same time. | Being validated ([#33](https://github.com/xorob0/rigPlay/issues/33)). |
 | **Tablet hotspot** | Uses the hotspot you turn on in Android settings, and stays on the home Wi-Fi. | Hotspot turned on by hand, and STA + AP concurrency (many tablets turn the Wi-Fi client off when the hotspot starts). | Being validated. |
-| **Existing Wi-Fi network (experimental)** | Creates no network. Tells the iPhone to join the home Wi-Fi the tablet is already on, and serves CarPlay on that connection. | The tablet on the same LAN as the PC; the network name and password entered in rigPlay; a router that passes multicast (Bonjour) between Wi-Fi clients. | **Untested with iOS.** Whether an iPhone accepts a CarPlay accessory that is a client on someone else's network is unknown. |
+| **Existing Wi-Fi network (experimental)** | Creates no network. Tells the iPhone to join the home Wi-Fi the tablet is already on, and serves CarPlay on that connection. | The tablet on the same LAN as the PC; the network name and password entered in rigPlay; a router that passes multicast (Bonjour) between Wi-Fi clients. | **Untested on a rig.** Upstream DiPlay's equivalent "Same LAN" mode, which this mode now follows, has been validated with an iPhone on a car's Android head unit. |
 
 Notes on the existing-network mode:
 
@@ -36,8 +36,15 @@ Notes on the existing-network mode:
 - The channel comes from the tablet's current connection. Nothing is created, changed or torn down; leaving
   the mode or disconnecting leaves the home Wi-Fi as it was.
 - rigPlay's AirPlay service is advertised on the home network during a session. Discovery uses rigPlay's
-  own mDNS responder bound to the tablet's home-network IPv4 address, not Android's NSD service; the
-  other modes bind it to their hotspot address the same way.
+  own mDNS responders, one per address family (the tablet's home-network IPv4 address and its IPv6
+  link-local address), not Android's NSD service, and the AirPlay listener accepts on both on the same
+  port. The iPhone is given the IPv6 link-local address, or the IPv4 one when there is none. The other
+  modes keep a single address.
+- The router's address (BSSID), when Android exposes it, is passed to the iPhone as a hint for which
+  access point to join. It is never used as rigPlay's own identity.
+- An open network works: leave the password empty. On Android 12 and later rigPlay checks the network's
+  security and says so when a password is saved for an open network or missing for a secured one.
+- If the tablet loses the network or its addresses change, rigPlay restarts the wireless session.
 - Routers with "AP isolation", "client isolation" or a guest network block the iPhone from reaching the
   tablet. Mesh systems and band steering may move the iPhone and the tablet to different access points,
   which is fine as long as they stay on one LAN.
@@ -118,7 +125,8 @@ for the test). Record the group channel from the report and the station channel 
 **7. Existing Wi-Fi network (only if step 3 fails).** Put the iPhone on the same home Wi-Fi. Choose
 **Existing Wi-Fi network (experimental)**, save the network name and password, and check the status line
 (`Detected: wlan0 · 192.168.1.x · channel N (band)`). Tap **Connect phone**. In the report, look for
-`Existing network iface=wlan0 family=IPv4 channel=… networkNameReadable=…` and then for `bonjourResolved`
+`Existing network iface=wlan0 family=IPv6 channel=… networkNameReadable=… families=IPv6,IPv4 apHint=…`,
+`mdnsFamilies=IPv6,IPv4`, and then for `bonjourResolved`
 and `tcpAccepted` above zero. If the iPhone authenticates over Bluetooth but never opens AirPlay TCP,
 note it: that is the "iOS does not accept a client accessory" outcome this spike is meant to find.
 

@@ -141,6 +141,11 @@ class CarPlayBonjour(
     private val advertisedHost: String? = null,
     private val useInterfaceMdns: Boolean = false,
     private val onEvent: (CarPlayBonjourEvent) -> Unit = {},
+    /**
+     * Existing-network mode: the other address family of the same interface. Interface mDNS then
+     * runs one registry per address, because a JmDNS instance joins only its own family's group.
+     */
+    additionalAddresses: List<InetAddress> = emptyList(),
 ) : Closeable {
     private val nsdManager = (context.applicationContext ?: context)
         .getSystemService(Context.NSD_SERVICE) as NsdManager
@@ -150,6 +155,8 @@ class CarPlayBonjour(
     private val seenServices = ConcurrentHashMap.newKeySet<String>()
     private val lifecycleLock = Any()
     private val localAdvertisedAddress = advertisedHostAddress()
+    private val advertisedAddresses = (listOfNotNull(localAdvertisedAddress) + additionalAddresses).distinct()
+    @Volatile private var publishedFamilies = "none"
     private val addedCount = AtomicInteger()
     private val resolvedCount = AtomicInteger()
     private val addressMismatchCount = AtomicInteger()
@@ -161,7 +168,8 @@ class CarPlayBonjour(
     fun diagnosticSnapshot(): String =
         "bonjourAdded=${addedCount.get()} bonjourResolved=${resolvedCount.get()} " +
             "bonjourAddressMismatch=${addressMismatchCount.get()} connectProbes=${probeCount.get()} " +
-            "connectProbe2xx=${successfulProbeCount.get()} lastProbe=${lastProbe.get()}"
+            "connectProbe2xx=${successfulProbeCount.get()} lastProbe=${lastProbe.get()} " +
+            "mdnsFamilies=$publishedFamilies"
     private val multicastLock = (context.applicationContext ?: context)
         .getSystemService(WifiManager::class.java)
         .createMulticastLock("carplay-bonjour").apply { setReferenceCounted(false) }
@@ -175,7 +183,7 @@ class CarPlayBonjour(
     private var worker: Thread? = null
     @Volatile
     private var activeSocket: Socket? = null
-    private var interfaceMdns: JmDNS? = null
+    private val interfaceMdns = mutableListOf<JmDNS>()
 
     private val interfaceListener = object : ServiceListener {
         override fun serviceAdded(event: ServiceEvent) {
@@ -186,15 +194,16 @@ class CarPlayBonjour(
         }
 
         override fun serviceRemoved(event: ServiceEvent) {
-            seenServices.remove(event.name)
+            seenServices.remove("${event.name}|${event.dns.inetAddress is Inet4Address}")
         }
 
         override fun serviceResolved(event: ServiceEvent) {
             if (closed) return
             val info = event.info
-            // Keep the HTTP probe in the same address family as its bound source.
+            // Each registry browses its own address family; keep the probe on that family. Use the
+            // registry address, not the deprecated getInterface(), which can return another family.
             val address = info.inetAddresses.firstOrNull {
-                (it is Inet4Address) == (localAdvertisedAddress is Inet4Address)
+                (it is Inet4Address) == (event.dns.inetAddress is Inet4Address)
             }?.let(::applyLocalScope)
             if (address == null || info.port !in 1..65535) {
                 discoveryEvents.offer(CarPlayBonjourEvent.Discovery(
@@ -204,7 +213,8 @@ class CarPlayBonjour(
                 ))
                 return
             }
-            if (!seenServices.add(event.name)) return
+            // A failed probe on one family must not suppress the other family's endpoint.
+            if (!seenServices.add("${event.name}|${address is Inet4Address}")) return
             val endpoint = CarPlayBonjourEndpoint(
                 event.name, address.hostAddress ?: return, info.port,
                 info.getPropertyString("id"),
@@ -265,16 +275,22 @@ class CarPlayBonjour(
             try {
                 multicastLock.acquire()
                 if (useInterfaceMdns) {
-                    val address = requireNotNull(localAdvertisedAddress) {
+                    requireNotNull(localAdvertisedAddress) {
                         "Interface mDNS requires a local advertised address"
                     }
-                    val dns = JmDNS.create(address, "carplay-${config.deviceId.replace(":", "")}")
-                    interfaceMdns = dns
-                    dns.addServiceListener("$CARPLAY_CONTROL_SERVICE_TYPE.local.", interfaceListener)
-                    dns.registerService(ServiceInfo.create(
-                        "$AIRPLAY_SERVICE_TYPE.local.", config.deviceName, config.port,
-                        0, 0, CarPlayBonjourProtocol.airPlayTxtRecords(config, identity),
-                    ))
+                    // A JmDNS instance joins only its own address family's multicast group.
+                    for (address in advertisedAddresses) {
+                        val dns = JmDNS.create(address, "carplay-${config.deviceId.replace(":", "")}")
+                        interfaceMdns.add(dns)
+                        dns.addServiceListener("$CARPLAY_CONTROL_SERVICE_TYPE.local.", interfaceListener)
+                        dns.registerService(ServiceInfo.create(
+                            "$AIRPLAY_SERVICE_TYPE.local.", config.deviceName, config.port,
+                            0, 0, CarPlayBonjourProtocol.airPlayTxtRecords(config, identity),
+                        ))
+                    }
+                    publishedFamilies = advertisedAddresses.joinToString(",") {
+                        if (it is Inet4Address) "IPv4" else "IPv6"
+                    }
                 } else {
                     registerAirPlay()
                     registrationRequested = true
@@ -301,8 +317,9 @@ class CarPlayBonjour(
                 }
                 worker?.interrupt()
                 worker = null
-                runCatching { interfaceMdns?.close() }
-                interfaceMdns = null
+                interfaceMdns.forEach { dns -> runCatching { dns.close() } }
+                interfaceMdns.clear()
+                publishedFamilies = "none"
                 if (multicastLock.isHeld) multicastLock.release()
                 throw error
             }
@@ -311,7 +328,7 @@ class CarPlayBonjour(
 
     override fun close() {
         val workerToJoin: Thread?
-        val dnsToClose: JmDNS?
+        val dnsToClose: List<JmDNS>
         synchronized(lifecycleLock) {
             if (closed) return
             closed = true
@@ -328,14 +345,15 @@ class CarPlayBonjour(
             services.clear()
             interfaceServices.clear()
             discoveryEvents.clear()
-            dnsToClose = interfaceMdns
-            interfaceMdns = null
+            dnsToClose = interfaceMdns.toList()
+            interfaceMdns.clear()
+            publishedFamilies = "none"
             workerToJoin = worker
             worker = null
             workerToJoin?.interrupt()
             if (multicastLock.isHeld) multicastLock.release()
         }
-        runCatching { dnsToClose?.close() }
+        dnsToClose.forEach { dns -> runCatching { dns.close() } }
         workerToJoin?.let(::joinWorker)
     }
 
@@ -494,8 +512,13 @@ class CarPlayBonjour(
             ?: addresses.firstOrNull()
     }
 
+    /** The advertised address of [target]'s family, so a probe never binds across families. */
+    private fun sourceAddressFor(target: InetAddress): InetAddress? =
+        advertisedAddresses.firstOrNull { (it is Inet4Address) == (target is Inet4Address) }
+
     private fun applyLocalScope(address: InetAddress): InetAddress {
-        val scope = (localAdvertisedAddress as? Inet6Address)?.scopeId ?: return address
+        val scope = advertisedAddresses.filterIsInstance<Inet6Address>()
+            .firstOrNull { it.scopeId != 0 }?.scopeId ?: return address
         if (address !is Inet6Address || address.scopeId != 0) return address
         return try {
             Inet6Address.getByAddress(null, address.address, scope)
@@ -546,7 +569,7 @@ class CarPlayBonjour(
         }
         try {
             emit(CarPlayBonjourEvent.ProbeProgress(CarPlayBonjourEvent.ProbeProgress.Stage.CONNECTING, attempt, address is Inet6Address))
-            localAdvertisedAddress?.let { socket.bind(InetSocketAddress(it, 0)) }
+            sourceAddressFor(address)?.let { socket.bind(InetSocketAddress(it, 0)) }
             socket.connect(InetSocketAddress(address, port), CONNECT_TIMEOUT_MILLIS)
             stage = CarPlayBonjourEvent.ProbeProgress.Stage.TCP_CONNECTED
             emit(CarPlayBonjourEvent.ProbeProgress(CarPlayBonjourEvent.ProbeProgress.Stage.TCP_CONNECTED, attempt, address is Inet6Address))

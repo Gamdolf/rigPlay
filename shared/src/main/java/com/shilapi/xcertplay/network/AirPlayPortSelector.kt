@@ -32,6 +32,45 @@ object AirPlayPortSelector {
         return reportFallback(bindPort(address, 0), preferredPort, onFallback)
     }
 
+    /**
+     * Binds one listener per address, all on the same port (existing-network mode serves IPv4 and
+     * IPv6 link-local). Specific per-family listeners avoid relying on a platform's IPV6_V6ONLY
+     * default. When any address cannot take a candidate port, the listeners already bound for it are
+     * closed and the next candidate is tried for all addresses together.
+     */
+    fun bindAll(
+        addresses: List<InetAddress>,
+        preferredPort: Int,
+        fallbackPorts: Iterable<Int> = FALLBACK_PORTS,
+        onFallback: (busyPort: Int, boundPort: Int) -> Unit = { _, _ -> },
+    ): List<ServerSocket> {
+        require(addresses.isNotEmpty()) { "At least one listener address is required" }
+        // A few ephemeral attempts: the port the first family gets may be taken on the other one.
+        val candidates = listOf(preferredPort) + fallbackPorts.filter { it != preferredPort } + List(4) { 0 }
+        for (candidate in candidates) {
+            val servers = mutableListOf<ServerSocket>()
+            try {
+                for (address in addresses.distinct()) {
+                    servers.add(bindPort(address, servers.firstOrNull()?.localPort ?: candidate))
+                }
+            } catch (error: Throwable) {
+                servers.forEach { closeAfterFailure(it, error) }
+                if (error is BindException) continue
+                throw error
+            }
+            try {
+                val port = servers.first().localPort
+                if (preferredPort != 0 && port != preferredPort) onFallback(preferredPort, port)
+                return servers
+            } catch (error: Throwable) {
+                // Ownership transfers to the caller only after notification succeeds.
+                servers.forEach { closeAfterFailure(it, error) }
+                throw error
+            }
+        }
+        throw BindException("No common AirPlay port is available on every listener address")
+    }
+
     private fun tryBind(address: InetAddress, port: Int): ServerSocket? = try {
         bindPort(address, port)
     } catch (_: BindException) {
