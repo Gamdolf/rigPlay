@@ -25,6 +25,8 @@ data class AirPlayDeviceInfo(
 
 /** Session lifecycle and command callbacks for the driver/UI layer. */
 interface AirPlaySessionListener {
+    /** A TCP connection reached the AirPlay listener; [external] is false when the tablet connected to itself. */
+    fun onTcpAccepted(external: Boolean) {}
     fun onSessionActive(session: AirPlaySession) {}
     fun onSessionEnded(session: AirPlaySession) {}
     fun onVideoFrameRendered(session: AirPlaySession) {}
@@ -101,7 +103,14 @@ class AirPlaySession(
     val controllerId: String? get() = pairVerify.verifiedControllerId
     val sharedSecret: ByteArray? get() = pairVerify.shared?.copyOf()
     val videoInCar: Boolean get() = config.videoInCar
-    @Volatile private var videoPlaybackEnabled = false
+    private val videoPlaybackAvailability = VideoPlaybackAvailability { allowed ->
+        sendCommand(
+            linkedMapOf(
+                "type" to "setVideoPlaybackAllowed",
+                "params" to linkedMapOf("videoPlaybackAllowed" to allowed),
+            ),
+        )
+    }
 
     fun syncedNtp(): BigInteger = ntp.syncedNtp()
 
@@ -161,12 +170,11 @@ class AirPlaySession(
     }
 
     /**
-     * Video in car: tells the iPhone whether video may play now; otherwise it plays audio only. Sent only
-     * when SETUP enabled video, so an iPhone without it never gets the command.
+     * Video in car: retains whether video may play now and sends the latest value once SETUP has
+     * enabled video and the event channel is ready. An iPhone without the feature gets no command.
      */
-    fun setVideoPlaybackAllowed(allowed: Boolean): Boolean = videoPlaybackEnabled && sendCommand(
-        linkedMapOf("type" to "setVideoPlaybackAllowed", "params" to linkedMapOf("videoPlaybackAllowed" to allowed)),
-    )
+    internal fun setVideoPlaybackAllowed(allowed: Boolean): VideoPlaybackDelivery =
+        videoPlaybackAvailability.setDesired(allowed)
 
     private fun sendCommandLocked(command: Map<String, Any?>, extraHeaders: String = ""): Boolean {
         val socket = eventSocket ?: return false
@@ -422,6 +430,10 @@ class AirPlaySession(
                         "audioFormats=${(info["audioFormats"] as? List<*>)?.size ?: 0} " +
                         "audioLatencies=${(info["audioLatencies"] as? List<*>)?.size ?: 0}",
                 )
+                debugLog(
+                    "airplay /info videoInCar=${config.videoInCar} " +
+                        "videoPlaybackAllowed=${if (config.videoInCar) VideoInCar.allowed else "not-offered"}",
+                )
                 debugLog("airplay /info displays=${info["displays"]}")
                 RtspMessage.Response(
                     headers = mapOf("Content-Type" to PLIST_CONTENT_TYPE),
@@ -506,7 +518,9 @@ class AirPlaySession(
             response["keepAlivePort"] = openKeepAlive()
         }
         val features = setupEnabledFeatures(config, dict["features"] as? List<*>)
-        videoPlaybackEnabled = VideoInCar.FEATURE in features
+        val videoPlaybackEnabled = VideoInCar.FEATURE in features
+        val videoDelivery = videoPlaybackAvailability.setFeatureEnabled(videoPlaybackEnabled)
+        debugLog("airplay video playback negotiated=$videoPlaybackEnabled availability=$videoDelivery")
         response["enabledFeatures"] = features
         return RtspMessage.Response(
             headers = mapOf("Content-Type" to PLIST_CONTENT_TYPE),
@@ -645,6 +659,8 @@ class AirPlaySession(
     }
 
     private fun teardown() {
+        videoPlaybackAvailability.setEventReady(false)
+        videoPlaybackAvailability.setFeatureEnabled(false)
         ntp.close()
         safeClose(keepAliveSocket)
         keepAliveSocket = null
@@ -688,6 +704,8 @@ class AirPlaySession(
             synchronized(eventWriteLock) {
                 sendPendingNightModeLocked()
             }
+            val videoDelivery = videoPlaybackAvailability.setEventReady(true)
+            debugLog("airplay video event ready availability=$videoDelivery")
             runEventRead(socket)
         } catch (error: Exception) {
             if (!closed.get()) {
@@ -740,6 +758,7 @@ class AirPlaySession(
             if (!closed.get()) Log.e(TAG, "airplay event read failed", error)
         } finally {
             debugLog("airplay event connection closed")
+            videoPlaybackAvailability.setEventReady(false)
             if (eventSocket === socket) eventSocket = null
             eventCipher = null
             safeClose(socket)

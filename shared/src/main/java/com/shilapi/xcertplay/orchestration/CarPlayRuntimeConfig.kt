@@ -2,6 +2,7 @@ package com.shilapi.xcertplay.orchestration
 
 import com.shilapi.xcertplay.transport.Iap2IdentificationConfig
 import com.shilapi.xcertplay.transport.UsbDeviceId
+import com.shilapi.xcertplay.network.WifiP2pChannels
 import java.net.Inet6Address
 import java.net.InetAddress
 
@@ -58,6 +59,7 @@ class CarPlayRuntimeConfig(
     val existingNetworkPassphrase: String? = null,
     val wirelessBluetoothDeviceAddress: String? = null,
     val locationReportingEnabled: Boolean = false,
+    val wifiP2pPreferredChannel: Int = WifiP2pChannels.AUTO,
 ) {
     init {
         require(iphoneDevices.all { it.vendorId == APPLE_VENDOR_ID }) {
@@ -71,6 +73,11 @@ class CarPlayRuntimeConfig(
         require(label.isNotBlank()) { "label must not be blank" }
         require(hostName.isNotBlank()) { "hostName must not be blank" }
         // Only a wireless session starts the hotspot; a USB session must not fail on unused settings.
+        if (transport == CarPlayTransport.WIRELESS && wirelessHotspotMode == WirelessHotspotMode.WIFI_P2P) {
+            require(WifiP2pChannels.isValid(wifiP2pPreferredChannel)) {
+                "Unsupported Wi-Fi Direct channel: $wifiP2pPreferredChannel"
+            }
+        }
         if (transport == CarPlayTransport.WIRELESS && wirelessHotspotMode == WirelessHotspotMode.MANUAL) {
             val ssid = manualHotspotSsid
             require(!ssid.isNullOrBlank()) {

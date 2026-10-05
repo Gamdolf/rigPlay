@@ -8,6 +8,7 @@ import android.os.Build
 import android.util.Log
 import com.shilapi.xcertplay.airplay.AirPlayConfig
 import com.shilapi.xcertplay.airplay.AirPlayIdentity
+import com.shilapi.xcertplay.airplay.AirPlayInfoPlist
 import java.io.BufferedReader
 import java.io.Closeable
 import java.io.IOException
@@ -72,12 +73,18 @@ fun CarPlayBonjourEvent.diagnosticSummary(): String = when (this) {
 
 /** Pure protocol values shared by the Android runtime and JVM tests. */
 object CarPlayBonjourProtocol {
+    internal fun featuresTxt(features: Long): String {
+        val low = "0x${(features and 0xffffffffL).toString(16)}"
+        val high = features ushr 32
+        return if (high == 0L) low else "$low,0x${high.toString(16)}"
+    }
+
     fun airPlayTxtRecords(
         config: AirPlayConfig,
         identity: AirPlayIdentity,
     ): Map<String, String> = linkedMapOf(
         "deviceid" to config.deviceId,
-        "features" to "0x44540380,0x61",
+        "features" to featuresTxt(AirPlayInfoPlist.features(config)),
         "flags" to "0x4",
         "model" to config.model,
         "srcvers" to config.sourceVersion,

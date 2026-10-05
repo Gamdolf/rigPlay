@@ -14,6 +14,7 @@ import com.shilapi.xcertplay.media.AudioOutputTarget
 import com.shilapi.xcertplay.orchestration.ManualHotspotBand
 import com.shilapi.xcertplay.orchestration.ManualHotspotSecurity
 import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
+import com.shilapi.xcertplay.network.WifiP2pChannels
 import com.shilapi.xcertplay.simhub.SimHubProtocol
 import com.shilapi.xcertplay.transport.LockdownPairRecord
 import java.io.File
@@ -37,6 +38,8 @@ object AirPlayPersistence {
     private const val KEY_LOCKDOWN_ROOT_PRIVATE = "lockdown_root_private"
     private const val KEY_LOCKDOWN_ROOT_CERT = "lockdown_root_cert"
     private const val KEY_DISPLAY_SCALE_TENTHS = "display_scale_tenths"
+    private const val KEY_DISPLAY_SCALE_PERCENT = "display_scale_percent"
+    private const val KEY_VIDEO_IN_CAR = "video_in_car"
     private const val KEY_UI_SCALE_PERCENT = "ui_scale_percent"
     private const val KEY_HEVC_ENABLED = "hevc_enabled"
     private const val KEY_HEVC_SOFTWARE_DECODER = "hevc_software_decoder"
@@ -47,6 +50,7 @@ object AirPlayPersistence {
     private const val KEY_NAVIGATION_STREAM_TYPE = "navigation_stream_type"
     private const val KEY_WIRELESS_ENABLED = "wireless_enabled"
     private const val KEY_WIRELESS_HOTSPOT_MODE = "wireless_hotspot_mode"
+    private const val KEY_WIFI_P2P_PREFERRED_CHANNEL = "wifi_p2p_preferred_channel"
     private const val KEY_MANUAL_HOTSPOT_SSID = "manual_hotspot_ssid"
     private const val KEY_MANUAL_HOTSPOT_PASSPHRASE = "manual_hotspot_passphrase"
     private const val KEY_EXISTING_NETWORK_SSID = "existing_network_ssid"
@@ -103,6 +107,27 @@ object AirPlayPersistence {
     fun saveDisplayScaleTenths(context: Context, tenths: Int) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_DISPLAY_SCALE_TENTHS, CarPlayDisplayScale.sanitize(tenths))
+            .apply()
+    }
+
+    /** iOS 27 video in car (see [com.shilapi.xcertplay.airplay.VideoInCar]); on unless turned off. */
+    fun loadVideoInCarEnabled(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_VIDEO_IN_CAR, true)
+
+    fun saveVideoInCarEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_VIDEO_IN_CAR, enabled).apply()
+    }
+
+    /** Resolution in percent (30–160); a value saved as tenths by older builds is carried over. */
+    fun loadDisplayScalePercent(context: Context): Int =
+        CarPlayDisplayScale.sanitizePercent(
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getInt(KEY_DISPLAY_SCALE_PERCENT, loadDisplayScaleTenths(context) * 10),
+        )
+
+    fun saveDisplayScalePercent(context: Context, percent: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_DISPLAY_SCALE_PERCENT, CarPlayDisplayScale.sanitizePercent(percent))
             .apply()
     }
 
@@ -240,6 +265,18 @@ object AirPlayPersistence {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putString(KEY_WIRELESS_HOTSPOT_MODE, supported.name)
             .apply()
+    }
+
+    fun loadWifiP2pPreferredChannel(context: Context): Int = runCatching {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt(KEY_WIFI_P2P_PREFERRED_CHANNEL, WifiP2pChannels.AUTO)
+            .takeIf(WifiP2pChannels::isValid) ?: WifiP2pChannels.AUTO
+    }.getOrDefault(WifiP2pChannels.AUTO)
+
+    fun saveWifiP2pPreferredChannel(context: Context, channel: Int) {
+        require(WifiP2pChannels.isValid(channel))
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_WIFI_P2P_PREFERRED_CHANNEL, channel).apply()
     }
 
     fun loadManualHotspotSsid(context: Context): String =

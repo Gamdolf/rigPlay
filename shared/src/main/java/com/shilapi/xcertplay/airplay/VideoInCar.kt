@@ -3,6 +3,59 @@ package com.shilapi.xcertplay.airplay
 import java.math.BigInteger
 import java.util.Base64
 
+/** Whether the latest video availability update was sent now or retained for a later AirPlay stage. */
+internal enum class VideoPlaybackDelivery { SENT, QUEUED, UNCHANGED }
+
+/**
+ * Keeps the latest parked-state decision until both SETUP has enabled video playback and the
+ * encrypted AirPlay event channel is ready. AirPlay establishes those asynchronously, so dropping
+ * an early update can leave the iPhone in audio-only mode for the rest of the session.
+ */
+internal class VideoPlaybackAvailability(
+    private val send: (Boolean) -> Boolean,
+) {
+    private var desired: Boolean? = null
+    private var featureEnabled = false
+    private var eventReady = false
+    private var lastSent: Boolean? = null
+
+    @Synchronized
+    fun setDesired(allowed: Boolean): VideoPlaybackDelivery {
+        desired = allowed
+        return flush()
+    }
+
+    @Synchronized
+    fun setFeatureEnabled(enabled: Boolean): VideoPlaybackDelivery {
+        if (featureEnabled != enabled) {
+            featureEnabled = enabled
+            if (!enabled) lastSent = null
+        }
+        return flush()
+    }
+
+    @Synchronized
+    fun setEventReady(ready: Boolean): VideoPlaybackDelivery {
+        if (eventReady != ready) {
+            eventReady = ready
+            if (!ready) lastSent = null
+        }
+        return flush()
+    }
+
+    private fun flush(): VideoPlaybackDelivery {
+        val next = desired ?: return VideoPlaybackDelivery.QUEUED
+        if (!featureEnabled || !eventReady) return VideoPlaybackDelivery.QUEUED
+        if (lastSent == next) return VideoPlaybackDelivery.UNCHANGED
+        return if (send(next)) {
+            lastSent = next
+            VideoPlaybackDelivery.SENT
+        } else {
+            VideoPlaybackDelivery.QUEUED
+        }
+    }
+}
+
 /**
  * iOS 27 "video in car": while the car is parked, the iPhone hands the head unit a media URL and
  * drives playback; the head unit plays it in its own player. Observed with an iPhone on iOS 27 and
@@ -33,7 +86,7 @@ object VideoInCar {
     const val ERROR_DECODER = -12911
     const val ERROR_INCOMPATIBLE_ASSET = -12927
 
-    /** Whether video may play now. Nothing enables it: the app has no parked signal (v2: SimHub). */
+    /** Whether video may play now. A rig is always parked, so the host turns it on when video in car is enabled. */
     @Volatile var allowed = false
 
     /** Bits the AirPlay web app's manifest adds to the legacy feature bits (featureList.additionalAirPlayFeatures). */

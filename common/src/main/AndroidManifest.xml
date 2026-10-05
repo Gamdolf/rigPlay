@@ -51,6 +51,14 @@
             android:screenOrientation="sensorLandscape"
             android:theme="@style/Theme.Xcertplay" />
 
+        <!-- iOS 27 video in car: the iPhone's video, played full screen over CarPlay. -->
+        <activity
+            android:name="com.shilapi.xcertplay.CarPlayVideoActivity"
+            android:configChanges="density|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@style/Theme.Xcertplay" />
+
         <activity
             android:name="com.shilapi.xcertplay.ImageCropActivity"
             android:exported="false"

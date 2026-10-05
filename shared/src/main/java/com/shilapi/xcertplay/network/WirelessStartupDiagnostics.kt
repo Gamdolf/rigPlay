@@ -19,14 +19,17 @@ internal class WirelessStartupDiagnostics(
     private val intervalMillis: Long = 10_000,
     /** Fixed per-session facts (mode, interface, channel) repeated on every line; see [wirelessStartupContext]. */
     private val context: String = "",
+    private val nowNs: () -> Long = System::nanoTime,
 ) : Closeable {
     private val closed = AtomicBoolean(false)
-    private val startedNanos = System.nanoTime()
+    private val startedNanos = nowNs()
     private var authenticated = false
     private var wifiConfigs = 0
     private var startRequests = 0
     private var tcpAccepted = 0
     private var sessionActive = false
+    private var firstStartRequestNs: Long? = null
+    private var firstTcpAfterStartMs: Long? = null
     @Volatile private var lastSnapshot = ""
     private val worker = Thread(::observe, "rigplay-wireless-diagnostics").apply { isDaemon = true }
 
@@ -41,11 +44,19 @@ internal class WirelessStartupDiagnostics(
             "iap2 authentication accepted" -> authenticated = true
             "iap2 tx=0x5703 accessory-wifi-configuration",
             "iap2 tx=0x5703 post-transport accessory-wifi-configuration" -> wifiConfigs++
-            "iap2 tx=0x4301 carplay-start-session" -> startRequests++
+            "iap2 tx=0x4301 carplay-start-session" -> {
+                startRequests++
+                if (firstStartRequestNs == null) firstStartRequestNs = nowNs()
+            }
         }
     }
 
-    @Synchronized fun connectionAccepted() { tcpAccepted++ }
+    @Synchronized fun connectionAccepted() {
+        tcpAccepted++
+        if (firstTcpAfterStartMs == null) {
+            firstStartRequestNs?.let { firstTcpAfterStartMs = elapsedMillis(it) }
+        }
+    }
     @Synchronized fun sessionActive() { sessionActive = true }
 
     @Synchronized fun summary(): String {
@@ -56,10 +67,14 @@ internal class WirelessStartupDiagnostics(
             authenticated -> "WiFi_configuration_or_start_request"
             else -> "Bluetooth_iAP2_authentication"
         }
-        return "wireless startup elapsedMs=${(System.nanoTime() - startedNanos) / 1_000_000} " +
+        return "wireless startup elapsedMs=${elapsedMillis(startedNanos)} " +
             "authenticated=$authenticated wifiConfigs=$wifiConfigs startRequests=$startRequests " +
-            "tcpAccepted=$tcpAccepted sessionActive=$sessionActive waitingFor=$waitingFor"
+            "tcpAccepted=$tcpAccepted sessionActive=$sessionActive waitingFor=$waitingFor " +
+            "startRequestAgeMs=${firstStartRequestNs?.let(::elapsedMillis) ?: "none"} " +
+            "firstTcpAfterStartMs=${firstTcpAfterStartMs ?: "none"}"
     }
+
+    private fun elapsedMillis(since: Long): Long = (nowNs() - since).coerceAtLeast(0) / 1_000_000
 
     private fun observe() {
         try {
@@ -69,7 +84,8 @@ internal class WirelessStartupDiagnostics(
                 }
                 if (closed.get()) return
                 lastSnapshot = snapshot
-                emit(listOf(summary(), context, snapshot).filter { it.isNotEmpty() }.joinToString(" "))
+                emit(listOf(summary(), context).filter { it.isNotEmpty() }.joinToString(" "))
+                emitSnapshot(snapshot)
                 Thread.sleep(intervalMillis)
             }
         } catch (_: InterruptedException) {
@@ -80,7 +96,16 @@ internal class WirelessStartupDiagnostics(
     @Synchronized override fun close() {
         if (!closed.compareAndSet(false, true)) return
         worker.interrupt()
-        emit(listOf(summary(), context, "observation=ended", lastSnapshot).filter { it.isNotEmpty() }.joinToString(" "))
+        emit(listOf(summary(), context, "observation=ended").filter { it.isNotEmpty() }.joinToString(" "))
+        emitSnapshot(lastSnapshot, cached = true)
+    }
+
+    private fun emitSnapshot(snapshot: String, cached: Boolean = false) {
+        // The report redactor caps each log line at 700 characters. Never append the kernel
+        // counters to the already detailed startup/interface/P2P/Bonjour state line.
+        snapshot.lineSequence().filter { it.isNotBlank() }.take(4).forEach { line ->
+            emit("wireless snapshot${if (cached) " cached=true" else ""} $line")
+        }
     }
 
     private fun emit(message: String) {

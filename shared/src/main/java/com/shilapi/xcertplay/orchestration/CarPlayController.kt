@@ -29,6 +29,8 @@ import com.shilapi.xcertplay.airplay.AirPlayMediaHandler
 import com.shilapi.xcertplay.airplay.AirPlaySession
 import com.shilapi.xcertplay.airplay.AirPlaySessionListener
 import com.shilapi.xcertplay.airplay.PairingStore
+import com.shilapi.xcertplay.airplay.VideoInCar
+import com.shilapi.xcertplay.airplay.VideoPlaybackDelivery
 import com.shilapi.xcertplay.iap2.session.Iap2Session
 import com.shilapi.xcertplay.mfi.Iap2MfiAuthenticationClient
 import com.shilapi.xcertplay.mfi.LocalMfiAuthenticationClient
@@ -42,6 +44,7 @@ import com.shilapi.xcertplay.network.WirelessHotspotInfo
 import com.shilapi.xcertplay.network.WirelessHotspotBackend
 import com.shilapi.xcertplay.network.WirelessHotspotManager
 import com.shilapi.xcertplay.network.WirelessInterfaceDiagnostics
+import com.shilapi.xcertplay.network.WirelessReceiveDiagnostics
 import com.shilapi.xcertplay.network.WirelessStartupDiagnostics
 import com.shilapi.xcertplay.network.ExistingNetworkHotspotManager
 import com.shilapi.xcertplay.network.wirelessStartupContext
@@ -50,7 +53,6 @@ import com.shilapi.xcertplay.transport.BlockingDuplexByteStream
 import com.shilapi.xcertplay.transport.BluetoothRfcommDuplexStream
 import com.shilapi.xcertplay.transport.Iap2IdentificationConfig
 import com.shilapi.xcertplay.transport.Iap2LocationProvider
-import com.shilapi.xcertplay.transport.Iap2LocationRequest
 import com.shilapi.xcertplay.transport.Iap2UsbMuxHost
 import com.shilapi.xcertplay.transport.Iap2UsbSession
 import com.shilapi.xcertplay.transport.Iap2WiredCarPlayEndpoint
@@ -60,6 +62,8 @@ import com.shilapi.xcertplay.transport.Iap2WirelessCarPlayEndpoint
 import com.shilapi.xcertplay.transport.Iap2WirelessControlClient
 import com.shilapi.xcertplay.transport.Iap2WirelessControlTerminal
 import com.shilapi.xcertplay.transport.Iap2WirelessIdentification
+import com.shilapi.xcertplay.transport.Iap2WirelessLinkRole
+import com.shilapi.xcertplay.transport.forWirelessLink
 import com.shilapi.xcertplay.transport.IphoneCarPlayConfiguration
 import com.shilapi.xcertplay.transport.IphoneUsbException
 import com.shilapi.xcertplay.transport.IphoneUsbHost
@@ -238,12 +242,21 @@ class CarPlayController(
     @Volatile private var hotspot: WirelessHotspotManager? = null
     @Volatile private var bonjour: CarPlayBonjour? = null
     @Volatile private var wirelessDiagnostics: WirelessStartupDiagnostics? = null
+    @Volatile private var firstTcpWatchdog: FirstTcpWatchdog? = null
+    /** iOS 27 video in car, played by the host (see [VideoInCar]); set before [start]. */
+    @Volatile var videoListener: CarPlayVideoListener? = null
+    @Volatile private var videoGate: VideoInCarGate? = null
+    /** Takes a media button first, e.g. while the video player is on screen; true when it handled it. */
+    @Volatile var mediaButtonInterceptor: ((Int) -> Boolean)? = null
+
+    /** Answers the iPhone on a video in car remote control session; a network write, any thread. */
+    fun sendVideoMessage(streamId: Long, message: Map<String, Any?>): Boolean =
+        activeSession?.sendRemoteControlMessage(streamId, message) ?: false
     @Volatile private var bluetoothSocket: BluetoothSocket? = null
     @Volatile private var bluetoothStream: BluetoothRfcommDuplexStream? = null
     @Volatile private var wirelessTunnelChannel: Iap2Session? = null
-    @Volatile private var wirelessIdentification: Iap2IdentificationConfig? = null
+    @Volatile private var wirelessRuntimeIdentification: Iap2IdentificationConfig? = null
     @Volatile private var wirelessAirPlayEndpoint: Iap2WirelessCarPlayEndpoint? = null
-    @Volatile private var wirelessLocationRequest = Iap2LocationRequest()
     @Volatile private var vpnService: CarPlayVpnService? = null
     @Volatile private var vpnBound = false
     private val wirelessHandoffRequested = AtomicBoolean(false)
@@ -274,6 +287,10 @@ class CarPlayController(
             val newSession = activeSession !== session
             if (newSession) {
                 com.shilapi.xcertplay.glance.CarPlayGlance.setConnected(true)
+                if (videoListener != null) {
+                    val delivery = session.setVideoPlaybackAllowed(VideoInCar.allowed)
+                    debugLog("video in car session allowed=${VideoInCar.allowed} delivery=$delivery")
+                }
             }
             activeSession = session
             if (newSession) notifyPhone(true)
@@ -288,6 +305,7 @@ class CarPlayController(
             if (activeSession === session) {
                 activeSession = null
                 com.shilapi.xcertplay.glance.CarPlayGlance.setConnected(false)
+                videoListener?.onVideoSessionEnded()
                 synchronized(playbackStatus) {
                     val wasPlaying = playbackStatus.playing
                     playbackStatus.clearAll()?.let { it to wasPlaying }
@@ -300,6 +318,15 @@ class CarPlayController(
             }
             debugLog("AirPlay session ended peer=${session.host}")
             uiListener?.onSessionEnded(session)
+        }
+
+        override fun onRemoteControlMessage(session: AirPlaySession, streamId: Long, message: Map<String, Any?>) {
+            if (activeSession === session) videoListener?.onVideoMessage(streamId, message)
+        }
+
+        override fun onVideoPlaybackUiRequested(session: AirPlaySession) {
+            debugLog("CarPlay requested the video player")
+            if (activeSession === session) videoListener?.onVideoUiRequested()
         }
 
         override fun onTransportError(message: String) {
@@ -389,6 +416,20 @@ class CarPlayController(
             if (closed) return
         }
         connectionDiagnostic("start transport=${config.transport}")
+        videoListener?.let { listener ->
+            videoGate = VideoInCarGate(
+                readParked = listener::readParked,
+                onChanged = { allowed ->
+                    val delivery = activeSession?.setVideoPlaybackAllowed(allowed)
+                        ?: VideoPlaybackDelivery.QUEUED
+                    debugLog("video in car allowed=$allowed delivery=$delivery")
+                    listener.onVideoAllowedChanged(allowed)
+                },
+                onObserved = { parked ->
+                    debugLog("video in car parked=${parked ?: "unknown"}")
+                },
+            ).also { it.start() }
+        }
         if (config.transport == CarPlayTransport.WIRED) {
             permissionCloseable = iphoneHost.registerPermissionReceiver(::onIphonePermission)
             attachCloseable = iphoneHost.registerAttachReceiver(::onIphoneAttached)
@@ -441,6 +482,7 @@ class CarPlayController(
 
     fun sendMediaButton(index: Int): Boolean {
         if (closed) return false
+        if (mediaButtonInterceptor?.invoke(index) == true) return true
         val session = activeSession ?: return false
         return try {
             touchExecutor.execute { session.sendMedia(index) }
@@ -457,6 +499,7 @@ class CarPlayController(
         }
         val teardownStarted = System.nanoTime()
         connectionDiagnostic("teardown begin transport=${config.transport}")
+        videoGate?.close()
         com.shilapi.xcertplay.glance.CarPlayGlance.setConnected(false)
         closeReceivers()
         availabilityPollGeneration.incrementAndGet()
@@ -482,7 +525,7 @@ class CarPlayController(
                     }
                     closeBestEffort("MFi") { mfiSession?.close() }
                     mfiSession = null
-                    wirelessIdentification = null
+                    wirelessRuntimeIdentification = null
                     wirelessAirPlayEndpoint = null
                     closeBestEffort("location provider") { locationProvider?.close() }
                 } finally {
@@ -660,6 +703,7 @@ class CarPlayController(
                     "frequency=${hotspotInfo.frequencyMHz?.toString() ?: "unknown"}MHz",
             )
             var startedBonjour: CarPlayBonjour? = null
+            val receiveDiagnostics = WirelessReceiveDiagnostics(hotspotInfo.interfaceName)
             val diagnostics = WirelessStartupDiagnostics(
                 context = wirelessStartupContext(
                     WirelessModeRequirements.effectiveMode(config.wirelessHotspotMode, Build.VERSION.SDK_INT),
@@ -668,11 +712,23 @@ class CarPlayController(
                 sample = {
                     "${WirelessInterfaceDiagnostics.snapshot(hotspotInfo.interfaceName)} " +
                         "${startedHotspot?.connectionDiagnosticSnapshot() ?: "association=unknown"} " +
-                        (startedBonjour?.diagnosticSnapshot() ?: "bonjour=not_started")
+                        (startedBonjour?.diagnosticSnapshot() ?: "bonjour=not_started") + "\n" +
+                        receiveDiagnostics.snapshot()
                 },
                 log = { message -> if (!isStaleWirelessRun(generation)) debugLog(message) },
             )
             wirelessDiagnostics = diagnostics
+            val watchdog = FirstTcpWatchdog(
+                schedule = { delayMillis, action ->
+                    val task = Runnable { action() }
+                    mainHandler.postDelayed(task, delayMillis)
+                    val cancel: () -> Unit = { mainHandler.removeCallbacks(task) }
+                    cancel
+                },
+                onTimeout = { onFirstTcpTimeout(generation) },
+                log = { message -> if (!isStaleWirelessRun(generation)) debugLog("wireless startup $message") },
+            )
+            firstTcpWatchdog = watchdog
             onStatus(
                 CarPlayStatus.HotspotReady(
                     ssid = hotspotInfo.ssid,
@@ -709,7 +765,7 @@ class CarPlayController(
                     identity = identity,
                     pairings = pairings,
                     mfi = mfi,
-                    listener = wirelessSessionListener(generation),
+                    listener = wirelessSessionListener(generation, watchdog),
                     media = media,
                 )
             ) {
@@ -790,8 +846,14 @@ class CarPlayController(
                 closeWirelessStack()
                 return
             }
-            val identification = config.identification.copy(
-                wireless = Iap2WirelessIdentification(hostBluetoothMac, hotspotInfo.ssid),
+            val wirelessIdentification = Iap2WirelessIdentification(hostBluetoothMac, hotspotInfo.ssid)
+            val bootstrapIdentification = config.identification.forWirelessLink(
+                Iap2WirelessLinkRole.BLUETOOTH_BOOTSTRAP,
+                wirelessIdentification,
+            )
+            val runtimeIdentification = config.identification.forWirelessLink(
+                Iap2WirelessLinkRole.RUNTIME_TUNNEL,
+                wirelessIdentification,
             )
             val endpoint = Iap2WirelessCarPlayEndpoint(
                 ssid = hotspotInfo.ssid,
@@ -804,28 +866,28 @@ class CarPlayController(
                 publicKey = identity.publicKeyHex,
                 sourceVersion = airPlayConfig.sourceVersion,
             )
-            wirelessIdentification = identification
+            wirelessRuntimeIdentification = runtimeIdentification
             wirelessAirPlayEndpoint = endpoint
             debugLog(
                 "wireless endpoint addressCount=${endpoint.ipAddresses.size} " +
                     "family=${if (hostAddress is Inet6Address) "IPv6" else "IPv4"} " +
                     "port=${endpoint.airPlayPort} channel=${endpoint.channel} security=${endpoint.security}",
             )
-            wirelessLocationRequest = Iap2LocationRequest()
             media.setIapTunnelHandler(::startWirelessTunnelControl)
 
             onStatus(CarPlayStatus.RunningWireless)
-            debugLog("wireless Bluetooth iAP2 control starting")
+            debugLog(
+                "wireless Bluetooth iAP2 bootstrap starting " +
+                    "location=false vehicleStatus=false",
+            )
             val result = Iap2WirelessControlClient(
                 session = channel,
                 mfi = Iap2MfiAuthenticationClient(mfi),
             ).run(
-                identification = identification,
+                identification = bootstrapIdentification,
                 endpoint = endpoint,
                 timeoutMillis = controlLoopTimeoutMillis(),
-                locationProvider = locationProvider,
-                vehicleStatusProvider = vehicleStatusProvider,
-                locationRequest = wirelessLocationRequest,
+                onStartSessionSent = watchdog::startSessionSent,
                 onIncoming = ::onRouteFrame,
                 onProgress = { message ->
                     diagnostics.controlProgress(message)
@@ -887,7 +949,7 @@ class CarPlayController(
 
     private fun startWirelessTunnelControl(stream: BlockingDuplexByteStream): Boolean {
         if (closed || config.transport != CarPlayTransport.WIRELESS) return false
-        val identification = wirelessIdentification ?: return false
+        val identification = wirelessRuntimeIdentification ?: return false
         val endpoint = wirelessAirPlayEndpoint ?: return false
         val mfi = mfiSession?.client ?: return false
         debugLog("wireless type-130 tunnel data stream accepted")
@@ -904,7 +966,11 @@ class CarPlayController(
         }
         wirelessTunnelChannel = channel
         val generation = wirelessGeneration.get()
-        debugLog("wireless iAP2 tunnel control starting")
+        debugLog(
+            "wireless iAP2 runtime tunnel control starting " +
+                "location=${identification.locationInformationEnabled} " +
+                "vehicleStatus=${identification.vehicleStatusEnabled}",
+        )
         return try {
             tunnelExecutor.execute {
                 try {
@@ -917,9 +983,6 @@ class CarPlayController(
                         timeoutMillis = Iap2WirelessControlClient.NO_TIMEOUT_MILLIS,
                         locationProvider = locationProvider,
                         vehicleStatusProvider = vehicleStatusProvider,
-                        // The iPhone asks for location only on the Bluetooth link (see Iap2LocationRequest).
-                        locationRequest = wirelessLocationRequest,
-                        continueLocationRequest = true,
                         onReady = {
                             onWirelessTunnelReady(generation)
                         },
@@ -955,8 +1018,13 @@ class CarPlayController(
         }
     }
 
-    private fun wirelessSessionListener(generation: Int): AirPlaySessionListener =
+    private fun wirelessSessionListener(generation: Int, watchdog: FirstTcpWatchdog): AirPlaySessionListener =
         object : AirPlaySessionListener by sessionListener {
+            override fun onTcpAccepted(external: Boolean) {
+                if (isStaleWirelessRun(generation)) return
+                watchdog.accepted(external)
+            }
+
             override fun onSessionActive(session: AirPlaySession) {
                 if (isStaleWirelessRun(generation)) return
                 wirelessDiagnostics?.let {
@@ -1433,7 +1501,11 @@ class CarPlayController(
                 deviceIdentifier = ncmHostMac.macString(),
             )
             onStatus(CarPlayStatus.RunningControl)
-            debugLog("wired iAP2 control starting")
+            debugLog(
+                "wired iAP2 runtime control starting " +
+                    "location=${config.identification.locationInformationEnabled} " +
+                    "vehicleStatus=${config.identification.vehicleStatusEnabled}",
+            )
             val result = Iap2WiredControlClient(csm, Iap2MfiAuthenticationClient(mfi)).run(
                 identification = config.identification,
                 endpoint = endpoint,
@@ -1494,7 +1566,8 @@ class CarPlayController(
             throw IOException("The car hotspot is off. Turn it on in the car settings and connect again.")
         }
         val manager: WirelessHotspotManager = when (hotspotMode) {
-            WirelessHotspotMode.WIFI_P2P -> WifiP2pGroupManager(appContext, ::debugLog)
+            WirelessHotspotMode.WIFI_P2P -> WifiP2pGroupManager(appContext, ::debugLog,
+                preferredChannel = config.wifiP2pPreferredChannel)
             WirelessHotspotMode.LOCAL_ONLY_HOTSPOT -> LocalOnlyHotspotManager(appContext, ::debugLog)
             WirelessHotspotMode.MANUAL -> ManualHotspotManager(
                 context = appContext,
@@ -1643,7 +1716,31 @@ class CarPlayController(
         }
     }
 
+    /**
+     * StartSession went out but the iPhone never connected: end this run as a failure so the screen's
+     * reconnect path starts over, instead of waiting for the much longer control-loop timeout.
+     */
+    private fun onFirstTcpTimeout(generation: Int) {
+        if (closed || activeSession != null) return
+        // Moving the generation on first makes the blocked Bluetooth bootstrap end quietly.
+        if (!wirelessGeneration.compareAndSet(generation, generation + 1)) return
+        Thread(
+            {
+                closeWirelessStack()
+                fail(IOException("The iPhone did not open the CarPlay connection within " +
+                    "${FirstTcpWatchdog.TIMEOUT_MILLIS / 1000} s of StartSession"))
+            },
+            "rigplay-first-tcp-timeout",
+        ).apply {
+            isDaemon = true
+            start()
+        }
+    }
+
     private fun closeWirelessStack(service: CarPlayVpnService? = vpnService) {
+        val watchdog = firstTcpWatchdog
+        firstTcpWatchdog = null
+        watchdog?.terminate()
         val diagnostics = wirelessDiagnostics
         wirelessDiagnostics = null
         diagnostics?.close()
@@ -1662,7 +1759,7 @@ class CarPlayController(
         val activeHotspot = hotspot
         hotspot = null
         if (activeHotspot != null) closeBestEffort("wireless hotspot") { activeHotspot.close() }
-        wirelessIdentification = null
+        wirelessRuntimeIdentification = null
         wirelessAirPlayEndpoint = null
         wirelessHandoffRequested.set(false)
         wirelessTunnelReady.set(false)

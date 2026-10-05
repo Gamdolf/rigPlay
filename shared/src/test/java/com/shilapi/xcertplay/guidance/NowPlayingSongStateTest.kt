@@ -20,8 +20,8 @@ class NowPlayingSongStateTest {
         // Elapsed time alone changes nothing.
         assertNull(state.accept(update { group(1) { u32(1, 120_706L) } }))
         assertEquals(NowPlayingSong("Numb — Linkin Park", false), state.accept(update { group(1) { u8(0, 2) } }))
-        // A new title without an artist is a new item that has none.
-        assertEquals(NowPlayingSong("Podcast", false), state.accept(update { group(0) { string(1, "Podcast") } }))
+        // A title-only incremental update retains the last artist.
+        assertEquals(NowPlayingSong("Podcast — Linkin Park", false), state.accept(update { group(0) { string(1, "Podcast") } }))
         assertEquals(NowPlayingSong("Podcast — Host", false), state.accept(update { group(0) { string(12, "Host") } }))
     }
 
@@ -47,8 +47,43 @@ class NowPlayingSongStateTest {
         assertNull(state.current())
         assertEquals(NowPlayingSong("Next song", true),
             state.accept(update { group(0) { string(1, "Next song") } }))
-        state.accept(update { group(0) { string(1, "  ") } })
+        state.accept(update { group(0) { string(1, "  "); string(12, "Stale artist") } })
         assertNull(state.current())
+        assertEquals(NowPlayingSong("After clear", true),
+            state.accept(update { group(0) { string(1, "After clear") } }))
+    }
+
+    @Test
+    fun titleOnlyUpdatesRetainArtistAndPlaybackWhenOtherFieldsAreOmitted() {
+        val state = NowPlayingSongState()
+        state.accept(update {
+            group(0) { string(1, "Track"); string(12, "Artist") }
+            group(1) { u8(0, 1) }
+        })
+        assertEquals(NowPlayingSong("Lyric line — Artist", true),
+            state.accept(update { group(0) { string(1, "Lyric line") } }))
+        assertNull(state.accept(update { group(0) { u32(4, 180_000L) } }))
+        assertEquals(NowPlayingSong("Lyric line — Artist", true), state.current())
+    }
+
+    @Test
+    fun explicitEmptyArtistClearsItWithoutChangingTitleOrPlayback() {
+        val state = NowPlayingSongState()
+        state.accept(update { group(0) { string(1, "Track"); string(12, "Artist") } })
+        assertEquals(NowPlayingSong("Track", false),
+            state.accept(update { group(0) { string(12, "") } }))
+        assertEquals(NowPlayingSong("Next line", false),
+            state.accept(update { group(0) { string(1, "Next line") } }))
+    }
+
+    @Test
+    fun completeTrackUpdateReplacesBothTitleAndArtist() {
+        val state = NowPlayingSongState()
+        state.accept(update { group(0) { string(1, "First track"); string(12, "First artist") } })
+        assertEquals(NowPlayingSong("Second track — Second artist", false),
+            state.accept(update { group(0) { string(1, "Second track"); string(12, "Second artist") } }))
+        assertEquals(NowPlayingSong("Third track", false),
+            state.accept(update { group(0) { string(1, "Third track"); string(12, "") } }))
     }
 
     @Test

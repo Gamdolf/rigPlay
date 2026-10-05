@@ -92,6 +92,9 @@ class CarPlayVpnService : VpnService() {
                 .setSession(SESSION_NAME)
                 .setMtu(TUN_MTU)
                 .setBlocking(true)
+                // An empty app list routes every UID through this VPN. Scope it before establish;
+                // rejection must reach the existing attachment cleanup, never an unscoped retry.
+                .addAllowedApplication(packageName)
                 .establish()
                 ?: throw IOException("VpnService.establish returned null")
             tun = tunFd
@@ -200,6 +203,7 @@ class CarPlayVpnService : VpnService() {
                         socket.close()
                         return
                     }
+                    runCatching { current.listener.onTcpAccepted(!isOwnAddress(socket.inetAddress, socket.localAddress)) }
                     runCatching { current.listener.onDebugLog(
                         "airplay TCP accepted family=${if (socket.inetAddress is Inet6Address) "IPv6" else "IPv4"}",
                     ) }
@@ -309,3 +313,8 @@ class CarPlayVpnService : VpnService() {
         fun prepare(context: Context): Intent? = VpnService.prepare(context)
     }
 }
+
+/** Whether [peer] is this tablet (loopback, the listening address or any local interface), as for Bonjour probes. */
+internal fun isOwnAddress(peer: java.net.InetAddress, local: java.net.InetAddress): Boolean =
+    peer.isLoopbackAddress || peer == local ||
+        runCatching { java.net.NetworkInterface.getByInetAddress(peer) != null }.getOrDefault(false)
