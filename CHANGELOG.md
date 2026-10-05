@@ -1,5 +1,19 @@
 # rigPlay 0.2.0 — unreleased
 
+- Video in CarPlay (iOS 27): a video sent to CarPlay on the iPhone plays full screen on the tablet,
+  driven from the iPhone; SimHub wheel buttons play/pause it and skip 10 s. A rig counts as always
+  parked. Plain web video plays; FairPlay-protected video (Apple TV+, most paid streaming) does not. The
+  video's sound plays on the tablet, not on the PC. On by default (Display and performance → Video in
+  CarPlay).
+- Resolution is a whole-number percentage from 30 % to 160 % (rigPlay screen and in-session slider).
+  Above 100 % CarPlay draws a larger picture that the tablet scales down; if the tablet's decoder cannot
+  handle it, rigPlay falls back to 100 % and says so. A 60/80/100 % setting from an older build is kept.
+- Picture adjustments: brightness, contrast, saturation and warmth for the CarPlay picture, applied live
+  on the tablet from Display and performance → Picture adjustments.
+- Wi-Fi Direct: a Preferred channel setting (Auto, 5 GHz 36–48/149–165, or 2.4 GHz 1–11). A channel the
+  tablet refuses fails with a message instead of silently using another one.
+- Wireless: when the iPhone receives StartSession but never opens the CarPlay connection, rigPlay gives
+  up after 30 s and reconnects, instead of waiting for the much longer control timeout.
 - Fixes taken from upstream DiPlay (0.2.11–0.2.12), only where they touch code rigPlay still has:
   - Location, wheel speed and vehicle status are offered to the iPhone only on the Wi-Fi tunnel, never
     on the Bluetooth bootstrap, so iOS no longer binds them to the short-lived Bluetooth link and then
