@@ -1,5 +1,13 @@
 # rigPlay 0.2.0 — unreleased
 
+- Nothing yet since 0.2.0-rc.3. Changes for the final 0.2.0 go here.
+
+# rigPlay 0.2.0-rc.3 — 2026-10-05
+
+Fourth pre-release, for testing on a rig: the fixes and features taken from upstream DiPlay 0.2.11–0.2.12
+that apply to rigPlay, video in CarPlay, and the existing Wi-Fi network mode reworked after upstream's
+vehicle-tested Same LAN mode. Android versionCode 4; it installs over 0.2.0-rc.2.
+
 - Video in CarPlay (iOS 27): a video sent to CarPlay on the iPhone plays full screen on the tablet,
   driven from the iPhone; SimHub wheel buttons play/pause it and skip 10 s. A rig counts as always
   parked. Plain web video plays; FairPlay-protected video (Apple TV+, most paid streaming) does not. The
@@ -12,6 +20,12 @@
   on the tablet from Display and performance → Picture adjustments.
 - Wi-Fi Direct: a Preferred channel setting (Auto, 5 GHz 36–48/149–165, or 2.4 GHz 1–11). A channel the
   tablet refuses fails with a message instead of silently using another one.
+- Existing Wi-Fi network mode (#33) follows upstream DiPlay's vehicle-tested Same LAN mode: the iPhone
+  is given the tablet's IPv6 link-local address (IPv4 when there is none), Bonjour and the AirPlay
+  listener serve both IPv4 and IPv6 on the same port, the router's BSSID goes to the iPhone as a hint,
+  open networks work (StartSession no longer rejects an empty password), a password that does not
+  match the network's security is reported on Android 12+, and losing the network or a change of its
+  addresses restarts the wireless session.
 - Wireless: when the iPhone receives StartSession but never opens the CarPlay connection, rigPlay gives
   up after 30 s and reconnects, instead of waiting for the much longer control timeout.
 - Fixes taken from upstream DiPlay (0.2.11–0.2.12), only where they touch code rigPlay still has:

@@ -8,6 +8,7 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.net.wifi.WifiInfo
 import android.net.wifi.WifiManager
+import android.os.Build
 import android.os.Looper
 import com.shilapi.xcertplay.transport.Iap2WirelessSecurity
 import java.io.Closeable
@@ -27,9 +28,13 @@ import java.util.concurrent.TimeUnit
  * hides it without location permission) and otherwise from Settings; the password always comes from
  * Settings. It never creates, changes or tears down a network: [close] only releases its callback.
  *
- * The router's BSSID is read for diagnostics only. [WirelessHotspotInfo.bssid] doubles as the AirPlay
- * device identifier, which must stay rigPlay's own and stable across roaming, so it is left null here
- * and the controller uses the saved identifier. The iAP2 0x5703 message omits the BSSID anyway.
+ * The iPhone is given the scoped IPv6 link-local address (IPv4 when there is none), and discovery and
+ * the AirPlay listener serve both families on the interface, as upstream DiPlay's Same LAN mode does.
+ * The router's BSSID goes to the iPhone only as the optional AP hint in 0x5703
+ * ([WirelessHotspotInfo.accessPointBssid]). [WirelessHotspotInfo.bssid] doubles as the AirPlay device
+ * identifier, which must stay rigPlay's own and stable across roaming, so it is left null here and the
+ * controller uses the saved identifier. Losing the network or a change of its addresses calls
+ * [onNetworkChanged] once, so the controller restarts the wireless session.
  */
 class ExistingNetworkHotspotManager(
     context: Context,
@@ -37,6 +42,7 @@ class ExistingNetworkHotspotManager(
     passphrase: String,
     private val onDiagnostic: (String) -> Unit = {},
     private val reader: StationWifiReader = AndroidStationWifiReader(context),
+    private val onNetworkChanged: () -> Unit = {},
 ) : WirelessHotspotManager {
     private val configuredSsid = ssid.trim()
     private val passphrase = passphrase
@@ -44,6 +50,8 @@ class ExistingNetworkHotspotManager(
     @Volatile private var closed = false
     @Volatile private var stationLost = false
     @Volatile private var watch: Closeable? = null
+    @Volatile private var servedAddresses: Set<InetAddress> = emptySet()
+    private val changeReported = java.util.concurrent.atomic.AtomicBoolean(false)
 
     init {
         require('\u0000' !in configuredSsid && '\u0000' !in passphrase) {
@@ -66,13 +74,29 @@ class ExistingNetworkHotspotManager(
             val station = readStation()
             if (station?.hostAddress != null) {
                 val info = existingNetworkHotspotInfo(station, configuredSsid, passphrase)
-                if (watch == null) watch = reader.watch { stationLost = true }
+                securityMismatch(reader.wifiInfo(), passphrase)?.let { throw IOException(it) }
+                servedAddresses = info.hostAddresses.toSet()
+                if (watch == null) {
+                    watch = reader.watchChanges(
+                        onLost = {
+                            stationLost = true
+                            reportChange("network lost")
+                        },
+                        onLinkChanged = { link ->
+                            val current = stationHostAddresses(link.linkAddresses.map { it.address },
+                                reader.interfaceIndex(link.interfaceName.orEmpty())).toSet()
+                            if (current != servedAddresses) reportChange("addresses changed")
+                        },
+                    )
+                }
                 onDiagnostic(
                     "Existing network iface=${station.interfaceName} " +
                         "family=${if (info.hostAddress is Inet6Address) "IPv6" else "IPv4"} " +
                         "channel=${info.channel} channelKnown=${info.channel > 0} " +
                         "frequency=${info.frequencyMHz?.toString() ?: "unknown"}MHz " +
                         "networkNameReadable=${info.ssidReadable} routerAddressReadable=${station.bssid != null} " +
+                        "families=${info.hostAddresses.joinToString(",") { if (it is Inet6Address) "IPv6" else "IPv4" }} " +
+                        "apHint=${if (info.accessPointBssid == null) "omitted" else "present"} " +
                         "security=${info.security}",
                 )
                 return info
@@ -94,6 +118,12 @@ class ExistingNetworkHotspotManager(
                 throw IOException("Interrupted while waiting for the Wi-Fi connection", interrupted)
             }
         }
+    }
+
+    private fun reportChange(reason: String) {
+        if (closed || !changeReported.compareAndSet(false, true)) return
+        onDiagnostic("Existing network $reason; restarting the wireless session")
+        onNetworkChanged()
     }
 
     private fun readStation(): StationWifiSnapshot? =
@@ -130,6 +160,9 @@ interface StationWifiReader {
 
     /** Reports loss of the Wi-Fi network; closing the handle unregisters the callback. */
     fun watch(onLost: () -> Unit): Closeable = Closeable {}
+
+    /** Like [watch], and also reports the network's new link properties when they change. */
+    fun watchChanges(onLost: () -> Unit, onLinkChanged: (LinkProperties) -> Unit): Closeable = watch(onLost)
 }
 
 /** [StationWifiReader] over [ConnectivityManager] and [WifiManager]. Never changes Wi-Fi state. */
@@ -167,10 +200,17 @@ class AndroidStationWifiReader(context: Context) : StationWifiReader {
         0
     }
 
-    override fun watch(onLost: () -> Unit): Closeable {
+    override fun watch(onLost: () -> Unit): Closeable = watchChanges(onLost) {}
+
+    override fun watchChanges(onLost: () -> Unit, onLinkChanged: (LinkProperties) -> Unit): Closeable {
         val cm = connectivity ?: return Closeable {}
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onLost(network: Network) = onLost()
+
+            override fun onLinkPropertiesChanged(network: Network, linkProperties: LinkProperties) {
+                val capabilities = runCatching { cm.getNetworkCapabilities(network) }.getOrNull()
+                if (capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) != true) onLinkChanged(linkProperties)
+            }
         }
         return try {
             cm.registerNetworkCallback(
@@ -197,7 +237,7 @@ data class StationWifiSnapshot(
 ) {
     val channel: Int get() = frequencyMHz?.let(::wifiFrequencyMhzToChannel) ?: 0
     val bandLabel: String? get() = frequencyMHz?.let(::wifiFrequencyBandLabel)
-    /** The address the AirPlay listener binds and the iPhone is given. */
+    /** The address the iPhone is given (StartSession) and the AirPlay listener binds first. */
     val hostAddress: InetAddress? get() = stationHostAddress(addresses, interfaceIndex)
 }
 
@@ -225,15 +265,49 @@ internal fun readableSsid(raw: String?): String? {
     return value.substring(1, value.length - 1).takeIf { it.isNotEmpty() }
 }
 
-/** Prefers the LAN IPv4 address; a scoped IPv6 link-local address is the fallback. */
-internal fun stationHostAddress(addresses: List<InetAddress>, interfaceIndex: Int): InetAddress? {
-    addresses.firstOrNull {
+/**
+ * Prefers the scoped IPv6 link-local address, as the other wireless modes and upstream DiPlay's
+ * vehicle-tested Same LAN mode do; the LAN IPv4 address is the fallback.
+ */
+internal fun stationHostAddress(addresses: List<InetAddress>, interfaceIndex: Int): InetAddress? =
+    wirelessHostAddress(addresses, interfaceIndex)
+
+/** Every address discovery and the AirPlay listener serve: the LAN IPv4 and the scoped IPv6 link-local. */
+internal fun stationHostAddresses(addresses: List<InetAddress>, interfaceIndex: Int): List<InetAddress> {
+    val ipv4 = addresses.firstOrNull {
         it is Inet4Address && !it.isLoopbackAddress && !it.isLinkLocalAddress &&
             !it.isAnyLocalAddress && !it.isMulticastAddress
-    }?.let { return it }
-    if (interfaceIndex <= 0) return null
-    return addresses.filterIsInstance<Inet6Address>().firstOrNull { it.isLinkLocalAddress }
-        ?.let { Inet6Address.getByAddress(null, it.address, interfaceIndex) }
+    }
+    val ipv6 = wirelessHostAddress(addresses, interfaceIndex) as? Inet6Address
+    return listOfNotNull(ipv6, ipv4)
+}
+
+/** The router BSSID as six bytes for the 0x5703 AP hint; null when unknown, zero, multicast or redacted. */
+internal fun accessPointBssid(text: String?): ByteArray? {
+    if (text == null || !text.matches(Regex("(?i)[0-9a-f]{2}(:[0-9a-f]{2}){5}"))) return null
+    if (text.lowercase() in REDACTED_BSSIDS) return null
+    val bytes = text.split(':').map { it.toInt(16).toByte() }.toByteArray()
+    if (bytes.all { it == 0.toByte() } || bytes[0].toInt() and 1 != 0) return null
+    return bytes
+}
+
+/**
+ * Android 12+ reports the network's security: an open network with a saved password, or a secured
+ * one without, cannot work, so it fails early with what to fix. Unknown security is left alone.
+ */
+internal fun securityMismatch(info: WifiInfo?, passphrase: String): String? {
+    if (Build.VERSION.SDK_INT < 31 || info == null) return null
+    return securityMismatch(info.currentSecurityType, passphrase)
+}
+
+internal fun securityMismatch(securityType: Int, passphrase: String): String? = when (securityType) {
+    WifiInfo.SECURITY_TYPE_OPEN -> if (passphrase.isNotEmpty()) {
+        "The tablet's Wi-Fi network is open; clear the saved password in Settings"
+    } else null
+    WifiInfo.SECURITY_TYPE_PSK, WifiInfo.SECURITY_TYPE_SAE -> if (passphrase.isEmpty()) {
+        "The tablet's Wi-Fi network is secured; enter its password in Settings"
+    } else null
+    else -> null
 }
 
 /**
@@ -270,6 +344,8 @@ internal fun existingNetworkHotspotInfo(
         bandLabel = station.frequencyMHz?.let(::wifiFrequencyBandLabel) ?: "Unknown band",
         backend = WirelessHotspotBackend.EXISTING_NETWORK,
         ssidReadable = station.ssid != null,
+        hostAddresses = stationHostAddresses(station.addresses, station.interfaceIndex),
+        accessPointBssid = accessPointBssid(station.bssid),
     )
 }
 

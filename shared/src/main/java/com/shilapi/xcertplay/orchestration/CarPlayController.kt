@@ -767,6 +767,8 @@ class CarPlayController(
                     mfi = mfi,
                     listener = wirelessSessionListener(generation, watchdog),
                     media = media,
+                    // Existing-network mode also serves the interface's other address family.
+                    additionalBindAddresses = hotspotInfo.hostAddresses.filter { it != hostAddress },
                 )
             ) {
                 CarPlayVpnService.AttachResult.Started -> Unit
@@ -797,6 +799,7 @@ class CarPlayController(
                 // or IPv6 while the listener/probe was bound to the AP's IPv4 address.
                 useInterfaceMdns = true,
                 onEvent = { event -> debugLog("wireless bonjour: ${event.diagnosticSummary()}") },
+                additionalAddresses = hotspotInfo.hostAddresses.filter { it != hostAddress },
             )
             bonjour = bonjourClient
             bonjourClient.start()
@@ -865,6 +868,7 @@ class CarPlayController(
                 deviceIdentifier = deviceIdentifier,
                 publicKey = identity.publicKeyHex,
                 sourceVersion = airPlayConfig.sourceVersion,
+                accessPointBssid = hotspotInfo.accessPointBssid,
             )
             wirelessRuntimeIdentification = runtimeIdentification
             wirelessAirPlayEndpoint = endpoint
@@ -1585,6 +1589,7 @@ class CarPlayController(
                 ssid = config.existingNetworkSsid.orEmpty(),
                 passphrase = config.existingNetworkPassphrase.orEmpty(),
                 onDiagnostic = ::debugLog,
+                onNetworkChanged = { if (!isStaleWirelessRun(generation)) restartWireless() },
             )
         }
         hotspot = manager

@@ -2,6 +2,7 @@ package com.shilapi.xcertplay.network
 
 import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
 import com.shilapi.xcertplay.transport.Iap2WirelessSecurity
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -41,7 +42,10 @@ class ExistingNetworkHotspotInfoTest {
         assertEquals(5180, info.frequencyMHz)
         assertEquals("5 GHz", info.bandLabel)
         assertEquals("wlan0", info.interfaceName)
-        assertEquals(lan, info.hostAddress)
+        // The iPhone gets the scoped link-local address; both families are served.
+        assertEquals(7, (info.hostAddress as Inet6Address).scopeId)
+        assertEquals(linkLocal, info.hostAddress)
+        assertEquals(listOf(linkLocal, lan), info.hostAddresses)
         assertEquals(Iap2WirelessSecurity.WPA_WPA2, info.security)
         assertEquals(WirelessHotspotBackend.EXISTING_NETWORK, info.backend)
         // The router BSSID must not become rigPlay's AirPlay device identifier.
@@ -71,13 +75,34 @@ class ExistingNetworkHotspotInfoTest {
         assertEquals(Iap2WirelessSecurity.NONE, existingNetworkHotspotInfo(station(), "", "").security)
     }
 
-    @Test fun ipv6LinkLocalIsTheScopedFallbackOnly() {
-        val v6 = existingNetworkHotspotInfo(station(addresses = listOf(linkLocal)), "", "").hostAddress as Inet6Address
-        assertEquals(7, v6.scopeId)
+    @Test fun ipv4IsTheFallbackWithoutAScopedLinkLocalAddress() {
+        val v4 = existingNetworkHotspotInfo(station(index = 0), "", "")
+        assertEquals(lan, v4.hostAddress)
+        assertEquals(listOf(lan), v4.hostAddresses)
+        assertEquals(lan, existingNetworkHotspotInfo(station(addresses = listOf(lan)), "", "").hostAddress)
         assertThrows(IOException::class.java) {
             existingNetworkHotspotInfo(station(addresses = listOf(linkLocal), index = 0), "", "")
         }
         assertNull(station(addresses = emptyList()).hostAddress)
+    }
+
+    @Test fun theRouterAddressIsOnlyAnApHint() {
+        val info = existingNetworkHotspotInfo(station(), "", "")
+        assertArrayEquals(byteArrayOf(0xaa.toByte(), 0xbb.toByte(), 0xcc.toByte(), 0xdd.toByte(), 0xee.toByte(), 0xff.toByte()),
+            info.accessPointBssid)
+        assertNull(info.bssid)
+        listOf(null, "", "02:00:00:00:00:00", "00:00:00:00:00:00", "01:00:5e:00:00:01", "not-a-mac", "aa:bb:cc:dd:ee").forEach {
+            assertNull(it, accessPointBssid(it))
+        }
+    }
+
+    @Test fun openOrSecuredMismatchesAreReportedWhenAndroidKnowsTheSecurity() {
+        assertTrue(securityMismatch(android.net.wifi.WifiInfo.SECURITY_TYPE_OPEN, "home-password")!!.contains("open"))
+        assertTrue(securityMismatch(android.net.wifi.WifiInfo.SECURITY_TYPE_PSK, "")!!.contains("secured"))
+        assertTrue(securityMismatch(android.net.wifi.WifiInfo.SECURITY_TYPE_SAE, "")!!.contains("secured"))
+        assertNull(securityMismatch(android.net.wifi.WifiInfo.SECURITY_TYPE_OPEN, ""))
+        assertNull(securityMismatch(android.net.wifi.WifiInfo.SECURITY_TYPE_PSK, "home-password"))
+        assertNull(securityMismatch(android.net.wifi.WifiInfo.SECURITY_TYPE_UNKNOWN, ""))
     }
 
     @Test fun androidSsidFormsAreNormalised() {
