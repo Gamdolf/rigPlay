@@ -25,6 +25,8 @@ data class AirPlayDeviceInfo(
 
 /** Session lifecycle and command callbacks for the driver/UI layer. */
 interface AirPlaySessionListener {
+    /** A TCP connection reached the AirPlay listener; [external] is false when the tablet connected to itself. */
+    fun onTcpAccepted(external: Boolean) {}
     fun onSessionActive(session: AirPlaySession) {}
     fun onSessionEnded(session: AirPlaySession) {}
     fun onVideoFrameRendered(session: AirPlaySession) {}

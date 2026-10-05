@@ -240,6 +240,7 @@ class CarPlayController(
     @Volatile private var hotspot: WirelessHotspotManager? = null
     @Volatile private var bonjour: CarPlayBonjour? = null
     @Volatile private var wirelessDiagnostics: WirelessStartupDiagnostics? = null
+    @Volatile private var firstTcpWatchdog: FirstTcpWatchdog? = null
     @Volatile private var bluetoothSocket: BluetoothSocket? = null
     @Volatile private var bluetoothStream: BluetoothRfcommDuplexStream? = null
     @Volatile private var wirelessTunnelChannel: Iap2Session? = null
@@ -676,6 +677,17 @@ class CarPlayController(
                 log = { message -> if (!isStaleWirelessRun(generation)) debugLog(message) },
             )
             wirelessDiagnostics = diagnostics
+            val watchdog = FirstTcpWatchdog(
+                schedule = { delayMillis, action ->
+                    val task = Runnable { action() }
+                    mainHandler.postDelayed(task, delayMillis)
+                    val cancel: () -> Unit = { mainHandler.removeCallbacks(task) }
+                    cancel
+                },
+                onTimeout = { onFirstTcpTimeout(generation) },
+                log = { message -> if (!isStaleWirelessRun(generation)) debugLog("wireless startup $message") },
+            )
+            firstTcpWatchdog = watchdog
             onStatus(
                 CarPlayStatus.HotspotReady(
                     ssid = hotspotInfo.ssid,
@@ -712,7 +724,7 @@ class CarPlayController(
                     identity = identity,
                     pairings = pairings,
                     mfi = mfi,
-                    listener = wirelessSessionListener(generation),
+                    listener = wirelessSessionListener(generation, watchdog),
                     media = media,
                 )
             ) {
@@ -834,6 +846,7 @@ class CarPlayController(
                 identification = bootstrapIdentification,
                 endpoint = endpoint,
                 timeoutMillis = controlLoopTimeoutMillis(),
+                onStartSessionSent = watchdog::startSessionSent,
                 onIncoming = ::onRouteFrame,
                 onProgress = { message ->
                     diagnostics.controlProgress(message)
@@ -964,8 +977,13 @@ class CarPlayController(
         }
     }
 
-    private fun wirelessSessionListener(generation: Int): AirPlaySessionListener =
+    private fun wirelessSessionListener(generation: Int, watchdog: FirstTcpWatchdog): AirPlaySessionListener =
         object : AirPlaySessionListener by sessionListener {
+            override fun onTcpAccepted(external: Boolean) {
+                if (isStaleWirelessRun(generation)) return
+                watchdog.accepted(external)
+            }
+
             override fun onSessionActive(session: AirPlaySession) {
                 if (isStaleWirelessRun(generation)) return
                 wirelessDiagnostics?.let {
@@ -1657,7 +1675,31 @@ class CarPlayController(
         }
     }
 
+    /**
+     * StartSession went out but the iPhone never connected: end this run as a failure so the screen's
+     * reconnect path starts over, instead of waiting for the much longer control-loop timeout.
+     */
+    private fun onFirstTcpTimeout(generation: Int) {
+        if (closed || activeSession != null) return
+        // Moving the generation on first makes the blocked Bluetooth bootstrap end quietly.
+        if (!wirelessGeneration.compareAndSet(generation, generation + 1)) return
+        Thread(
+            {
+                closeWirelessStack()
+                fail(IOException("The iPhone did not open the CarPlay connection within " +
+                    "${FirstTcpWatchdog.TIMEOUT_MILLIS / 1000} s of StartSession"))
+            },
+            "rigplay-first-tcp-timeout",
+        ).apply {
+            isDaemon = true
+            start()
+        }
+    }
+
     private fun closeWirelessStack(service: CarPlayVpnService? = vpnService) {
+        val watchdog = firstTcpWatchdog
+        firstTcpWatchdog = null
+        watchdog?.terminate()
         val diagnostics = wirelessDiagnostics
         wirelessDiagnostics = null
         diagnostics?.close()

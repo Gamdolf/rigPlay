@@ -27,6 +27,8 @@ class Iap2WirelessControlClient(
         locationProvider: Iap2LocationProvider? = null,
         vehicleStatusProvider: VehicleStatusProvider? = null,
         onReady: () -> Unit = {},
+        /** Called after each CarPlay StartSession (0x4301) has been sent. */
+        onStartSessionSent: () -> Unit = {},
         onIncoming: (Iap2Frame) -> Unit = {},
         onProgress: (String) -> Unit = {},
     ): Iap2WirelessControlResult {
@@ -159,6 +161,7 @@ class Iap2WirelessControlClient(
                         onProgress("iap2 rx=0x4300 carplay-availability")
                         onProgress(carPlayAvailabilityDiagnostic(incoming))
                         send(carPlayStartSession(endpoint), deadlineNanos)
+                        onStartSessionSent()
                         stage = later(stage, Iap2WirelessControlStage.CARPLAY_START_SENT)
                         carPlayStartSessionsSent++
                         onProgress("iap2 tx=0x4301 carplay-start-session")
