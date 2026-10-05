@@ -433,7 +433,7 @@ namespace RigPlayPlugin.Net
                     SendError(ErrorCodes.NotPaired, message.Type + " requires a paired session", message.Type);
                     return;
                 }
-                pairRequestSeen = true;
+                lock (stateLock) pairRequestSeen = true;
                 server.OnPairRequest(this, request);
                 return;
             }
@@ -502,7 +502,17 @@ namespace RigPlayPlugin.Net
                     if (now >= deadline) Close(PendingCloseReason);
                     return;
                 }
-                var state = State;
+                // Capture the published state under a short lock, then decide the timeouts outside it: never do I/O
+                // or call Close() while holding stateLock (Close() takes it, and server handlers run outside it).
+                SessionState state;
+                long welcomeAtNow;
+                bool pairRequestSeenNow;
+                lock (stateLock)
+                {
+                    state = State;
+                    welcomeAtNow = welcomeAt;
+                    pairRequestSeenNow = pairRequestSeen;
+                }
                 if (state == SessionState.AwaitingHello)
                 {
                     if (now - acceptedAt >= timings.HelloTimeoutMs) Close("no hello within " + timings.HelloTimeoutMs + " ms");
@@ -513,7 +523,7 @@ namespace RigPlayPlugin.Net
                     Close("link lost: no line for " + timings.WatchdogMs + " ms");
                     return;
                 }
-                if (state == SessionState.Unpaired && !pairRequestSeen && now - welcomeAt >= timings.PairRequestTimeoutMs)
+                if (state == SessionState.Unpaired && !pairRequestSeenNow && now - welcomeAtNow >= timings.PairRequestTimeoutMs)
                 {
                     Close("no pairRequest within " + timings.PairRequestTimeoutMs + " ms of welcome");
                     return;

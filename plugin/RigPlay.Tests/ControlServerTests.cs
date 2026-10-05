@@ -87,7 +87,26 @@ namespace RigPlayPlugin.Tests
 
         public static ControlServer NewServer(SessionTimings timings)
         {
-            return new ControlServer(0, () => new WelcomeMessage { HostId = HostId, Name = "RIG-PC", Version = "0.1.0", SimhubVersion = "9.12.6" }, timings);
+            return NewServer(timings, null);
+        }
+
+        public static ControlServer NewServer(SessionTimings timings, IClock clock)
+        {
+            return new ControlServer(0, () => new WelcomeMessage { HostId = HostId, Name = "RIG-PC", Version = "0.1.0", SimhubVersion = "9.12.6" }, timings, clock);
+        }
+
+        /// <summary>Swaps in a server driven by <paramref name="clock"/> instead of real time; the session's timer still
+        /// ticks on <see cref="SessionTimings.TickMs"/> but reads this clock, so the test moves the deadlines by hand.</summary>
+        private ManualClock UseManualClock(SessionTimings timings)
+        {
+            var clock = new ManualClock();
+            server.Stop();
+            var s = NewServer(timings, clock);
+            s.Pairing = new TokenPairing();
+            s.StateFactory = _ => new StateMessage { DashboardUrl = null, Audio = new AudioInfo { Enabled = false, Port = 23712 } };
+            Assert.True(s.Start(), s.Status.Error);
+            server = s;
+            return clock;
         }
 
         public void Dispose()
@@ -410,6 +429,53 @@ namespace RigPlayPlugin.Tests
             t.ExpectClosed();
             var afterRefusal = (DateTime.UtcNow - refusedAt).TotalMilliseconds;
             Assert.True(afterRefusal >= 1650, "closed " + afterRefusal + " ms after the refusal");
+        }
+
+        [Fact]
+        public void OnAManualClockAdvancingPastThePairRequestTimeoutCloses()
+        {
+            // Only the pairRequest deadline can fire: hello and watchdog are far in the future on the manual clock.
+            var timings = Fast;
+            timings.HelloTimeoutMs = 1000000;
+            timings.WatchdogMs = 1000000;
+            timings.PairRequestTimeoutMs = 5000;
+            var clock = UseManualClock(timings);
+
+            var t = Connect();
+            t.Hello();
+            Assert.True(FakeTablet.WaitFor(() => server.Sessions.Any(s => s.State == SessionState.Unpaired)));
+
+            // Short of the deadline the session stays open (the timer has fired on real time but the clock has not moved).
+            clock.Advance(timings.PairRequestTimeoutMs - 1);
+            Assert.False(FakeTablet.WaitFor(() => server.Sessions.Count == 0, 200));
+
+            // Crossing it closes the session: Tick reads welcomeAt/pairRequestSeen/State under stateLock.
+            clock.Advance(1);
+            t.ExpectClosed();
+            Assert.True(FakeTablet.WaitFor(() => server.Sessions.Count == 0));
+        }
+
+        [Fact]
+        public void OnAManualClockAPairRequestPreventsTheTimeout()
+        {
+            var timings = Fast;
+            timings.HelloTimeoutMs = 1000000;
+            timings.WatchdogMs = 1000000;
+            timings.PairRequestTimeoutMs = 5000;
+            var clock = UseManualClock(timings);
+
+            var t = Connect();
+            t.Hello();
+            // The pairRequest (token "good") pairs the session; pairRequestSeen is published under stateLock.
+            t.Send(new PairRequestMessage { Token = "good" });
+            Assert.True(t.Expect<PairResultMessage>().Ok);
+            t.Expect<StateMessage>();
+            Assert.True(FakeTablet.WaitFor(() => server.PairedSessions.Count == 1));
+
+            // Moving the clock well past the pairRequest deadline must not close the (now paired) session.
+            clock.Advance(timings.PairRequestTimeoutMs * 3);
+            Assert.False(FakeTablet.WaitFor(() => server.PairedSessions.Count == 0, 300));
+            Assert.Single(server.PairedSessions);
         }
 
         [Fact]
