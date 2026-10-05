@@ -680,6 +680,10 @@ class CarPlayHostActivity : ComponentActivity() {
         sessionLog?.append("Activity destroyed")
         sessionLog?.close()
         sessionLog = null
+        // Shut down the worker executors even when shutdown() did not run (system-driven recreate),
+        // so their threads do not leak. shutdown() is idempotent, so this is safe if it already ran.
+        teardownExecutor.shutdown()
+        airPlayCommandExecutor.shutdown()
         super.onDestroy()
     }
 
