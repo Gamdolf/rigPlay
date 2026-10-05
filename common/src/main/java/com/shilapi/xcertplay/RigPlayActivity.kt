@@ -29,6 +29,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import com.shilapi.xcertplay.host.R
+import com.shilapi.xcertplay.network.WifiP2pChannels
 import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
 import java.io.File
 import java.text.SimpleDateFormat
@@ -752,8 +753,45 @@ class RigPlayActivity : ComponentActivity() {
             existingNetworkControls(parent)
         } else {
             parent.addView(label(getString(R.string.wifi_direct_setup_hint), 16, MUTED))
+            wifiDirectChannelControl(parent)
             parent.addView(button(getString(R.string.open_tablet_wi_fi_settings), false) { openCarClientWifiSettings() }, matchButton(12, 60))
         }
+    }
+
+    private fun wifiDirectChannelLabel(channel: Int): String = if (channel == WifiP2pChannels.AUTO) {
+        getString(R.string.auto)
+    } else {
+        getString(R.string.wifi_direct_channel_choice, channel,
+            getString(if (channel < 36) R.string.s_2_4_ghz else R.string.s_5_ghz))
+    }
+
+    /** Preferred Wi-Fi Direct channel; Auto keeps the automatic choice and its remembered channel. */
+    private fun wifiDirectChannelControl(parent: LinearLayout) {
+        val summary: (Int) -> String = {
+            getString(R.string.wifi_direct_channel_summary, wifiDirectChannelLabel(it))
+        }
+        val control = button(summary(AirPlayPersistence.loadWifiP2pPreferredChannel(this)), false) {}
+        control.setOnClickListener {
+            val choices = listOf(WifiP2pChannels.AUTO) + WifiP2pChannels.channels
+            val current = AirPlayPersistence.loadWifiP2pPreferredChannel(this)
+            var selection = current
+            AlertDialog.Builder(this).setTitle(R.string.wifi_direct_channel_title)
+                .setSingleChoiceItems(choices.map(::wifiDirectChannelLabel).toTypedArray(),
+                    choices.indexOf(current)) { _, which -> selection = choices[which] }
+                .setPositiveButton(R.string.save) { _, _ ->
+                    if (selection != current) {
+                        AirPlayPersistence.saveWifiP2pPreferredChannel(this, selection)
+                        control.text = summary(selection)
+                        toast(getString(R.string.saved_for_your_next_connection))
+                    }
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        }
+        parent.addView(control, matchButton(12, 60))
+        parent.addView(label(getString(R.string.wifi_direct_channel_description), 15, MUTED).apply {
+            setPadding(0, dp(6), 0, 0)
+        })
     }
 
     // --- Existing Wi-Fi network mode (#33) ---------------------------------------------------------

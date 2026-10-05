@@ -1,6 +1,10 @@
 <resources>
     <string name="tablet_hotspot">Tablet hotspot</string>
     <string name="wifi_direct">Wi-Fi Direct</string>
+    <string name="wifi_direct_channel_title">Preferred Wi-Fi Direct channel</string>
+    <string name="wifi_direct_channel_summary">Preferred channel: %1$s</string>
+    <string name="wifi_direct_channel_choice">Channel %1$d · %2$s</string>
+    <string name="wifi_direct_channel_description">Auto lets the tablet choose. A tablet with one Wi-Fi radio that is also on your home Wi-Fi usually has to use the home network’s channel. Changes apply to the next Wi-Fi Direct connection.</string>
     <string name="hotspot_hint_manual">Tablet hotspot · Keep the tablet hotspot, Bluetooth and your iPhone’s Wi-Fi on.</string>
     <string name="hotspot_hint_local">Open Connection setup to save your tablet hotspot details.</string>
     <string name="hotspot_hint_p2p">Wi-Fi Direct · Keep the tablet’s Wi-Fi, Bluetooth and your iPhone’s Wi-Fi on.</string>
