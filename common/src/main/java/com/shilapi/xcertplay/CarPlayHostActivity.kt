@@ -2525,6 +2525,7 @@ class CarPlayHostActivity : ComponentActivity() {
             main = display,
             rightHandDrive = rightHandDrive,
             hevc = hevcEnabled,
+            videoInCar = AirPlayPersistence.loadVideoInCarEnabled(this),
             microphone = microphoneAvailable,
             manufacturer = normalizedManufacturer(),
             model = normalizedModel(),
@@ -2950,6 +2951,7 @@ class CarPlayHostActivity : ComponentActivity() {
         )
         controller = next
         CarPlayMediaKeys.attach(this, next)
+        if (airPlayConfig.videoInCar) CarPlayVideo.attach(this, next)
         val display = CarPlaySessionDisplay(airPlayConfig.main.widthPixels, airPlayConfig.main.heightPixels,
             displayRotation(), hideTopBar, hideBottomBar, size.width, size.height)
         sessionDisplay = display

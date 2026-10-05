@@ -39,6 +39,7 @@ object AirPlayPersistence {
     private const val KEY_LOCKDOWN_ROOT_CERT = "lockdown_root_cert"
     private const val KEY_DISPLAY_SCALE_TENTHS = "display_scale_tenths"
     private const val KEY_DISPLAY_SCALE_PERCENT = "display_scale_percent"
+    private const val KEY_VIDEO_IN_CAR = "video_in_car"
     private const val KEY_UI_SCALE_PERCENT = "ui_scale_percent"
     private const val KEY_HEVC_ENABLED = "hevc_enabled"
     private const val KEY_HEVC_SOFTWARE_DECODER = "hevc_software_decoder"
@@ -107,6 +108,14 @@ object AirPlayPersistence {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_DISPLAY_SCALE_TENTHS, CarPlayDisplayScale.sanitize(tenths))
             .apply()
+    }
+
+    /** iOS 27 video in car (see [com.shilapi.xcertplay.airplay.VideoInCar]); on unless turned off. */
+    fun loadVideoInCarEnabled(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_VIDEO_IN_CAR, true)
+
+    fun saveVideoInCarEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_VIDEO_IN_CAR, enabled).apply()
     }
 
     /** Resolution in percent (30–160); a value saved as tenths by older builds is carried over. */

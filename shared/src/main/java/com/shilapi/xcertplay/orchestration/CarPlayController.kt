@@ -29,6 +29,8 @@ import com.shilapi.xcertplay.airplay.AirPlayMediaHandler
 import com.shilapi.xcertplay.airplay.AirPlaySession
 import com.shilapi.xcertplay.airplay.AirPlaySessionListener
 import com.shilapi.xcertplay.airplay.PairingStore
+import com.shilapi.xcertplay.airplay.VideoInCar
+import com.shilapi.xcertplay.airplay.VideoPlaybackDelivery
 import com.shilapi.xcertplay.iap2.session.Iap2Session
 import com.shilapi.xcertplay.mfi.Iap2MfiAuthenticationClient
 import com.shilapi.xcertplay.mfi.LocalMfiAuthenticationClient
@@ -241,6 +243,15 @@ class CarPlayController(
     @Volatile private var bonjour: CarPlayBonjour? = null
     @Volatile private var wirelessDiagnostics: WirelessStartupDiagnostics? = null
     @Volatile private var firstTcpWatchdog: FirstTcpWatchdog? = null
+    /** iOS 27 video in car, played by the host (see [VideoInCar]); set before [start]. */
+    @Volatile var videoListener: CarPlayVideoListener? = null
+    @Volatile private var videoGate: VideoInCarGate? = null
+    /** Takes a media button first, e.g. while the video player is on screen; true when it handled it. */
+    @Volatile var mediaButtonInterceptor: ((Int) -> Boolean)? = null
+
+    /** Answers the iPhone on a video in car remote control session; a network write, any thread. */
+    fun sendVideoMessage(streamId: Long, message: Map<String, Any?>): Boolean =
+        activeSession?.sendRemoteControlMessage(streamId, message) ?: false
     @Volatile private var bluetoothSocket: BluetoothSocket? = null
     @Volatile private var bluetoothStream: BluetoothRfcommDuplexStream? = null
     @Volatile private var wirelessTunnelChannel: Iap2Session? = null
@@ -276,6 +287,10 @@ class CarPlayController(
             val newSession = activeSession !== session
             if (newSession) {
                 com.shilapi.xcertplay.glance.CarPlayGlance.setConnected(true)
+                if (videoListener != null) {
+                    val delivery = session.setVideoPlaybackAllowed(VideoInCar.allowed)
+                    debugLog("video in car session allowed=${VideoInCar.allowed} delivery=$delivery")
+                }
             }
             activeSession = session
             if (newSession) notifyPhone(true)
@@ -290,6 +305,7 @@ class CarPlayController(
             if (activeSession === session) {
                 activeSession = null
                 com.shilapi.xcertplay.glance.CarPlayGlance.setConnected(false)
+                videoListener?.onVideoSessionEnded()
                 synchronized(playbackStatus) {
                     val wasPlaying = playbackStatus.playing
                     playbackStatus.clearAll()?.let { it to wasPlaying }
@@ -302,6 +318,15 @@ class CarPlayController(
             }
             debugLog("AirPlay session ended peer=${session.host}")
             uiListener?.onSessionEnded(session)
+        }
+
+        override fun onRemoteControlMessage(session: AirPlaySession, streamId: Long, message: Map<String, Any?>) {
+            if (activeSession === session) videoListener?.onVideoMessage(streamId, message)
+        }
+
+        override fun onVideoPlaybackUiRequested(session: AirPlaySession) {
+            debugLog("CarPlay requested the video player")
+            if (activeSession === session) videoListener?.onVideoUiRequested()
         }
 
         override fun onTransportError(message: String) {
@@ -391,6 +416,20 @@ class CarPlayController(
             if (closed) return
         }
         connectionDiagnostic("start transport=${config.transport}")
+        videoListener?.let { listener ->
+            videoGate = VideoInCarGate(
+                readParked = listener::readParked,
+                onChanged = { allowed ->
+                    val delivery = activeSession?.setVideoPlaybackAllowed(allowed)
+                        ?: VideoPlaybackDelivery.QUEUED
+                    debugLog("video in car allowed=$allowed delivery=$delivery")
+                    listener.onVideoAllowedChanged(allowed)
+                },
+                onObserved = { parked ->
+                    debugLog("video in car parked=${parked ?: "unknown"}")
+                },
+            ).also { it.start() }
+        }
         if (config.transport == CarPlayTransport.WIRED) {
             permissionCloseable = iphoneHost.registerPermissionReceiver(::onIphonePermission)
             attachCloseable = iphoneHost.registerAttachReceiver(::onIphoneAttached)
@@ -443,6 +482,7 @@ class CarPlayController(
 
     fun sendMediaButton(index: Int): Boolean {
         if (closed) return false
+        if (mediaButtonInterceptor?.invoke(index) == true) return true
         val session = activeSession ?: return false
         return try {
             touchExecutor.execute { session.sendMedia(index) }
@@ -459,6 +499,7 @@ class CarPlayController(
         }
         val teardownStarted = System.nanoTime()
         connectionDiagnostic("teardown begin transport=${config.transport}")
+        videoGate?.close()
         com.shilapi.xcertplay.glance.CarPlayGlance.setConnected(false)
         closeReceivers()
         availabilityPollGeneration.incrementAndGet()

@@ -349,6 +349,7 @@ class RigPlayActivity : ComponentActivity() {
             }, matchButton(0, 56).apply { bottomMargin = dp(24) })
             carPlaySizeControl(card)
             resolutionSettingControl(card)
+            toggle(card, getString(R.string.video_in_carplay), getString(R.string.video_in_carplay_description), AirPlayPersistence.loadVideoInCarEnabled(this)) { AirPlayPersistence.saveVideoInCarEnabled(this, it) }
             val bufferPresets = com.shilapi.xcertplay.media.MediaAudioBuffer.presets
             choice(card, getString(R.string.music_buffer), listOf(getString(R.string.s_300_ms_default), getString(R.string.s_500_ms), getString(R.string.s_1000_ms_most_stable)),
                 bufferPresets.indexOf(AirPlayPersistence.loadMediaBufferMillis(this)).coerceAtLeast(0)) {
