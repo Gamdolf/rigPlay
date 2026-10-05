@@ -196,7 +196,6 @@
     <string name="mfi_authentication_ready">MFi authentication ready</string>
     <string name="model">Model</string>
     <string name="music_buffer">Music buffer</string>
-    <string name="resolution_native">Native</string>
     <string name="nearby_devices">Nearby devices</string>
     <string name="nearby_devices_connects_your_iphone_microphone_enables_sir">Nearby devices connects your iPhone. Microphone enables Siri and calls. Older Android versions also require Location for wireless setup. USB mode may ask for a local VPN connection.</string>
     <string name="nothing_is_sent_automatically_protocol_payloads_and_creden">Nothing is sent automatically. Protocol payloads and credentials are excluded.</string>
@@ -242,9 +241,7 @@
     <string name="review_app_permissions">Review app permissions</string>
     <string name="right_hand_drive">Right-hand drive</string>
     <string name="running">Running</string>
-    <string name="s_0_3x">0.3x</string>
     <string name="s_1000_ms_most_stable">1000 ms · most stable</string>
-    <string name="s_1_0x">1.0x</string>
     <string name="s_1_choose_your_connection">1 · Choose your connection</string>
     <string name="tablet_hotspot_setup_steps">1. Open the tablet’s hotspot settings, turn the hotspot on and select 5 GHz if available.\n2. Copy its name and password below exactly.\n3. Leave the tablet hotspot on when connecting. rigPlay sends the details over Bluetooth; your iPhone joins automatically.</string>
     <string name="s_2_4_ghz">2.4 GHz</string>
@@ -255,8 +252,6 @@
     <string name="s_500_ms">500 ms</string>
     <string name="s_5_ghz">5 GHz</string>
     <string name="s_60_fps_smoother_motion">60 fps · smoother motion</string>
-    <string name="s_60_lightest_load" formatted="false">60% · lightest load</string>
-    <string name="s_80_lighter_load" formatted="false">80% · lighter load</string>
     <string name="safe_area">Safe area</string>
     <string name="safe_area_waiting_for_activity_size">Safe area: waiting for activity size</string>
     <string name="save">Save</string>

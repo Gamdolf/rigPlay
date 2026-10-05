@@ -28,6 +28,7 @@ import android.widget.*
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import com.shilapi.xcertplay.airplay.CarPlayDisplayScale
 import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.network.WifiP2pChannels
 import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
@@ -343,7 +344,7 @@ class RigPlayActivity : ComponentActivity() {
         }
         section(content, getString(R.string.display_and_performance), R.drawable.ic_dp_display) { card ->
             carPlaySizeControl(card)
-            choice(card, getString(R.string.resolution), listOf(getString(R.string.resolution_native), getString(R.string.s_80_lighter_load), getString(R.string.s_60_lightest_load)), listOf(10, 8, 6).indexOf(AirPlayPersistence.loadDisplayScaleTenths(this)).coerceAtLeast(0)) { AirPlayPersistence.saveDisplayScaleTenths(this, listOf(10, 8, 6)[it]) }
+            resolutionSettingControl(card)
             val bufferPresets = com.shilapi.xcertplay.media.MediaAudioBuffer.presets
             choice(card, getString(R.string.music_buffer), listOf(getString(R.string.s_300_ms_default), getString(R.string.s_500_ms), getString(R.string.s_1000_ms_most_stable)),
                 bufferPresets.indexOf(AirPlayPersistence.loadMediaBufferMillis(this)).coerceAtLeast(0)) {
@@ -756,6 +757,51 @@ class RigPlayActivity : ComponentActivity() {
             wifiDirectChannelControl(parent)
             parent.addView(button(getString(R.string.open_tablet_wi_fi_settings), false) { openCarClientWifiSettings() }, matchButton(12, 60))
         }
+    }
+
+    /** Resolution as an integer percentage; above 100% CarPlay renders larger and the tablet downscales. */
+    private fun resolutionSettingControl(parent: LinearLayout) {
+        val title = getString(R.string.resolution)
+        val range = CarPlayDisplayScale.MIN_PERCENT..CarPlayDisplayScale.MAX_PERCENT
+        fun summary() = getString(R.string.contrib_audio_home_choice_summary, title,
+            getString(R.string.custom_resolution_summary, AirPlayPersistence.loadDisplayScalePercent(this)))
+        val control = button(summary(), false) {}
+        control.setOnClickListener {
+            val fields = column().apply { setPadding(dp(24), dp(8), dp(24), dp(8)) }
+            val input = EditText(this).apply {
+                setSingleLine()
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                setText(AirPlayPersistence.loadDisplayScalePercent(this@RigPlayActivity).toString())
+            }
+            fields.addView(input)
+            fields.addView(label(getString(R.string.custom_resolution_hint), 14, MUTED))
+            val reconnects = CarPlayBackgroundSession.hasSession()
+            val dialog = AlertDialog.Builder(this).setTitle(title).setView(fields)
+                .setPositiveButton(getString(if (reconnects) R.string.apply_and_reconnect else R.string.save), null)
+                .setNegativeButton(getString(R.string.cancel), null)
+                .setNeutralButton(getString(R.string.resolution_reset_defaults), null).create()
+            dialog.setOnShowListener {
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                    val value = input.text.toString().trim().toIntOrNull()
+                    if (value == null || value !in range) {
+                        input.error = getString(R.string.resolution_number_error, range.first, range.last)
+                        return@setOnClickListener
+                    }
+                    val changed = value != AirPlayPersistence.loadDisplayScalePercent(this)
+                    AirPlayPersistence.saveDisplayScalePercent(this, value)
+                    control.text = summary()
+                    dialog.dismiss()
+                    if (changed && reconnects) connect(AirPlayPersistence.loadWirelessEnabled(this))
+                }
+                dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                    input.setText(CarPlayDisplayScale.DEFAULT_PERCENT.toString())
+                    input.error = null
+                }
+            }
+            dialog.show()
+        }
+        parent.addView(control, matchButton(0, 60))
+        parent.addView(space(12))
     }
 
     private fun wifiDirectChannelLabel(channel: Int): String = if (channel == WifiP2pChannels.AUTO) {
@@ -1259,7 +1305,7 @@ class RigPlayActivity : ComponentActivity() {
                     appendLine("CarPlay setup: ${if (setupError == null) "ready" else "authentication unavailable"}")
                     appendLine("Saved video preference (may differ from active session): ${if (AirPlayPersistence.loadHevcEnabled(appContext)) "HEVC" else "H.264"}; ${AirPlayPersistence.loadFps(appContext)} fps")
                     appendLine("CarPlay size: ${com.shilapi.xcertplay.airplay.CarPlaySize.fromWidthMillimeters(AirPlayPersistence.loadWidthPhysicalMm(appContext)).label}")
-                    appendLine("Saved resolution preference (may differ from active session): ${AirPlayPersistence.loadDisplayScaleTenths(appContext) * 10}%")
+                    appendLine("Saved resolution preference (may differ from active session): ${AirPlayPersistence.loadDisplayScalePercent(appContext)}%")
                     appendLine("Session: ${if (CarPlayBackgroundSession.active) "active" else if (CarPlayBackgroundSession.hasSession()) "connecting" else "stopped"}")
                     appendLine("Head-unit board: ${Build.BOARD}; hardware: ${Build.HARDWARE}; build: ${Build.DISPLAY}")
                     appendLine()

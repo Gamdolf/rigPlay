@@ -30,4 +30,27 @@ class CarPlayDisplayScaleTest {
         assertEquals(1344, scaled.widthPixels)
         assertEquals(686, scaled.heightPixels)
     }
+
+    @Test fun customPercentagesReachTheConfiguredMaximum() {
+        val native = AirPlayDisplayConfig(widthPixels = 1920, heightPixels = 978)
+
+        val widened = CarPlayDisplayScale.applyPercent(native, CarPlayDisplayScale.MAX_PERCENT)
+
+        assertEquals(160, CarPlayDisplayScale.MAX_PERCENT)
+        assertEquals(3072, widened.widthPixels)
+        assertEquals(1566, widened.heightPixels)
+        assertEquals(native.widthPhysicalMm, widened.widthPhysicalMm)
+        assertEquals(widened, CarPlayDisplayScale.applyPercent(native, CarPlayDisplayScale.MAX_PERCENT + 60))
+    }
+
+    @Test fun integerPercentagesKeepEvenDimensionsAndClampToTheMinimum() {
+        val native = AirPlayDisplayConfig(widthPixels = 1920, heightPixels = 978)
+
+        val scaled = CarPlayDisplayScale.applyPercent(native, 73)
+
+        assertEquals(1402, scaled.widthPixels)
+        assertEquals(714, scaled.heightPixels)
+        assertEquals(CarPlayDisplayScale.applyPercent(native, 30), CarPlayDisplayScale.applyPercent(native, 5))
+        assertEquals(native, CarPlayDisplayScale.applyPercent(native, CarPlayDisplayScale.DEFAULT_PERCENT))
+    }
 }

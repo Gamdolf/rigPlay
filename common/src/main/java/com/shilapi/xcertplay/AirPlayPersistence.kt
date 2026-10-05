@@ -38,6 +38,7 @@ object AirPlayPersistence {
     private const val KEY_LOCKDOWN_ROOT_PRIVATE = "lockdown_root_private"
     private const val KEY_LOCKDOWN_ROOT_CERT = "lockdown_root_cert"
     private const val KEY_DISPLAY_SCALE_TENTHS = "display_scale_tenths"
+    private const val KEY_DISPLAY_SCALE_PERCENT = "display_scale_percent"
     private const val KEY_UI_SCALE_PERCENT = "ui_scale_percent"
     private const val KEY_HEVC_ENABLED = "hevc_enabled"
     private const val KEY_HEVC_SOFTWARE_DECODER = "hevc_software_decoder"
@@ -105,6 +106,19 @@ object AirPlayPersistence {
     fun saveDisplayScaleTenths(context: Context, tenths: Int) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putInt(KEY_DISPLAY_SCALE_TENTHS, CarPlayDisplayScale.sanitize(tenths))
+            .apply()
+    }
+
+    /** Resolution in percent (30–160); a value saved as tenths by older builds is carried over. */
+    fun loadDisplayScalePercent(context: Context): Int =
+        CarPlayDisplayScale.sanitizePercent(
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getInt(KEY_DISPLAY_SCALE_PERCENT, loadDisplayScaleTenths(context) * 10),
+        )
+
+    fun saveDisplayScalePercent(context: Context, percent: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_DISPLAY_SCALE_PERCENT, CarPlayDisplayScale.sanitizePercent(percent))
             .apply()
     }
 
