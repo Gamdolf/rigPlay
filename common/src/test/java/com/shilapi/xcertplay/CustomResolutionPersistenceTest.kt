@@ -10,7 +10,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(manifest = Config.NONE)
+@Config(sdk = [29], manifest = Config.NONE)
 class CustomResolutionPersistenceTest {
     private val app get() = RuntimeEnvironment.getApplication()
 
