@@ -8,8 +8,8 @@ data class NowPlayingSong(val text: String, val playing: Boolean)
 
 /**
  * The CarPlay song from iAP2 NowPlayingUpdate (0x5001): title (1) and artist (12)
- * in MediaItemAttributes, playback status in PlaybackAttributes. Updates carry only what changed; a
- * new title replaces the item, so a missing artist then means none.
+ * in MediaItemAttributes, playback status in PlaybackAttributes. Updates carry only what changed;
+ * omitted fields retain their previous values, while an explicitly cleared title forgets the item.
  */
 class NowPlayingSongState {
     private var title: String? = null
@@ -25,8 +25,9 @@ class NowPlayingSongState {
             val nextTitle = runCatching { item.optionalString(TITLE) }.getOrNull()
             if (nextTitle != null) {
                 title = nextTitle
-                artist = runCatching { item.optionalString(ARTIST) }.getOrNull()
-            } else {
+                if (nextTitle.isBlank()) artist = null
+            }
+            if (nextTitle?.isBlank() != true) {
                 runCatching { item.optionalString(ARTIST) }.getOrNull()?.let { artist = it }
             }
         }
