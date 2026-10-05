@@ -1,5 +1,13 @@
 # rigPlay 0.2.0 — unreleased
 
+- Nothing yet since 0.2.0-rc.3. Changes for the final 0.2.0 go here.
+
+# rigPlay 0.2.0-rc.3 — 2026-10-05
+
+Fourth pre-release, for testing on a rig: the fixes and features taken from upstream DiPlay 0.2.11–0.2.12
+that apply to rigPlay, video in CarPlay, and the existing Wi-Fi network mode reworked after upstream's
+vehicle-tested Same LAN mode. Android versionCode 4; it installs over 0.2.0-rc.2.
+
 - Video in CarPlay (iOS 27): a video sent to CarPlay on the iPhone plays full screen on the tablet,
   driven from the iPhone; SimHub wheel buttons play/pause it and skip 10 s. A rig counts as always
   parked. Plain web video plays; FairPlay-protected video (Apple TV+, most paid streaming) does not. The
