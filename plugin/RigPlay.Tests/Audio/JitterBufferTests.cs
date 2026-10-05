@@ -577,6 +577,139 @@ namespace RigPlayPlugin.Tests.Audio
         }
 
         [Fact]
+        public void TheRunningMaxEndMatchesTheOldRecalculationThroughReorderDropsAndReset()
+        {
+            // Non-regression for the incremental maxEnd: on an out-of-order sequence with drops, a full drain and a
+            // reset, BufferedFrames and the skip-ahead must read the same end the old O(n) scan produced.
+            var b = NewBuffer(targetMs: 20, maxTargetMs: 200, skipSlackMs: 1000);
+            Push(b, 0, 0, 1, start: true); // end 10
+            Push(b, 2, 20, 3); // end 30
+            Push(b, 1, 10, 2); // out of order, end 20: does not lower the max
+            Assert.True(b.IsPlaying);
+            Assert.Equal(30, b.BufferedFrames); // 30 - readPos 0: the running max is the newest end, 30
+
+            Push(b, 3, 30, 4); // end 40
+            Assert.Equal(40, b.BufferedFrames);
+
+            // Drain everything: once empty the depth is 0 regardless of the last max seen.
+            Read(b, 40);
+            Assert.Equal(0, b.BufferedFrames);
+
+            // Refill, then reset: the max is forgotten and rebuilt from the new epoch.
+            Push(b, 4, 40, 5);
+            Push(b, 5, 50, 6);
+            Assert.Equal(20, b.BufferedFrames); // ends 50 and 60, readPos 40
+            b.Reset();
+            Assert.Equal(0, b.BufferedFrames);
+            Push(b, 0, 0, 7, start: true);
+            Push(b, 1, 10, 8);
+            Assert.Equal(20, b.BufferedFrames); // 20 - 0: rebuilt
+        }
+
+        [Fact]
+        public void SkipAheadUsesTheRunningMaxEndOfTheNewestDatagram()
+        {
+            // The skip-ahead target is maxEnd - TargetFrames: once the depth tops the ceiling, play-out jumps to the
+            // newest end minus the target. The running max feeds that jump without a scan.
+            var b = NewBuffer(targetMs: 20, maxTargetMs: 200, skipSlackMs: 10);
+            Assert.Equal(30, b.MaxFrames);
+            Push(b, 0, 0, 1, start: true); // end 10
+            Push(b, 1, 10, 2); // end 20: buffered 20 == target, play-out starts
+            Assert.True(b.IsPlaying);
+            Push(b, 2, 20, 3); // end 30: buffered 30 == ceiling, not over yet
+            Assert.Equal(30, b.BufferedFrames);
+            Assert.Equal(0, b.Counters.Overflows);
+            Push(b, 3, 30, 4); // end 40 > ceiling 30: skip to maxEnd 40 - target 20 = readPos 20
+            Assert.Equal(20, b.BufferedFrames);
+            Assert.Equal(1, b.Counters.Overflows);
+        }
+
+        [Fact]
+        public void PoolingReusesPacketsWithoutCorruptingWhatIsStillReadable()
+        {
+            // A long contiguous ramp, pushed with per-round reorder, read in lockstep: because the coverage is gapless
+            // the output must be the ramp exactly, so a buffer recycled on drain is never one still being read. The
+            // free-list has to be exercised (hits > 0) for the test to cover reuse at all.
+            // A roomy ceiling (big skip slack) keeps the steady depth below it, so no audible skip reshuffles the
+            // alignment: the output stays a faithful copy of the ramp and any corruption would show as a wrong sample.
+            var b = NewBuffer(targetMs: 20, maxTargetMs: 60, skipSlackMs: 1000);
+            short Expected(long frame) => (short)(frame % 7000);
+
+            byte[] RampAt(long startFrame)
+            {
+                var bytes = new byte[Frames * 2];
+                for (var f = 0; f < Frames; f++)
+                {
+                    var v = Expected(startFrame + f);
+                    bytes[2 * f] = (byte)v;
+                    bytes[2 * f + 1] = (byte)(v >> 8);
+                }
+                return bytes;
+            }
+
+            var seq = 0;
+            var pushed = 0L; // frames pushed so far (contiguous from 0)
+            var read = 0L;   // frames read so far (play-out starts at frame 0)
+
+            void PushOne(long startFrame, bool start)
+            {
+                var p = RampAt(startFrame);
+                b.Push((ushort)(startFrame / Frames), (uint)startFrame, start, p, 0, p.Length);
+                seq++;
+            }
+
+            void PushPair()
+            {
+                // Push the later datagram first, then the earlier one, so each pair arrives out of order (no start flag
+                // mid-stream: a reset would drop the companion datagram).
+                PushOne(pushed + Frames, start: false);
+                PushOne(pushed, start: false);
+                pushed += 2 * Frames;
+            }
+
+            var all = new List<short>();
+            PushOne(0, start: true); // epoch start, in order
+            pushed = Frames;
+            PushPair(); // frames 10..30 reorderd; depth now 30 >= target, play-out from frame 0
+            Assert.True(b.IsPlaying);
+            for (var round = 0; round < 80; round++)
+            {
+                PushPair();
+                all.AddRange(Read(b, 20));
+                read += 20;
+            }
+            for (var i = 0; i < read; i++) Assert.Equal(Expected(i), all[i]);
+            Assert.True(b.Counters.PoolHits > 0, "the free-list was never reused");
+            Assert.Equal(0, b.Counters.SilenceFrames); // gapless, so no silence
+
+            // A reset recycles everything held; the next epoch starts a fresh ramp at frame 0 and reads back clean.
+            b.Reset();
+            var hitsBeforeReset = b.Counters.PoolHits;
+            for (var i = 0; i < 3; i++) Push(b, i, i * Frames, (short)(i + 1), start: i == 0);
+            Assert.True(b.IsPlaying);
+            Assert.Equal(new short[] { 1, 2, 3 }.SelectMany(v => Enumerable.Repeat(v, 10)), Read(b, 30));
+            Assert.True(b.Counters.PoolHits > hitsBeforeReset, "the reset returned its packets to the pool");
+        }
+
+        [Fact]
+        public void TheFirstDatagramsAllocateThenLaterOnesComeFromThePool()
+        {
+            var b = NewBuffer(targetMs: 20);
+            for (var i = 0; i < 3; i++) Push(b, i, i * Frames, 1, start: i == 0);
+            Assert.True(b.IsPlaying);
+            var afterFill = b.Counters;
+            Assert.Equal(3, afterFill.PoolAllocations); // an empty pool allocates for the first datagrams
+            Assert.Equal(0, afterFill.PoolHits);
+
+            // Drain the oldest datagrams back into the pool, then feed more: a freed packet must be reused.
+            Read(b, 30); // consumes all three, recycling them
+            Push(b, 3, 30, 1);
+            var c = b.Counters;
+            Assert.True(c.PoolHits > 0, "a later datagram should reuse a freed packet");
+            Assert.Equal(3, c.PoolAllocations); // no further allocation while the pool has entries
+        }
+
+        [Fact]
         public void ResetKeepsTheCounters()
         {
             var b = NewBuffer(targetMs: 10);

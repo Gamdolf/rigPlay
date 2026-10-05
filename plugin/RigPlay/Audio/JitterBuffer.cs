@@ -67,6 +67,23 @@ namespace RigPlayPlugin.Audio
         private readonly object gate = new object();
         private readonly SortedList<long, Packet> packets = new SortedList<long, Packet>();
 
+        // Free-list of Packet (with their Data arrays) retired from <see cref="packets"/>, under gate, to spare the
+        // network thread an allocation per datagram. A Packet is recycled ONLY once it has left packets
+        // (DropBeforeLocked, skip-ahead, ResetLocked), so no array still readable by Read is ever reused. Capped so a
+        // burst does not pin an unbounded amount of memory. startPayload is never pooled here: it can stay referenced
+        // after a reset. The two counters prove the reuse to the tests.
+        private readonly Stack<Packet> pool = new Stack<Packet>();
+        private readonly int poolCap;
+        private long poolHits;
+        private long poolAllocations;
+
+        // The largest End (Start + Frames) among the datagrams held, kept incrementally so the real-time path never
+        // scans. End is not monotone in timestamp order (a short datagram can arrive after a long one), so it is a
+        // running maximum: a new datagram can only raise it, and dropping the oldest datagrams never lowers it (the
+        // maximum belongs to the most recent). It drops away only when the buffer empties (packets.Count == 0, where
+        // the callers read 0) or on a reset.
+        private long maxEnd;
+
         // Sequence and timestamp tracking, unwrapped to 64 bits within one epoch (between resets).
         private bool haveSeq;
         private long firstSeq;
@@ -136,6 +153,10 @@ namespace RigPlayPlugin.Audio
             frameA = new short[channels];
             frameB = new short[channels];
             for (var i = 0; i < seen.Length; i++) seen[i] = long.MinValue;
+            // The depth tops out at the skip ceiling (MaxTargetFrames + skipSlackFrames); even at one frame per
+            // datagram no more than that many Packet can be held, so capping the free-list there bounds it without
+            // ever starving the hot path. The floor keeps the pool useful for small, high-rate configs.
+            poolCap = (int)Math.Min(4096, Math.Max(64, (long)MaxTargetFrames + skipSlackFrames));
         }
 
         public int SampleRate { get; }
@@ -261,9 +282,8 @@ namespace RigPlayPlugin.Audio
                     return false;
                 }
 
-                var data = new byte[frames * BlockAlign];
-                Buffer.BlockCopy(payload, offset, data, 0, data.Length);
-                packets.Add(extTs, new Packet { Start = extTs, Frames = frames, Data = data });
+                packets.Add(extTs, RentLocked(extTs, frames, payload, offset));
+                if (end > maxEnd) maxEnd = end;
 
                 if (!playing)
                 {
@@ -279,7 +299,7 @@ namespace RigPlayPlugin.Audio
                 {
                     // Far too deep (a stall far longer than anything learned, or a sender clock running away): skip
                     // ahead to the target depth. Audible, so the ceiling is a full second above the target.
-                    var newPos = MaxEndLocked() - TargetFrames;
+                    var newPos = maxEnd - TargetFrames;
                     overflowFrames += newPos - readPos;
                     overflows++;
                     readPos = newPos;
@@ -420,6 +440,8 @@ namespace RigPlayPlugin.Audio
                         CatchingUp = catchingUp,
                         CatchUpFrames = catchUpFrames,
                         LongestStallFrames = longestStallFrames,
+                        PoolHits = poolHits,
+                        PoolAllocations = poolAllocations,
                     };
                 }
             }
@@ -517,7 +539,10 @@ namespace RigPlayPlugin.Audio
 
         private void ResetLocked()
         {
+            var values = packets.Values;
+            for (var i = 0; i < values.Count; i++) RecycleLocked(values[i]);
             packets.Clear();
+            maxEnd = 0;
             playing = false;
             catchingUp = false;
             readPos = 0;
@@ -535,19 +560,8 @@ namespace RigPlayPlugin.Audio
         private int BufferedFramesLocked()
         {
             if (packets.Count == 0) return 0;
-            var buffered = MaxEndLocked() - readPos;
+            var buffered = maxEnd - readPos;
             return buffered <= 0 ? 0 : (int)Math.Min(int.MaxValue, buffered);
-        }
-
-        private long MaxEndLocked()
-        {
-            long max = long.MinValue;
-            var values = packets.Values;
-            for (var i = 0; i < values.Count; i++)
-            {
-                if (values[i].End > max) max = values[i].End;
-            }
-            return max;
         }
 
         /// <summary>
@@ -574,7 +588,49 @@ namespace RigPlayPlugin.Audio
 
         private void DropBeforeLocked(long position)
         {
-            while (packets.Count > 0 && packets.Values[0].End <= position) packets.RemoveAt(0);
+            while (packets.Count > 0 && packets.Values[0].End <= position)
+            {
+                var p = packets.Values[0];
+                packets.RemoveAt(0);
+                RecycleLocked(p);
+            }
+        }
+
+        /// <summary>
+        /// A Packet for one datagram, taken from the free-list when it holds one (its Data reused if it is already big
+        /// enough, reallocated once otherwise) or newly allocated. The payload is copied in; the caller owns placing it
+        /// in <see cref="packets"/>. Under gate.
+        /// </summary>
+        private Packet RentLocked(long start, int frames, byte[] payload, int offset)
+        {
+            var length = frames * BlockAlign;
+            Packet p;
+            if (pool.Count > 0)
+            {
+                p = pool.Pop();
+                poolHits++;
+                if (p.Data.Length < length) p.Data = new byte[length];
+            }
+            else
+            {
+                p = new Packet { Data = new byte[length] };
+                poolAllocations++;
+            }
+            p.Start = start;
+            p.Frames = frames;
+            Buffer.BlockCopy(payload, offset, p.Data, 0, length);
+            return p;
+        }
+
+        /// <summary>
+        /// Returns a Packet that has just left <see cref="packets"/> to the free-list, keeping its Data for reuse, up to
+        /// the pool cap. Called ONLY after the Packet is out of packets, so Read can never see a recycled buffer.
+        /// Under gate.
+        /// </summary>
+        private void RecycleLocked(Packet p)
+        {
+            if (pool.Count >= poolCap) return;
+            pool.Push(p);
         }
 
         private int Frames(int ms)
@@ -629,5 +685,9 @@ namespace RigPlayPlugin.Audio
         public long CatchUpFrames;
         /// <summary>The longest stall measured at an underrun: the depth that drained plus the silence played.</summary>
         public long LongestStallFrames;
+        /// <summary>Datagrams whose Packet was taken from the free-list rather than allocated (proof of reuse).</summary>
+        public long PoolHits;
+        /// <summary>Datagrams for which a new Packet had to be allocated (the free-list was empty).</summary>
+        public long PoolAllocations;
     }
 }
