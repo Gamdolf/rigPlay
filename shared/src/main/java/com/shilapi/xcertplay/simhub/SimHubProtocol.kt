@@ -394,14 +394,7 @@ object SimHubProtocol {
                 updatedAt = it.reqInt("updatedAt", Long.MIN_VALUE..Long.MAX_VALUE),
             )
         }
-        val nav = f.optObject("nav")?.let {
-            NavStatus(
-                maneuver = it.reqString("maneuver", 1..64),
-                distanceM = it.optInt("distanceM", 0L..Int.MAX_VALUE)?.toInt(),
-                road = it.optString("road"),
-                etaEpochS = it.optInt("etaEpochS", 0L..Long.MAX_VALUE),
-            )
-        }
+        val nav = decodeNav(f.optJsonObject("nav"))
         return SimHubMessage.Status(
             phoneConnected = f.reqBoolean("phoneConnected"),
             phoneName = f.optString("phoneName"),
@@ -409,6 +402,32 @@ object SimHubProtocol {
             nowPlaying = nowPlaying,
             nav = nav,
         )
+    }
+
+    /**
+     * §6.7.1: `status.nav` is validated leniently like telemetry (mirrors the C# `DecodeNav`): a `nav`
+     * that is not an object means no route guidance; a member with the wrong type or out of range is
+     * treated as absent; a missing or invalid `maneuver` drops the whole `nav`; a bad `nav` never
+     * makes the status invalid — the rest of the status is used either way.
+     */
+    private fun decodeNav(nav: JSONObject?): NavStatus? {
+        if (nav == null) return null
+        val maneuver = (nav.opt("maneuver") as? String)?.takeIf { it.length in 1..64 } ?: return null
+        val distanceM = (nav.opt("distanceM") as? Number)?.toDouble()?.let { value ->
+            if (!value.isFinite() || value < 0.0 || value > Int.MAX_VALUE.toDouble()) {
+                null
+            } else {
+                // Whole metres on the wire; a decimal is accepted and rounded away from zero (C# behavior).
+                Math.round(value).toInt()
+            }
+        }
+        val road = (nav.opt("road") as? String)?.takeUnless { it.isBlank() }
+        val etaEpochS = when (val value = nav.opt("etaEpochS")) {
+            is Int -> value.toLong().takeIf { it >= 0 }
+            is Long -> value.takeIf { it >= 0 }
+            else -> null
+        }
+        return NavStatus(maneuver = maneuver, distanceM = distanceM, road = road, etaEpochS = etaEpochS)
     }
 
     private fun decodeCommand(f: Fields): SimHubMessage.Command {
@@ -591,5 +610,8 @@ object SimHubProtocol {
             if (value !is JSONObject) throw BadMember("$name must be an object")
             return Fields(value)
         }
+
+        /** Raw nested object for lenient decoding: a member that is absent or not an object yields `null`, never an error. */
+        fun optJsonObject(name: String): JSONObject? = raw(name) as? JSONObject
     }
 }

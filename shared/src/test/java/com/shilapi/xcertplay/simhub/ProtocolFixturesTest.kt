@@ -221,7 +221,26 @@ class ProtocolFixturesTest {
             SimHubProtocol.encode(nav),
         )
         assertEquals(SimHubParseResult.Ok(nav), SimHubProtocol.parse(SimHubProtocol.encode(nav)))
-        assertMalformed("""{"type":"status","phoneConnected":true,"screen":"carplay","nowPlaying":null,"nav":{"distanceM":5}}""", "status")
+        // §6.7.1: a bad `nav` never makes the status invalid; the rest of the status is used.
+        // A `nav` without a valid `maneuver` is dropped (nav absent), the status stays valid.
+        assertEquals(
+            SimHubParseResult.Ok(status),
+            SimHubProtocol.parse("""{"type":"status","phoneConnected":true,"screen":"carplay","nowPlaying":null,"nav":{"distanceM":5}}"""),
+        )
+        assertEquals(
+            SimHubParseResult.Ok(status),
+            SimHubProtocol.parse("""{"type":"status","phoneConnected":true,"screen":"carplay","nowPlaying":null,"nav":{"distanceM":350,"road":"B258"}}"""),
+        )
+        // A wrong-type member is dropped; the rest of a valid `nav` is kept.
+        assertEquals(
+            SimHubParseResult.Ok(status.copy(nav = NavStatus(maneuver = "leftTurn"))),
+            SimHubProtocol.parse("""{"type":"status","phoneConnected":true,"screen":"carplay","nowPlaying":null,"nav":{"maneuver":"leftTurn","distanceM":"x"}}"""),
+        )
+        // A `nav` that is not an object means no route guidance; the status stays valid.
+        assertEquals(
+            SimHubParseResult.Ok(status),
+            SimHubProtocol.parse("""{"type":"status","phoneConnected":true,"screen":"carplay","nowPlaying":null,"nav":5}"""),
+        )
         assertMalformed("""{"type":"artwork","mime":"image/jpeg"}""", "artwork")
         assertFalse(SimHubMessage.Artwork("image/jpeg", "QUJD".repeat(1_000)).toString().contains("QUJD"))
     }
