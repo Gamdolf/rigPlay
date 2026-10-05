@@ -7,6 +7,8 @@ import android.view.KeyEvent
 import com.shilapi.xcertplay.airplay.CarPlayMediaButton
 import com.shilapi.xcertplay.media.CarPlayNowPlaying
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -71,6 +73,17 @@ class CarPlayMediaCallbackTest {
         assertEquals(257_000, metadata.getLong(MediaMetadata.METADATA_KEY_DURATION))
         assertEquals(artwork, metadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART))
         assertEquals(artwork, metadata.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON))
+    }
+
+    @Test
+    fun aPendingArtworkTransferKeepsThePreviousArt() {
+        val previous = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
+        val cached = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
+
+        assertSame(previous, CarPlayMediaKeys.nextArtwork(7, emptyMap(), previous))
+        assertSame(cached, CarPlayMediaKeys.nextArtwork(7, mapOf(7 to cached), previous))
+        assertNull(CarPlayMediaKeys.nextArtwork(7, mapOf(7 to null), previous))
+        assertNull(CarPlayMediaKeys.nextArtwork(null, mapOf(7 to cached), previous))
     }
 
     private fun press(keyCode: Int, repeat: Int = 0) {

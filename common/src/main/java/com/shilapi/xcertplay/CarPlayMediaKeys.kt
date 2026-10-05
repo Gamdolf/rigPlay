@@ -111,10 +111,8 @@ internal object CarPlayMediaKeys {
                 if (controller !== expected) return@synchronized
                 val previousArtwork = artwork
                 if (nowPlaying.artworkTransferId != update.artworkTransferId) {
-                    artwork = update.artworkTransferId?.let { id ->
-                        if (artworkCache.containsKey(id)) artworkCache[id] else null
-                    }
-                    artwork?.let(SimHubArtworkPublisher::onArtwork)
+                    artwork = nextArtwork(update.artworkTransferId, artworkCache, artwork)
+                    if (artwork !== previousArtwork) artwork?.let(SimHubArtworkPublisher::onArtwork)
                 }
                 if (nowPlaying.elapsedMillis != update.elapsedMillis) elapsedUpdatedAt = SystemClock.elapsedRealtime()
                 val metadataChanged = metadataChanged(nowPlaying, update) || artwork !== previousArtwork
@@ -263,6 +261,16 @@ internal object CarPlayMediaKeys {
                 putBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON, it)
             }
         }.build()
+
+    /**
+     * The art to show once the iPhone names transfer [id]. A pending transfer keeps [current], so the
+     * art does not blank between tracks.
+     */
+    internal fun nextArtwork(id: Int?, cache: Map<Int, Bitmap?>, current: Bitmap?): Bitmap? = when {
+        id == null -> null
+        cache.containsKey(id) -> cache[id]
+        else -> current
+    }
 
     private fun decodeArtwork(bytes: ByteArray): Bitmap? {
         if (bytes.isEmpty()) return null
