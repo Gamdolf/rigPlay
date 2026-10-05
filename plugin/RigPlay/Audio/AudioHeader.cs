@@ -179,7 +179,7 @@ namespace RigPlayPlugin.Audio
 
             var payload = length - Size;
             if (payload <= 0) return AudioHeaderError.NoPayload;
-            if (payload > MaxPayloadBytes) return AudioHeaderError.PayloadTooLarge; // §10.2 high cap, as AudioDatagram.Validate enforces
+            if (payload > MaxPayloadBytes) return AudioHeaderError.PayloadTooLarge; // §10.2 high cap
             if (header.Format == AudioFormat.Opus)
             {
                 if (payload > MaxOpusPacketBytes || OpusToc.Frames(data, offset + Size, payload, header.SampleRate) <= 0) return AudioHeaderError.BadOpusPacket;

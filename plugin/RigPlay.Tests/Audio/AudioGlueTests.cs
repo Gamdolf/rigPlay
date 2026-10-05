@@ -8,7 +8,6 @@ using System.Linq;
 using System.Net;
 using RigPlayPlugin.Audio;
 using RigPlayPlugin.Protocol;
-using AudioHeader = RigPlayPlugin.Audio.AudioHeader;
 using Xunit;
 
 namespace RigPlayPlugin.Tests.Audio

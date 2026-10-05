@@ -9,6 +9,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using Newtonsoft.Json.Linq;
+using RigPlayPlugin.Audio;
 using RigPlayPlugin.Protocol;
 using Xunit;
 
@@ -136,29 +137,28 @@ namespace RigPlayPlugin.Tests
             var header = new AudioHeader
             {
                 Seq = (ushort)(int)h["seq"],
-                StreamType = (byte)(int)h["streamType"],
+                StreamType = (AudioStreamType)(int)h["streamType"],
                 Flags = (byte)(int)h["flags"],
                 Timestamp = (uint)(long)h["timestamp"],
                 SampleRateField = (ushort)(int)h["sampleRateField"],
                 Channels = (byte)(int)h["channels"],
-                Format = AudioHeader.FormatOpus,
+                Format = AudioFormat.Opus,
             };
-            Assert.Equal((int)h["format"], header.Format);
+            Assert.Equal((int)h["format"], (int)header.Format);
             var payload = Unhex((string)v["payloadHex"]);
             var datagram = new byte[AudioHeader.Size + payload.Length];
-            AudioDatagram.WriteHeader(header, datagram, 0);
+            header.Write(datagram, 0);
             Array.Copy(payload, 0, datagram, AudioHeader.Size, payload.Length);
             Assert.Equal((string)v["datagramHex"], Hex(datagram));
             Assert.Equal((string)v["headerHex"], Hex(datagram.Take(AudioHeader.Size).ToArray()));
 
             AudioHeader decoded;
             var bytes = Unhex((string)v["datagramHex"]);
-            Assert.Null(AudioDatagram.Validate(bytes, 0, bytes.Length, out decoded));
+            Assert.Equal(AudioHeaderError.Ok, AudioHeader.TryParse(bytes, 0, bytes.Length, out decoded));
             Assert.Equal(header, decoded);
-            Assert.True(decoded.IsOpus);
-            Assert.Equal((int)v["frames"], AudioDatagram.Frames(bytes, 0, bytes.Length, decoded));
-            // Decode gives PCM samples, which an opus datagram does not carry.
-            Assert.Throws<ProtocolException>(() => AudioDatagram.Decode(bytes, out decoded));
+            Assert.Equal(AudioFormat.Opus, decoded.Format);
+            Assert.Equal((int)v["frames"], decoded.PayloadFrames(bytes, AudioHeader.Size, bytes.Length - AudioHeader.Size));
+            // An opus datagram carries one Opus packet, not PCM samples: there is nothing to decode as PCM.
         }
 
         [Theory]
@@ -170,26 +170,27 @@ namespace RigPlayPlugin.Tests
             var header = new AudioHeader
             {
                 Seq = (ushort)(int)h["seq"],
-                StreamType = (byte)(int)h["streamType"],
+                StreamType = (AudioStreamType)(int)h["streamType"],
                 Flags = (byte)(int)h["flags"],
                 Timestamp = (uint)(long)h["timestamp"],
                 SampleRateField = (ushort)(int)h["sampleRateField"],
                 Channels = (byte)(int)h["channels"],
-                Format = (byte)(int)h["format"],
+                Format = (AudioFormat)(int)h["format"],
             };
-            Assert.Equal((int)h["sampleRateHz"], header.SampleRateHz);
-            Assert.Equal((string)h["stream"], AudioHeader.StreamNameOf(header.StreamType));
-            Assert.Equal(header.StreamType, AudioHeader.StreamTypeOf((string)h["stream"]));
+            Assert.Equal((int)h["sampleRateHz"], header.SampleRate);
+            Assert.Equal((string)h["stream"], AudioHeader.StreamName(header.StreamType));
             var samples = v["samples"].Select(s => (short)(int)s).ToArray();
 
-            var datagram = AudioDatagram.Encode(header, samples);
+            var datagram = header.Encode(samples);
             Assert.Equal((string)v["datagramHex"], Hex(datagram));
             Assert.Equal((string)v["headerHex"], Hex(datagram.Take(AudioHeader.Size).ToArray()));
             Assert.Equal((string)v["payloadHex"], Hex(datagram.Skip(AudioHeader.Size).ToArray()));
 
             AudioHeader decoded;
-            var direction = global::RigPlayPlugin.Audio.AudioHeader.ParseDirection((string)v["direction"]);
-            var decodedSamples = AudioDatagram.Decode(Unhex((string)v["datagramHex"]), direction, out decoded);
+            var direction = AudioHeader.ParseDirection((string)v["direction"]);
+            var bytes = Unhex((string)v["datagramHex"]);
+            Assert.Equal(AudioHeaderError.Ok, AudioHeader.TryParse(bytes, 0, bytes.Length, direction, out decoded));
+            var decodedSamples = AudioHeader.DecodeSamples(bytes, AudioHeader.Size, bytes.Length - AudioHeader.Size);
             Assert.Equal(header, decoded);
             Assert.Equal(samples, decodedSamples);
             Assert.Equal((int)v["frames"], decodedSamples.Length / decoded.Channels);
@@ -202,10 +203,9 @@ namespace RigPlayPlugin.Tests
         {
             var v = ((JArray)AudioVectors["invalid"]).Single(x => (string)x["name"] == name);
             var bytes = Unhex((string)v["datagramHex"]);
-            var direction = global::RigPlayPlugin.Audio.AudioHeader.ParseDirection((string)v["direction"]);
+            var direction = AudioHeader.ParseDirection((string)v["direction"]);
             AudioHeader header;
-            Assert.NotNull(AudioDatagram.Validate(bytes, 0, bytes.Length, direction, out header));
-            Assert.Throws<ProtocolException>(() => AudioDatagram.Decode(bytes, direction, out header));
+            Assert.NotEqual(AudioHeaderError.Ok, AudioHeader.TryParse(bytes, 0, bytes.Length, direction, out header));
         }
 
         // Helpers
