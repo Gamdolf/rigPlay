@@ -53,6 +53,20 @@ namespace RigPlayPlugin.Tests
             Assert.Equal(DecodeFailure.Invalid, MessageCodec.TryDecode(line).Failure);
         }
 
+        [Fact]
+        public void ABeaconHostIdOf129CharactersIsInvalid()
+        {
+            var line = "{\"type\":\"beacon\",\"name\":\"RIG-PC\",\"hostId\":\"" + new string('a', 129) + "\",\"version\":\"0.1.0\",\"controlPort\":23711,\"audioPort\":23712,\"protocol\":1}";
+            Assert.Equal(DecodeFailure.Invalid, MessageCodec.TryDecode(line).Failure);
+        }
+
+        [Fact]
+        public void AWelcomeHostIdOf129CharactersIsInvalid()
+        {
+            var line = "{\"type\":\"welcome\",\"hostId\":\"" + new string('a', 129) + "\",\"name\":\"RIG-PC\",\"version\":\"0.1.0\",\"protocol\":1,\"features\":[]}";
+            Assert.Equal(DecodeFailure.Invalid, MessageCodec.TryDecode(line).Failure);
+        }
+
         [Theory]
         [InlineData("{\"type\":\"pairRequest\",\"pin\":\"12345a\"}", false)]
         [InlineData("{\"type\":\"pairRequest\",\"pin\":123456}", false)]
@@ -78,6 +92,10 @@ namespace RigPlayPlugin.Tests
         [InlineData("{\"type\":\"audioStart\",\"stream\":\"media\",\"format\":\"opus\",\"sampleRate\":44100,\"channels\":2}", false)]
         [InlineData("{\"type\":\"audioStart\",\"stream\":\"media\",\"format\":\"flac\",\"sampleRate\":48000,\"channels\":2}", false)]
         [InlineData("{\"type\":\"audioStart\",\"stream\":\"alt\",\"format\":\"pcm_s16le\",\"sampleRate\":24000,\"channels\":3}", false)]
+        [InlineData("{\"type\":\"beacon\",\"name\":\"RIG-PC\",\"hostId\":\"RIG-PC-01\",\"version\":\"0.1.0\",\"controlPort\":23711,\"audioPort\":23712,\"protocol\":1}", true)]
+        [InlineData("{\"type\":\"beacon\",\"name\":\"RIG-PC\",\"hostId\":\"\",\"version\":\"0.1.0\",\"controlPort\":23711,\"audioPort\":23712,\"protocol\":1}", false)]
+        [InlineData("{\"type\":\"welcome\",\"hostId\":\"RIG-PC-01\",\"name\":\"RIG-PC\",\"version\":\"0.1.0\",\"protocol\":1,\"features\":[]}", true)]
+        [InlineData("{\"type\":\"welcome\",\"hostId\":\"\",\"name\":\"RIG-PC\",\"version\":\"0.1.0\",\"protocol\":1,\"features\":[]}", false)]
         public void ContentRules(string line, bool valid)
         {
             var result = MessageCodec.TryDecode(line);

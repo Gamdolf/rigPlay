@@ -749,7 +749,7 @@ namespace RigPlayPlugin.Protocol
             var m = new BeaconMessage
             {
                 Name = ReqString(o, "name"),
-                HostId = ReqString(o, "hostId"),
+                HostId = ReqString(o, "hostId", 1, 128),
                 Version = ReqString(o, "version"),
                 SimhubVersion = OptString(o, "simhubVersion"),
                 ControlPort = (int)ReqInt(o, "controlPort", 1, 65535),
@@ -780,7 +780,7 @@ namespace RigPlayPlugin.Protocol
         {
             return new WelcomeMessage
             {
-                HostId = ReqString(o, "hostId"),
+                HostId = ReqString(o, "hostId", 1, 128),
                 Name = ReqString(o, "name"),
                 Version = ReqString(o, "version"),
                 SimhubVersion = OptString(o, "simhubVersion"),
