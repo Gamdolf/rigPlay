@@ -343,6 +343,10 @@ class RigPlayActivity : ComponentActivity() {
             card.addView(button("${getString(R.string.choose_iphone_prefix)}${RigPlayPreferences.phoneName(this)}", false) { choosePhone() }, matchButton(12, 60))
         }
         section(content, getString(R.string.display_and_performance), R.drawable.ic_dp_display) { card ->
+            card.addView(button(getString(R.string.picture_adjustments), false) {
+                startActivity(Intent(this, CarPlayHostActivity::class.java)
+                    .putExtra(CarPlayPicture.EXTRA_OPEN_PANEL, true).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+            }, matchButton(0, 56).apply { bottomMargin = dp(24) })
             carPlaySizeControl(card)
             resolutionSettingControl(card)
             val bufferPresets = com.shilapi.xcertplay.media.MediaAudioBuffer.presets
