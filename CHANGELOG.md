@@ -1,6 +1,21 @@
 # rigPlay 0.2.0 — unreleased
 
-- Nothing yet since 0.2.0-rc.2. Changes for the final 0.2.0 go here.
+- Fixes taken from upstream DiPlay (0.2.11–0.2.12), only where they touch code rigPlay still has:
+  - Location, wheel speed and vehicle status are offered to the iPhone only on the Wi-Fi tunnel, never
+    on the Bluetooth bootstrap, so iOS no longer binds them to the short-lived Bluetooth link and then
+    refuses them on Wi-Fi.
+  - USB: the VPN that carries the wired CarPlay link is scoped to rigPlay, so it no longer captures the
+    tablet's other traffic (including the SimHub link).
+  - Media: the media session republishes metadata only when the song or artwork changes (not on every
+    position update); the artist survives title-only updates (lyrics apps); the previous album art
+    stays up while the next cover transfers, and a refused cover clears it.
+  - Audio: AudioTrack attributes no longer crash on Android 9; a decoder that fails to configure or
+    start is released.
+  - Reconnect after a rotation uses the settled display size; settings changed on the rigPlay screen
+    reach the next connection without reopening the CarPlay screen.
+  - Wireless: Bonjour advertises the same AirPlay feature bits as `/info`; Android 10 falls back to the
+    system Wi-Fi Direct group when the custom group config is unavailable; more wireless diagnostics in
+    the exported report.
 
 # rigPlay 0.2.0-rc.2 — 2026-10-04
 
