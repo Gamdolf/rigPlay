@@ -63,6 +63,8 @@ namespace RigPlayPlugin.Audio
         PartialFrame,
         /// <summary>An opus payload that is not one Opus packet: longer than 1275 bytes or with a TOC that describes no frame.</summary>
         BadOpusPacket,
+        /// <summary>Payload larger than the §10.2 cap of <see cref="AudioHeader.MaxPayloadBytes"/> bytes.</summary>
+        PayloadTooLarge,
         /// <summary>streamType 1-3 read as plugin to tablet: only the microphone flows that way.</summary>
         WrongDirection,
         /// <summary>format 2 (opus) on the microphone stream: the microphone is pcm_s16le only (§10.5).</summary>
@@ -177,6 +179,7 @@ namespace RigPlayPlugin.Audio
 
             var payload = length - Size;
             if (payload <= 0) return AudioHeaderError.NoPayload;
+            if (payload > MaxPayloadBytes) return AudioHeaderError.PayloadTooLarge; // §10.2 high cap, as AudioDatagram.Validate enforces
             if (header.Format == AudioFormat.Opus)
             {
                 if (payload > MaxOpusPacketBytes || OpusToc.Frames(data, offset + Size, payload, header.SampleRate) <= 0) return AudioHeaderError.BadOpusPacket;

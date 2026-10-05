@@ -42,6 +42,9 @@ data class AudioHeader(
 
         /** The longest Opus packet a datagram carries (§10.4). */
         const val MAX_OPUS_PACKET_BYTES = 1275
+
+        /** Receivers accept payloads up to this size (§10.2). */
+        const val MAX_PAYLOAD_BYTES = 8192
     }
 }
 
@@ -128,6 +131,7 @@ object SimHubAudioCodec {
         if (rateField !in AudioHeader.SAMPLE_RATE_FIELD_RANGE) return null
         if (channels != 1 && channels != 2) return null
         val payloadLength = length - AudioHeader.SIZE
+        if (payloadLength > AudioHeader.MAX_PAYLOAD_BYTES) return null // §10.2 high cap, mirrors C# AudioHeader.Validate
         if (format == AudioFormat.OPUS) {
             if (payloadLength !in 1..AudioHeader.MAX_OPUS_PACKET_BYTES) return null
             if (OpusPacket.frames(data, offset + AudioHeader.SIZE, payloadLength, rateField * 100) <= 0) return null

@@ -73,7 +73,7 @@ namespace RigPlayPlugin.Tests.Audio
             Assert.Equal("little-endian", (string)Fixture.Value["byteOrder"]["payload"]);
             Assert.Equal(6, Fixture.Value["valid"].Count());
             Assert.Equal(4, Fixture.Value["opus"].Count());
-            Assert.Equal(15, Fixture.Value["invalid"].Count());
+            Assert.Equal(16, Fixture.Value["invalid"].Count());
         }
 
         [Theory]
