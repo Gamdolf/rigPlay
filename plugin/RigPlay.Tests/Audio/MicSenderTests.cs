@@ -189,6 +189,19 @@ namespace RigPlayPlugin.Tests.Audio
             return sender.Start(session, "Lenovo Tab P11", to ?? Tablet, rate, () => lastLine);
         }
 
+        /// <summary>The log lines matching <paramref name="match"/>, read under the lock the sink writes with, so a
+        /// background logging thread cannot modify the list mid-enumeration.</summary>
+        private int LogCount(Func<string, bool> match)
+        {
+            lock (log) return log.Count(match);
+        }
+
+        /// <summary>A snapshot of the log, taken under the sink's lock, safe to enumerate.</summary>
+        private List<string> LogSnapshot()
+        {
+            lock (log) return new List<string>(log);
+        }
+
         private AudioHeader Header(int index)
         {
             AudioHeader h;
@@ -249,7 +262,7 @@ namespace RigPlayPlugin.Tests.Audio
             Assert.False(Start());
             Assert.False(Start());
             Assert.False(Start(session: 2));
-            Assert.Equal(1, log.Count(l => l.Contains("not started") && l.Contains("no recording device")));
+            Assert.Equal(1, LogCount(l => l.Contains("not started") && l.Contains("no recording device")));
             Assert.Empty(sent);
             var stats = sender.Stats;
             Assert.True(stats.Started);
@@ -263,7 +276,7 @@ namespace RigPlayPlugin.Tests.Audio
             Assert.True(Start());
             capture.DevicePresent = false;
             Assert.False(Start());
-            Assert.Equal(2, log.Count(l => l.Contains("not started")));
+            Assert.Equal(2, LogCount(l => l.Contains("not started")));
         }
 
         [Fact]
@@ -274,7 +287,7 @@ namespace RigPlayPlugin.Tests.Audio
             Assert.Empty(sent);
             Assert.False(sender.Stats.Capturing);
             Assert.Contains("the device is in use", sender.Stats.LastEvent);
-            Assert.Contains(log, l => l.Contains("not started") && l.Contains("the device is in use"));
+            Assert.Contains(LogSnapshot(), l => l.Contains("not started") && l.Contains("the device is in use"));
         }
 
         [Fact]
@@ -436,6 +449,44 @@ namespace RigPlayPlugin.Tests.Audio
             Assert.Equal(2, failing.Stats.SendErrors);
             Assert.Equal(0, failing.Stats.Packets);
             failing.Dispose();
+        }
+
+        [Fact]
+        public void ASlowSendToDoesNotFreezeTheCapture()
+        {
+            // The send blocks after it signals it has started: a datagram leaving the socket is in flight. OnSamples
+            // must return while the send is still blocked, proving the I/O no longer runs under the stream lock and so
+            // a slow SendTo cannot freeze the capture thread (or the stats/Stop path that also takes the lock).
+            var sendStarted = new System.Threading.ManualResetEventSlim(false);
+            var release = new System.Threading.ManualResetEventSlim(false);
+            var firstSend = 1;
+            using (var blocking = new MicSender(() => settings, capture, clock, (d, n, to) =>
+                   {
+                       // Only the first send blocks; later sends return at once, so a second OnSamples can finish.
+                       if (System.Threading.Interlocked.Exchange(ref firstSend, 0) == 1)
+                       {
+                           sendStarted.Set();
+                           release.Wait(5000);
+                       }
+                   }))
+            {
+                Assert.True(blocking.Start(1, "t", Tablet, 16000, () => clock.NowMs));
+
+                // Deliver one full datagram on a worker; the send inside it will block.
+                var worker = new System.Threading.Thread(() => blocking.OnSamples(1, new short[80], 80));
+                worker.Start();
+                Assert.True(sendStarted.Wait(5000), "the send never started");
+
+                // While the first send is still blocked, the capture thread hands back: a second OnSamples does its
+                // work (produces and sends its datagram) and returns without waiting for the blocked first send. If the
+                // I/O ran under the lock this Join would time out, because the first send still holds the lock.
+                var second = new System.Threading.Thread(() => blocking.OnSamples(1, new short[80], 80));
+                second.Start();
+                Assert.True(second.Join(5000), "OnSamples blocked behind a slow send under the lock");
+
+                release.Set();
+                Assert.True(worker.Join(5000));
+            }
         }
 
         [Fact]

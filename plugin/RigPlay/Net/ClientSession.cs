@@ -164,10 +164,27 @@ namespace RigPlayPlugin.Net
             return SendRaw(message);
         }
 
+        /// <summary>
+        /// Sends an already-encoded message line (without the trailing newline), so a broadcaster can encode once and
+        /// send the same line to many sessions. False when the session is closed or the write failed (it then closes);
+        /// it shares writeLock and the fail → Close semantics with <see cref="Send"/>.
+        /// </summary>
+        internal bool SendEncoded(string line)
+        {
+            if (!IsOpen) return false;
+            return SendRawLine(line);
+        }
+
         private bool SendRaw(Message message)
         {
             if (!IsAlive) return false;
-            var bytes = Utf8.GetBytes(MessageCodec.Encode(message) + "\n");
+            return SendRawLine(MessageCodec.Encode(message));
+        }
+
+        private bool SendRawLine(string line)
+        {
+            if (!IsAlive) return false;
+            var bytes = Utf8.GetBytes(line + "\n");
             try
             {
                 lock (writeLock)

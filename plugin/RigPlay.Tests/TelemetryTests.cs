@@ -289,6 +289,55 @@ namespace RigPlayPlugin.Tests
         }
 
         [Fact]
+        public void ASlowSendDoesNotHoldTheNextTickOrStop()
+        {
+            // A tablet that never reads: once its receive window and the plugin's send buffer are full, the plugin's
+            // write blocks. A big trackName makes one telemetry line large enough to fill them. The I/O now runs
+            // outside tickLock, so while that first send is stuck a second Tick() and Stop() still take tickLock and
+            // return at once (well under the 3 s socket send timeout). If the I/O ran under tickLock they would block.
+            var host = NewHost(new RigPlaySettings().Normalize());
+            try
+            {
+                using (var t = Pair(host, "tablet", new List<string> { Features.Telemetry }, true))
+                {
+                    var f = Frame();
+                    f.TrackName = new string('x', 4 * 1024 * 1024); // ~4 MB line: larger than the socket buffers
+                    host.TelemetrySampler.Update(ref f);
+                    var sender = host.TelemetrySender;
+                    var settings = host.Settings;
+
+                    // The tablet never drains, so this Tick blocks inside the socket write (which now runs outside
+                    // tickLock). The write holds no lock while it is stuck.
+                    var blocked = new System.Threading.Thread(() => { try { sender.Tick(); } catch { } });
+                    blocked.Start();
+
+                    // Give the first send time to reach and block in the write.
+                    System.Threading.Thread.Sleep(300);
+
+                    // Switch the master off so a second Tick does no I/O: it only needs tickLock, then returns Quiet.
+                    // While the first send is still stuck, this must take tickLock and return at once; if the I/O ran
+                    // under tickLock the lock would still be held and this Join would time out.
+                    settings.Telemetry.Enabled = false;
+                    var secondTick = new System.Threading.Thread(() => { try { sender.Tick(); } catch { } });
+                    secondTick.Start();
+                    Assert.True(secondTick.Join(2000), "a second Tick() blocked behind a slow send holding tickLock");
+
+                    // Stop() takes tickLock too: it must return promptly rather than wait for the slow send.
+                    var stopper = new System.Threading.Thread(() => sender.Stop());
+                    stopper.Start();
+                    Assert.True(stopper.Join(2000), "Stop() blocked behind a slow send holding tickLock");
+
+                    // The blocked send eventually unblocks or times out (the 3 s socket send timeout) and the thread exits.
+                    Assert.True(blocked.Join(6000));
+                }
+            }
+            finally
+            {
+                host.Stop();
+            }
+        }
+
+        [Fact]
         public void EveryTickSendsOneMessageAndTheTimerTicksOnItsOwn()
         {
             // The rate is the timer's 100 ms interval (TelemetrySender.IntervalMs, spec §6.9: at most 10 per second);

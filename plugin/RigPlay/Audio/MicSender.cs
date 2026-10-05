@@ -10,6 +10,7 @@
 // MicGlue connects it to the host's events and to state.mic.enabled.
 // Pure: no SimHub, WPF or NAudio types (compiled into RigPlay.Tests).
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
@@ -342,8 +343,11 @@ namespace RigPlayPlugin.Audio
                 this.target = target;
                 packetizer = new MicPacketizer(sampleRate);
                 gainControl = new MicGainControl(sampleRate) { Automatic = s.MicAutoBoost, BoostDb = s.MicBoostDb };
-                packets = 0;
-                sendErrors = 0;
+                // packets/sendErrors are incremented out of sync by OnSamples via Interlocked; a new stream never
+                // overlaps the previous one's sends (the old generation stops emitting), so a plain store is enough,
+                // but Interlocked.Exchange keeps the read in RefreshStats consistent across threads.
+                Interlocked.Exchange(ref packets, 0);
+                Interlocked.Exchange(ref sendErrors, 0);
                 peak = 0;
                 levelDb = double.NegativeInfinity;
                 rate.Clear();
@@ -487,6 +491,11 @@ namespace RigPlayPlugin.Audio
         internal void OnSamples(int gen, short[] samples, int count)
         {
             var s = settings();
+            // The datagrams produced under sync, each a copy (the packetizer reuses its buffer), with the target to
+            // reach; the actual send (a possibly blocking SendTo) happens after the lock so the capture thread and
+            // every other caller of sync (stats, Start/Stop) are not held behind the socket.
+            List<KeyValuePair<byte[], int>> outgoing = null;
+            IPEndPoint to;
             lock (sync)
             {
                 if (gen != generation || packetizer == null || target == null) return;
@@ -505,19 +514,27 @@ namespace RigPlayPlugin.Audio
                     p = MicPacketizer.Peak(samples, 0, count);
                 }
                 if (p > peak) peak = p;
-                var to = target;
+                to = target;
                 packetizer.Write(samples, 0, count, (datagram, length) =>
                 {
-                    try
-                    {
-                        send(datagram, length, to);
-                        packets++;
-                    }
-                    catch (Exception)
-                    {
-                        sendErrors++;
-                    }
+                    var copy = new byte[length];
+                    Buffer.BlockCopy(datagram, 0, copy, 0, length);
+                    (outgoing ?? (outgoing = new List<KeyValuePair<byte[], int>>())).Add(new KeyValuePair<byte[], int>(copy, length));
                 });
+            }
+
+            if (outgoing == null) return;
+            foreach (var datagram in outgoing)
+            {
+                try
+                {
+                    send(datagram.Key, datagram.Value, to);
+                    Interlocked.Increment(ref packets);
+                }
+                catch (Exception)
+                {
+                    Interlocked.Increment(ref sendErrors);
+                }
             }
         }
 
@@ -539,9 +556,11 @@ namespace RigPlayPlugin.Audio
         {
             var s = settings();
             MicStats next;
+            var packetsNow = Interlocked.Read(ref packets);
+            var sendErrorsNow = Interlocked.Read(ref sendErrors);
             lock (sync)
             {
-                rate.Add(clock.NowMs / 1000.0, packets, 0);
+                rate.Add(clock.NowMs / 1000.0, packetsNow, 0);
                 // A peak meter with a 20 dB/s fall, so speech reads as a steady level rather than flicker.
                 var db = peak > 0 ? AudioMath.GainToDb(peak) : double.NegativeInfinity;
                 var fallen = double.IsNegativeInfinity(levelDb) ? double.NegativeInfinity : levelDb - 20.0 * TickMs / 1000.0;
@@ -555,9 +574,9 @@ namespace RigPlayPlugin.Audio
                     Tablet = ownerSessionId != 0 ? ownerName : "",
                     Target = ownerSessionId != 0 && target != null ? target.ToString() : "",
                     SampleRate = packetizer?.SampleRate ?? 0,
-                    Packets = packets,
+                    Packets = packetsNow,
                     PacketsPerSecond = ownerSessionId != 0 ? rate.PacketsPerSecond : 0,
-                    SendErrors = sendErrors,
+                    SendErrors = sendErrorsNow,
                     LevelDb = levelDb,
                     GainDb = gainControl != null ? gainControl.GainDb : (s != null ? (double)s.MicBoostDb : 0),
                     AutoGain = s != null && s.MicAutoBoost,

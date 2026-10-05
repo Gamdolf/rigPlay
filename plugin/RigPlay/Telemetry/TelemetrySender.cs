@@ -87,12 +87,18 @@ namespace RigPlayPlugin.Telemetry
         /// <summary>One timer tick; returns how many sessions got a message. Tests call it directly.</summary>
         public int Tick()
         {
+            // Under tickLock: decide streaming/idle, pick the targets and build the message, then encode it exactly
+            // once. The network I/O (session.Send, which can block on a stalled tablet) happens after the lock, so a
+            // slow send cannot hold the next tick or Stop() behind it. The streaming flag flips under the lock, so two
+            // concurrent ticks never emit two gameRunning: false.
+            List<ClientSession> targets;
+            string encoded;
             lock (tickLock)
             {
                 var s = settings()?.Telemetry ?? new TelemetrySettings();
                 if (!s.Enabled) return Quiet("Off");
                 if (!s.AnyFieldEnabled()) return Quiet("No field is switched on");
-                var targets = Eligible(server());
+                targets = Eligible(server());
                 if (targets.Count == 0) return Quiet("No paired tablet with a connected iPhone asks for telemetry");
 
                 var message = Sampler.Build(s);
@@ -102,12 +108,17 @@ namespace RigPlayPlugin.Telemetry
                     // The game stopped: one last message so the tablet stops at once instead of waiting for staleness.
                     streaming = false;
                     Idle = "No game running";
-                    return Send(targets, new TelemetryMessage { GameRunning = false });
+                    message = new TelemetryMessage { GameRunning = false };
                 }
-                streaming = true;
-                Idle = null;
-                return Send(targets, message);
+                else
+                {
+                    streaming = true;
+                    Idle = null;
+                }
+                encoded = MessageCodec.Encode(message);
+                LastMessage = encoded;
             }
+            return Send(targets, encoded);
         }
 
         private int Quiet(string why)
@@ -118,16 +129,15 @@ namespace RigPlayPlugin.Telemetry
             return 0;
         }
 
-        private int Send(List<ClientSession> targets, TelemetryMessage message)
+        private int Send(List<ClientSession> targets, string encoded)
         {
             var sent = 0;
             foreach (var session in targets)
             {
-                if (session.Send(message)) sent++;
+                if (session.SendEncoded(encoded)) sent++;
             }
             MessagesSent += sent;
             Targets = sent;
-            LastMessage = MessageCodec.Encode(message);
             return sent;
         }
     }
