@@ -10,7 +10,12 @@
         android:label="@string/app_name"
         android:roundIcon="@drawable/ic_rigplay"
         android:supportsRtl="true"
+        android:resizeableActivity="true"
         android:theme="@style/Theme.Xcertplay">
+
+        <meta-data
+            android:name="android.allow_multiple_resumed_activities"
+            android:value="true" />
 
         <receiver
             android:name="com.shilapi.xcertplay.BootReceiver"

@@ -38,8 +38,8 @@ Notes on the existing-network mode:
 - rigPlay's AirPlay service is advertised on the home network during a session. Discovery uses rigPlay's
   own mDNS responders, one per address family (the tablet's home-network IPv4 address and its IPv6
   link-local address), not Android's NSD service, and the AirPlay listener accepts on both on the same
-  port. The iPhone is given the IPv6 link-local address, or the IPv4 one when there is none. The other
-  modes keep a single address.
+  port. The iPhone is given the tablet's IPv4 address, or the IPv6 link-local one when there is none
+  (upstream DiPlay's IPv4-first policy since 0.2.13). The other modes keep a single address.
 - The router's address (BSSID), when Android exposes it, is passed to the iPhone as a hint for which
   access point to join. It is never used as rigPlay's own identity.
 - An open network works: leave the password empty. On Android 12 and later rigPlay checks the network's
@@ -125,8 +125,8 @@ for the test). Record the group channel from the report and the station channel 
 **7. Existing Wi-Fi network (only if step 3 fails).** Put the iPhone on the same home Wi-Fi. Choose
 **Existing Wi-Fi network (experimental)**, save the network name and password, and check the status line
 (`Detected: wlan0 · 192.168.1.x · channel N (band)`). Tap **Connect phone**. In the report, look for
-`Existing network iface=wlan0 family=IPv6 channel=… networkNameReadable=… families=IPv6,IPv4 apHint=…`,
-`mdnsFamilies=IPv6,IPv4`, and then for `bonjourResolved`
+`Existing network iface=wlan0 family=IPv4 channel=… networkNameReadable=… families=IPv4,IPv6 apHint=…`,
+`mdnsFamilies=IPv4,IPv6`, and then for `bonjourResolved`
 and `tcpAccepted` above zero. If the iPhone authenticates over Bluetooth but never opens AirPlay TCP,
 note it: that is the "iOS does not accept a client accessory" outcome this spike is meant to find.
 

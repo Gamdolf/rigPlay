@@ -87,7 +87,7 @@ class RouteGuidanceStateTest {
     @Test
     fun `brief empty maneuver list keeps guidance and a lasting one hides it without losing maneuvers`() {
         var now = 0L
-        val state = populatedState { now }
+        val state = populatedState(nanoTime = { now })
 
         assertEquals(RouteGuidanceChange.NONE, state.accept(RouteGuidanceState.ROUTE_GUIDANCE_UPDATE, tlvs(tlv(0x01, 5), tlv(0x0d))))
         now = 2_000_000_000L
@@ -118,7 +118,7 @@ class RouteGuidanceStateTest {
     @Test
     fun `silent route expires and fresh update restores cached maneuver`() {
         var now = 0L
-        val state = populatedState { now }
+        val state = populatedState(nanoTime = { now })
         now = 30_000_000_000L
         assertNull(state.current())
         state.accept(RouteGuidanceState.ROUTE_GUIDANCE_UPDATE, tlvs(tlv(0x0a, 0, 0, 0, 20)))

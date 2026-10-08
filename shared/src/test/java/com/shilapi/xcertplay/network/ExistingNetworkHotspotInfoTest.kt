@@ -42,10 +42,10 @@ class ExistingNetworkHotspotInfoTest {
         assertEquals(5180, info.frequencyMHz)
         assertEquals("5 GHz", info.bandLabel)
         assertEquals("wlan0", info.interfaceName)
-        // The iPhone gets the scoped link-local address; both families are served.
-        assertEquals(7, (info.hostAddress as Inet6Address).scopeId)
-        assertEquals(linkLocal, info.hostAddress)
-        assertEquals(listOf(linkLocal, lan), info.hostAddresses)
+        // The iPhone gets the LAN IPv4 address; both families are served, the IPv6 one scoped.
+        assertEquals(lan, info.hostAddress)
+        assertEquals(listOf(lan, linkLocal), info.hostAddresses)
+        assertEquals(7, (info.hostAddresses[1] as Inet6Address).scopeId)
         assertEquals(Iap2WirelessSecurity.WPA_WPA2, info.security)
         assertEquals(WirelessHotspotBackend.EXISTING_NETWORK, info.backend)
         // The router BSSID must not become rigPlay's AirPlay device identifier.
@@ -75,7 +75,7 @@ class ExistingNetworkHotspotInfoTest {
         assertEquals(Iap2WirelessSecurity.NONE, existingNetworkHotspotInfo(station(), "", "").security)
     }
 
-    @Test fun ipv4IsTheFallbackWithoutAScopedLinkLocalAddress() {
+    @Test fun ipv4IsPreferredAndAnUnscopedLinkLocalAddressIsNotUsed() {
         val v4 = existingNetworkHotspotInfo(station(index = 0), "", "")
         assertEquals(lan, v4.hostAddress)
         assertEquals(listOf(lan), v4.hostAddresses)

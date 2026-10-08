@@ -103,7 +103,8 @@ class RouteGuidanceState(private val nanoTime: () -> Long = System::nanoTime) {
             }
         }
 
-        // Only NoRouteSet (0) and Arrived (2) end the route.
+        // Only NoRouteSet (0) and Arrived (2) end the route. A wireless handoff often sends
+        // NoRouteSet while the session is still coming back — keep the overlay instruction then.
         if (state == 0 || state == 2) {
             return if (clear()) RouteGuidanceChange.CLEAR else RouteGuidanceChange.NONE
         }

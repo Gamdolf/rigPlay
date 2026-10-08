@@ -28,8 +28,9 @@ import java.util.concurrent.TimeUnit
  * hides it without location permission) and otherwise from Settings; the password always comes from
  * Settings. It never creates, changes or tears down a network: [close] only releases its callback.
  *
- * The iPhone is given the scoped IPv6 link-local address (IPv4 when there is none), and discovery and
- * the AirPlay listener serve both families on the interface, as upstream DiPlay's Same LAN mode does.
+ * The iPhone is given the tablet's LAN IPv4 address (the scoped IPv6 link-local one when there is none),
+ * and discovery and the AirPlay listener serve both families on the interface, as upstream DiPlay's
+ * Same LAN mode does.
  * The router's BSSID goes to the iPhone only as the optional AP hint in 0x5703
  * ([WirelessHotspotInfo.accessPointBssid]). [WirelessHotspotInfo.bssid] doubles as the AirPlay device
  * identifier, which must stay rigPlay's own and stable across roaming, so it is left null here and the
@@ -266,21 +267,16 @@ internal fun readableSsid(raw: String?): String? {
 }
 
 /**
- * Prefers the scoped IPv6 link-local address, as the other wireless modes and upstream DiPlay's
- * vehicle-tested Same LAN mode do; the LAN IPv4 address is the fallback.
+ * Prefers the LAN IPv4 address, as the other wireless modes and upstream DiPlay's vehicle-tested
+ * hotspot policy do ([HotspotAddressPolicy]); the IPv6 link-local address is the fallback, and only
+ * when it can be scoped to the interface.
  */
 internal fun stationHostAddress(addresses: List<InetAddress>, interfaceIndex: Int): InetAddress? =
-    wirelessHostAddress(addresses, interfaceIndex)
+    wirelessHostAddress(addresses, interfaceIndex)?.takeUnless { it is Inet6Address && it.scopeId == 0 }
 
 /** Every address discovery and the AirPlay listener serve: the LAN IPv4 and the scoped IPv6 link-local. */
-internal fun stationHostAddresses(addresses: List<InetAddress>, interfaceIndex: Int): List<InetAddress> {
-    val ipv4 = addresses.firstOrNull {
-        it is Inet4Address && !it.isLoopbackAddress && !it.isLinkLocalAddress &&
-            !it.isAnyLocalAddress && !it.isMulticastAddress
-    }
-    val ipv6 = wirelessHostAddress(addresses, interfaceIndex) as? Inet6Address
-    return listOfNotNull(ipv6, ipv4)
-}
+internal fun stationHostAddresses(addresses: List<InetAddress>, interfaceIndex: Int): List<InetAddress> =
+    existingWifiHostAddresses(addresses, interfaceIndex)
 
 /** The router BSSID as six bytes for the 0x5703 AP hint; null when unknown, zero, multicast or redacted. */
 internal fun accessPointBssid(text: String?): ByteArray? {

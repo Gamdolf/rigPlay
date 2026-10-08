@@ -27,8 +27,8 @@ class Iap2WirelessControlClient(
         locationProvider: Iap2LocationProvider? = null,
         vehicleStatusProvider: VehicleStatusProvider? = null,
         onReady: () -> Unit = {},
-        /** Called after each CarPlay StartSession (0x4301) has been sent. */
-        onStartSessionSent: () -> Unit = {},
+        beforeStartSession: () -> Unit = {},
+        onStartSessionSent: (Iap2StartSessionSent) -> Unit = {},
         onIncoming: (Iap2Frame) -> Unit = {},
         onProgress: (String) -> Unit = {},
     ): Iap2WirelessControlResult {
@@ -160,8 +160,8 @@ class Iap2WirelessControlClient(
                     CARPLAY_AVAILABILITY -> {
                         onProgress("iap2 rx=0x4300 carplay-availability")
                         onProgress(carPlayAvailabilityDiagnostic(incoming))
-                        send(carPlayStartSession(endpoint), deadlineNanos)
-                        onStartSessionSent()
+                        beforeStartSession()
+                        sendStartSession(endpoint, { send(it, deadlineNanos) }, onStartSessionSent)
                         stage = later(stage, Iap2WirelessControlStage.CARPLAY_START_SENT)
                         carPlayStartSessionsSent++
                         onProgress("iap2 tx=0x4301 carplay-start-session")
@@ -255,7 +255,7 @@ class Iap2WirelessControlClient(
             "iap2 availability decode=failed failureClass=${error.javaClass.simpleName}"
         }
 
-        /** Reference-compatible 0x5703 body. BSSID is omitted when the platform does not expose it. */
+        /** Optional AP hint is independent of the AirPlay receiver identity. */
         fun accessoryWiFiConfiguration(endpoint: Iap2WirelessCarPlayEndpoint): Iap2Frame =
             Iap2WirelessMessages.accessoryWiFiConfiguration(
                 ssid = endpoint.ssid,
@@ -334,6 +334,7 @@ class Iap2WirelessCarPlayEndpoint(
     val accessPointBssid: ByteArray? = accessPointBssid?.copyOf()
 
     init {
+        require(accessPointBssid == null || accessPointBssid.size == 6) { "AP address must contain six bytes" }
         require(ssid.isNotBlank()) { "ssid is required and must not be blank" }
         require('\u0000' !in ssid) { "ssid must not contain U+0000" }
         require('\u0000' !in passphrase) { "passphrase must not contain U+0000" }
@@ -379,3 +380,15 @@ data class Iap2WirelessControlResult(
     val postTransportWiFiConfigurationsSent: Int,
     val wirelessCarPlayAvailableSeen: Boolean,
 )
+
+/** 仅在 StartSession 发送成功后产生，不通过日志驱动超时。 */
+data class Iap2StartSessionSent(val sentAtNanos: Long)
+
+internal fun sendStartSession(
+    endpoint: Iap2WirelessCarPlayEndpoint,
+    send: (Iap2Frame) -> Unit,
+    onSent: (Iap2StartSessionSent) -> Unit,
+) {
+    send(Iap2WirelessControlClient.carPlayStartSession(endpoint))
+    onSent(Iap2StartSessionSent(System.nanoTime()))
+}

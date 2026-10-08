@@ -1,6 +1,23 @@
 # rigPlay 0.2.0 — unreleased
 
-- Nothing yet since 0.2.0-rc.3. Changes for the final 0.2.0 go here.
+- Merged upstream DiPlay 0.2.13 (its `main` as of 2026-10-06). rigPlay takes upstream's wireless and
+  AirPlay core and keeps its own screens; head-unit features (BYD cluster and HUD, ADB, car hotspot
+  control, wheel keys, side panel, Android TV, the six extra languages and the website) stay out.
+  What changed for the tablet:
+  - Wireless startup reworked after upstream: the hotspot is checked for a stable interface before
+    the phone is told about it, the 30 s first-connection watchdog is tied to the listener it was
+    armed for, and a session that already renders video is kept when the Bluetooth handoff times out
+    instead of being torn down (#229, #258, #313 upstream).
+  - Hotspot endpoints prefer a usable IPv4 address and keep a scoped IPv6 fallback; Auto channel
+    selection beside a 5 GHz home network tries saved and aligned channels, then explicit 2.4 GHz,
+    before other 5 GHz fallbacks (#283, #309 upstream).
+  - Siri's 24 kHz microphone stream gets the right RTP clock; telephony stays at 48 kHz (#295 upstream).
+  - TCP_NODELAY on the CarPlay touch event channel (#311 upstream).
+  - USBMUX payload replies with a four-byte trailer are recovered instead of dropped (#298 upstream).
+  - Android 9's legacy Wi-Fi Direct group path is present in the code; rigPlay still documents
+    Android 10 as the minimum for wireless (#282 upstream).
+  - Upstream's AAC-LC buffered music stream is in the AirPlay core but has no setting in rigPlay and
+    stays off (#308 upstream).
 
 # rigPlay 0.2.0-rc.3 — 2026-10-05
 
